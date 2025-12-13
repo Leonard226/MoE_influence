@@ -206,11 +206,11 @@ def colored_print(h_expert, r_score, a_score, top_n, mode=1):
         print(str)
 
 def decompose_XA_verbose(prompt_ls, model, tokenizer, router_weight_ls, top_n, output_dir, mode=1):
-    """ Decomposition: one sample, layer_input(X) and attn_out(A).
+    """ Decomposition: single prompt, layer_input(X) and attn_out(A).
         For mode info, please refer to function 'colored_print'.  
     """
     ## run
-    batch_token = tokenizer(prompt_ls, return_tensors="pt", padding=True)
+    batch_token = tokenizer(prompt_ls, return_tensors="pt")
     model_outputs, hook_dict = model(input_ids=batch_token["input_ids"], attention_mask=batch_token["attention_mask"])
 
     ## check if 'project_to_logits' is implemented correctly
@@ -250,11 +250,12 @@ def decompose_XA_verbose(prompt_ls, model, tokenizer, router_weight_ls, top_n, o
             
             ## decomposition: moe_in = res_in + attn_out [This is the core of the function.]
             res_in_rmsnorm, attn_out_rmsnorm = rmsnorm_breakdown(after_res1[L, T], [layer_input[L, T], attn_output[L, T]], L, model)
+            ## NOTE: shape: res_in_rmsnorm [n_dim]; attn_out_rmsnorm [n_dim]
 
             ## score: original_score = res_in_score + attn_out_score
+            original_score = torch.matmul(router_weight_vectors, after_norm2[L, T])
             res_in_score[T, L] = torch.matmul(router_weight_vectors, res_in_rmsnorm)
             attn_out_score[T, L] = torch.matmul(router_weight_vectors, attn_out_rmsnorm)
-            original_score = torch.matmul(router_weight_vectors, after_norm2[L, T])
             
             ## expert selection
             original_experts[T, L] = torch.argsort(original_score, descending=True)
@@ -391,11 +392,11 @@ def line_drawer_XA_ratio_verbose(res_in_score, attn_out_score, absolute, name, o
     plt.close("all")
 
 def decompose_XA_single(prompt_ls, model, tokenizer, router_weight_ls):
-    """ decomposition: one sample, layer_input(X) and attn_out(A).
+    """ decomposition: single prompt, layer_input(X) and attn_out(A).
         A simplified version of  'decompose_XA_verbose'. (Remove the verbose output)
     """
     ## run
-    batch_token = tokenizer(prompt_ls, return_tensors="pt", padding=True)
+    batch_token = tokenizer(prompt_ls, return_tensors="pt")
     _, hook_dict = model(input_ids=batch_token["input_ids"], attention_mask=batch_token["attention_mask"])
     ## collect info
     n_tokens = torch.sum(batch_token["attention_mask"])
@@ -417,11 +418,12 @@ def decompose_XA_single(prompt_ls, model, tokenizer, router_weight_ls):
         for T in range(n_tokens):
             ## decomposition: moe_in = res_in + attn_out [This is the core of the function.]
             res_in_rmsnorm, attn_out_rmsnorm = rmsnorm_breakdown(after_res1[L, T], [layer_input[L, T], attn_output[L, T]], L, model)
+            ## NOTE: shape: res_in_rmsnorm [n_dim]; attn_out_rmsnorm [n_dim]
             
             ## score: original_score = res_in_score + attn_out_score
+            original_score = torch.matmul(router_weight_vectors, after_norm2[L, T])
             res_in_score[T, L] = torch.matmul(router_weight_vectors, res_in_rmsnorm)
             attn_out_score[T, L] = torch.matmul(router_weight_vectors, attn_out_rmsnorm)
-            original_score = torch.matmul(router_weight_vectors, after_norm2[L, T])
             
             ## expert selection
             original_experts[T, L] = torch.argsort(original_score, descending=True)
