@@ -60,3 +60,112 @@ def tril_drawer_TAM(data, name, output_dir, figsize=(11,11), diagonal=1, add_pat
     np.save(output_dir + name + ".npy", data)
     plt.savefig(output_dir + name + ".png", bbox_inches="tight", pad_inches=0) # .pdf
     plt.close("all")
+
+def matrix_drawer_H_token_head(data, name, output_dir, figsize=(13,13), add_patch=[], token_ls=[], title="", xlabel="Head", ylabel="Token", need_description=True):
+    """ (Mode 1, 7) matrix. x: Head, y: Token """
+    data = data.detach().cpu().numpy()
+    plt.figure(figsize=figsize)
+
+    vmin, vmax = data.min(), data.max()
+    if vmin < 0 and vmax > 0:
+        normalize = mcolors.TwoSlopeNorm(vcenter=0, vmin=vmin, vmax=vmax)
+        cmap_type = "RdBu"
+    elif vmax <= 0:
+        normalize = mcolors.Normalize(vmin=vmin, vmax=0)
+        cmap_type = "Reds_r"
+    else: # vmin >= 0
+        normalize = mcolors.Normalize(vmin=0, vmax=vmax)
+        cmap_type = "Blues"
+
+    y_label_ls = [str(T) + "| " + token_ls[T] for T in range(len(token_ls))]
+
+    with sns.axes_style("white"):
+        ax = sns.heatmap(data, square=True, annot=True, fmt=".2f", cmap=cmap_type, norm=normalize, cbar_kws={"shrink": 0.6}, linewidth=.5)
+        ax.set_yticklabels(labels=y_label_ls, rotation=0)
+        for grid in add_patch:
+            ax.add_patch(Rectangle((grid[0], grid[1]), 1, 1, fill=False, edgecolor="black", lw=3))
+    if need_description:
+        plt.title(title)
+        plt.xlabel(xlabel)
+        plt.ylabel(ylabel)
+    plt.savefig(output_dir + name + ".png", bbox_inches="tight", pad_inches=0) # ".pdf"
+    plt.close("all")
+
+def scatter_drawer_H_expert(data, submode, name, output_dir, title=""):
+    """ (Mode 2) scatter plot. x: Expert, y: Score """
+    n_experts, n_heads = data.shape
+    data = data.detach().cpu().numpy()
+
+    if submode == 1:
+        xs = np.arange(n_experts)
+        for H in range(n_heads):
+            plt.scatter(xs, data[:, H], s=5, alpha=0.5, label=str(H))
+    elif submode == 2:
+        color_ls = ["k","grey","r","sandybrown","orange","gold","yellowgreen","lawngreen","g","aquamarine","cyan","dodgerblue","b","indigo","violet","pink"] # 16 heads
+        for H in range(n_heads):
+            for E in range(n_experts):
+                plt.text(E, data[E, H], str(H), c=color_ls[H], fontdict={"weight":"bold", "size":9})
+        plt.ylim(data.min() - 0.05, data.max() + 0.05)
+        plt.xlim(0, n_experts)
+    
+    plt.grid(axis="y")
+    plt.title(title)
+    plt.xlabel("Expert")
+    plt.ylabel("Score")
+    plt.savefig(output_dir + name + ".png") # ".pdf"
+    plt.close("all")
+
+def scatter_drawer_H_head(data, name, output_dir, title=""):
+    """ (Mode 3, 4) scatter plot. x: Head, y: Score """
+    n_experts, n_heads = data.shape
+    data = data.detach().cpu().numpy()
+    x_ls = [H for H in range(n_heads) for _ in range(n_experts)]
+    y_ls = [data[E, H] for H in range(n_heads) for E in range(n_experts)]
+    plt.scatter(x_ls, y_ls, s=5, alpha=0.5)
+    plt.ylim(data.min() - 0.05, data.max() + 0.05)
+    plt.xlim(0, n_heads)
+    plt.title(title)
+    plt.xlabel("Head")
+    plt.ylabel("Score")
+    plt.xticks([H for H in range(n_heads)], [str(H) for H in range(n_heads)])
+    plt.grid()
+    plt.savefig(output_dir + name + ".png") # ".pdf"
+    plt.close("all")
+
+def matrix_drawer_H_with_sum(data, name, output_dir, figsize=(13,13), token_ls=None, title="", xlabel="", ylabel="", need_description=True):
+    """ (Mode 5, 6) matrix. x: Token (Mode 5)/ Head (Mode 6) y: Selected Expert """
+    
+    top_n = data.shape[0]
+    net_token_score = torch.sum(data, dim=0).unsqueeze(0)
+    data = torch.cat((data, net_token_score), dim=0)
+    data = data.detach().cpu().numpy()
+    plt.figure(figsize=figsize)
+
+    vmin, vmax = data[:top_n].min(), data[:top_n].max()
+    if vmin < 0 and vmax > 0:
+        normalize = mcolors.TwoSlopeNorm(vcenter=0, vmin=vmin, vmax=vmax)
+        cmap_type = "RdBu"
+    elif vmax <= 0:
+        normalize = mcolors.Normalize(vmin=vmin, vmax=0)
+        cmap_type = "Reds_r"
+    else: # vmin >= 0
+        normalize = mcolors.Normalize(vmin=0, vmax=vmax)
+        cmap_type = "Blues"
+
+    y_ls = [i for i in range(top_n)] + ["Sum"]
+    if token_ls:
+        x_label_ls = [str(T) + "| " + token_ls[T] for T in range(len(token_ls))]
+    else:
+        x_label_ls = np.arange(data.shape[1])
+    
+    with sns.axes_style("white"):
+        ax = sns.heatmap(data, square=True, annot=True, fmt=".2f", cmap=cmap_type, norm=normalize, cbar_kws={"shrink": 0.8}, annot_kws={"color":"black"}, linewidth=.5)
+        ax.add_patch(Rectangle((0, top_n), data.shape[1], 1, fill=True, edgecolor="blue", facecolor="lightgrey", lw=3))
+        ax.set_xticklabels(labels=x_label_ls, rotation=0)
+        ax.set_yticklabels(y_ls, rotation=0)
+    if need_description:
+        plt.title(title)
+        plt.xlabel(xlabel)
+        plt.ylabel(ylabel)
+    plt.savefig(output_dir + name + ".png") # ".pdf"
+    plt.close("all")

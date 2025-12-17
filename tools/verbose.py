@@ -1,5 +1,6 @@
 import torch
-from tools.plot import tril_drawer_TAM
+import einops
+from tools.plot import tril_drawer_TAM, matrix_drawer_H_token_head, scatter_drawer_H_expert, scatter_drawer_H_head, matrix_drawer_H_with_sum
 
 def rmsnorm_breakdown(vector, components, layer_id, model, variance_epsilon=1e-05):
     """ Apply RMSNorm on the components (Single prompt)
@@ -189,3 +190,183 @@ def decompose_TAM_verbose(prompt_ls, model, tokenizer, router_weight_ls, top_n, 
     tril_drawer_TAM((token_cumulative_score[T] - token_abs_cumulative_score[T]) / 2, "token_negative_cumulative_score_T{}".format(T), output_dir, (11, 7), diagonal=1, add_patch=[], title="token_negative_cumulative_score_T{}".format(T), xlabel="Token (Sending)", ylabel="MoE Layer (Receiving)")
 
     return token_score, attn_score, moe_score, moe_cumulative_score, attn_cumulative_score, token_cumulative_score, moe_abs_cumulative_score, attn_abs_cumulative_score, token_abs_cumulative_score
+
+def decompose_attn_out_helper(v, pattern, layer_id, model):
+    """ Decompose the attention output into the shape of [q, k, n_heads, n_dim1] Reference: https://github.com/facebookresearch/llm-transparency-tool/blob/f1340f0757b959c75c139f7aa91aef16eddced67/llm_transparency_tool/models/tlens_model.py#L287
+    :param1 v: value matrix of attention layer | shape:[n_heads, n_tokens, dim_head]
+    :param2 pattern: the matrix Q(K^T) | shape:[n_heads, q=n_tokens, k=n_tokens]
+    :param3 layer_id: which layer? should be an int.
+    :param4 model: assigned model
+    :return: the decomposition result
+    """
+    # OLMoE:
+    # v.shape [n_heads=16, n_tokens, dim_head=128]
+    # pattern.shape [n_heads=16, q=n_tokens, k=n_tokens]
+    # z.shape [q=n_tokens, k=n_tokens, n_heads=16, dim_head=128]
+    # W_O.shape [dim_model_1=2048, dim_model_2=2048] -> [n_heads=16, dim_head=128, dim_model_1] (dim_model_2 is decomposed)
+    # decomposed_attn.shape  [q, k, n_heads, dim_model]
+    # K: key_pos, H: head Q: query_pos, A: dim_head, D: dim_model (hidden state dim)
+    z = torch.einsum("HKA,HQK->QKHA", v, pattern)
+    W_O = model.model.layers[layer_id].self_attn.o_proj.weight
+    n_heads = v.shape[0]
+    W_O = einops.rearrange(W_O, "d_model (index d_head)->index d_head d_model", index=n_heads)
+    decomposed_attn = torch.einsum("QKHA,HAD->QKHD", z, W_O)
+    return decomposed_attn
+
+def decompose_H_verbose(prompt_ls, model, tokenizer, router_weight_ls, top_n, output_dir, draw_mode=[], cached_experts=None):
+    """ Decomposition: single prompt, head(H).
+        Note that top_n can vary - top_k or n_experts or other ranges.
+    """
+    ## run
+    batch_token = tokenizer(prompt_ls, return_tensors="pt")
+    _, hook_dict = model(input_ids=batch_token["input_ids"], attention_mask=batch_token["attention_mask"])
+    ## collect info
+    n_tokens = torch.sum(batch_token["attention_mask"])
+    tokens_str = [tokenizer.decode(x) for x in batch_token["input_ids"][0]]
+
+    attn_v = hook_dict["hook_v"].squeeze(0) # shape: [n_layers, n_heads, n_tokens, head_dim]
+    attn_weights = hook_dict["hook_attn_weights"].squeeze(0) # shape: [n_layers, n_heads, n_tokens, n_tokens] # first n_tokens -> queries , second n_tokens -> keys
+    after_res1 = hook_dict["hook_after_res1"].squeeze(0) # shape: [n_layers, n_tokens, n_dim]
+    after_norm2 = hook_dict["hook_after_norm2"].squeeze(0) # shape: [n_layers, n_tokens, n_dim]
+    attn_output = hook_dict["hook_attn_output"].squeeze(0) # shape: [n_layers, n_tokens, n_dim] # for check if the decomposition is implemented correctly
+    print(attn_v.shape, attn_weights.shape, after_res1.shape, after_norm2.shape)
+
+    n_layers = len(router_weight_ls)
+    n_experts, n_dim = router_weight_ls[1].shape
+    n_heads = attn_v.shape[1]
+
+    expert_ids_by_rank = torch.zeros((n_layers, n_tokens, n_experts), dtype=torch.int)
+
+    for send_L in range(0, n_layers): # sending layer
+        decomposed_attn_out = decompose_attn_out_helper(attn_v[send_L], attn_weights[send_L], send_L, model) # shape: [n_tokens, n_tokens, n_heads, n_dim] first n_tokens: queries, second n_tokens: keys
+        for recv_L in range(send_L, n_layers): # receiving layer
+            router_weight_vectors = router_weight_ls[recv_L]
+            for T in range(n_tokens): # examined token (query token)
+                if T != 9 or recv_L != 3 or send_L != 1:
+                    continue
+
+                print("send_L{} recv_L{} T{}".format(send_L, recv_L, T))
+
+                ## decomposition
+                decomposed_attn_rmsnorm = rmsnorm_breakdown(after_res1[recv_L, T], [decomposed_attn_out[T].reshape(-1, n_dim)], recv_L, model)[0] # shape: [n_tokens * n_heads, n_dim]
+                
+                ## score
+                decomposed_attn_score = torch.matmul(router_weight_vectors, decomposed_attn_rmsnorm.T) # shape: [n_experts, n_tokens * n_heads]
+                
+                ## expert selection
+                original_score = torch.matmul(router_weight_vectors, after_norm2[recv_L, T])
+                expert_ids_by_rank[recv_L, T] = torch.argsort(original_score, descending=True)
+                top_n_experts = expert_ids_by_rank[recv_L, T][:top_n] # torch.argsort(original_score, descending=True)[:top_n]
+                print(recv_L, T, top_n_experts)
+
+                if 1 in draw_mode: # Matrix 1: x: Token y: Head
+                    matrix_drawer_H_token_head(torch.sum(decomposed_attn_score[top_n_experts, :], 0).reshape(n_tokens, n_heads), "Mode1_TokenHead_T{}_A{}M{}".format(T, send_L, recv_L), output_dir, (11, 11), [], tokens_str, "T{}_A{}M{} (Token x Head)".format(T, send_L, recv_L))
+                    if cached_experts is not None:
+                        cached_selected_experts = cached_experts[recv_L, T, :top_n]
+                        matrix_drawer_H_token_head(torch.sum(decomposed_attn_score[cached_selected_experts, :], 0).reshape(n_tokens, n_heads), "Mode1_TokenHead_cached_experts_T{}_A{}M{}".format(T, send_L, recv_L), output_dir, (11, 11), [], tokens_str, "cached_experts_T{}_A{}M{} (Token x Head)".format(T, send_L, recv_L))
+                if 2 in draw_mode: # Scatter 1 or 2: x: Expert, y: Score Each experts is assigned scores by 16 heads (seems useless)
+                    expert_head_score = torch.sum(decomposed_attn_score.reshape(n_experts, n_tokens, n_heads), 1) # default order # shape: [n_experts, n_heads]
+                    # ordered_expert_head_score = expert_head_score[expert_ids_by_rank[recv_L, T]] # sort by original_router_result
+                    # ordered_expert_head_score_2 = expert_head_score[torch.argsort(expert_head_score.sum(axis=1))] # sort by attn_out_score of experts
+                    scatter_drawer_H_expert(expert_head_score, 1, "Mode2_Expert_T{}_A{}M{}".format(T, send_L, recv_L), output_dir, title="T{}_A{}M{}".format(T, send_L, recv_L))
+                if 3 in draw_mode: # Scatter 3 x:Head, y:Score , All tokens
+                    expert_head_score = torch.sum(decomposed_attn_score.reshape(n_experts, n_tokens, n_heads), 1)
+                    scatter_drawer_H_head(expert_head_score, "Mode3_Head_T{}_A{}M{}".format(T, send_L, recv_L), output_dir, title="T{}_A{}M{}".format(T, send_L, recv_L))
+                if 4 in draw_mode: # Scatter 4 # same as scatter 3, but focus on only a specified key token
+                    checked_k_token =  9
+                    one_token_das = decomposed_attn_score.reshape(n_experts, n_tokens, n_heads)[:, checked_k_token, :].squeeze(1)
+                    scatter_drawer_H_head(one_token_das, "Mode4_HeadOneToken_T{}_A{}k{}->M{}".format(T, send_L, checked_k_token, recv_L), output_dir, title="T{}_A{}k{}M{}".format(T, send_L, checked_k_token, recv_L))
+                if 5 in draw_mode: # Matrix 2: x: Token, y: Selected experts  [token_level (0)]
+                    token_level = torch.sum(decomposed_attn_score[top_n_experts, :].reshape(top_n, n_tokens, n_heads), 2)
+                    matrix_drawer_H_with_sum(token_level, "Mode5_ExpertToken_T{}_A{}M{}".format(T, send_L, recv_L), output_dir, (13, 13), tokens_str, title="T{}_A{}M{} (Token x Expert)".format(T, send_L, recv_L), xlabel="Token", ylabel="Selected Expert")
+                    # out_str = ""
+                    # for k in range(top_n):
+                    #     out_str +="Expert {}: ".format(k)
+                    #     for t in range(n_tokens):
+                    #         out_str += "{: .2f} ".format(token_level[k, t].item())
+                    #     out_str += "\n"
+                    # ## print sum of scores, assigned by each token
+                    # net_token_score = torch.sum(token_level, dim=0)
+                    # out_str += "Sum      :"
+                    # for t in range(n_tokens):
+                    #     out_str += "\033[42m{: .2f} ".format(net_token_score[t].item())
+                    # out_str +="\033[0m"
+                    # print(out_str)
+                if 6 in draw_mode: # Matrix 3: x: Heads, y: Selected experts  [head_level (1)]
+                    head_level = torch.sum(decomposed_attn_score[top_n_experts, :].reshape(top_n, n_tokens, n_heads), 1)
+                    matrix_drawer_H_with_sum(head_level, "Mode6_HeadExpert_T{}_A{}M{}".format(T, send_L, recv_L), output_dir, (13, 13), None, title="T{}_A{}M{} (Head x Expert)".format(T, send_L, recv_L), xlabel="Head", ylabel="Selected Expert")
+                    # out_str = ""
+                    # for k in range(top_n):
+                    #     out_str +="Expert {}: ".format(k)
+                    #     for h in range(n_heads):
+                    #         out_str += "{: .2f} ".format(head_level[k, h].item())
+                    #     out_str += "\n"
+                    # ## print sum of scores, assigned by each head (3)
+                    # net_head_score = torch.sum(head_level, dim=0)
+                    # out_str += "Sum      :"
+                    # for h in range(n_heads):
+                    #     out_str += "\033[42m{: .2f} ".format(net_head_score[h].item())
+                    # out_str +="\033[0m"
+                    # print(out_str)
+                if 7 in draw_mode: # Matrix 1: x: Token y: Head (Positive/Negative separated) NOTE: not averaged
+                    pos = (decomposed_attn_score + torch.abs(decomposed_attn_score)).div(2).sum(0).reshape(n_tokens, n_heads) # all experts
+                    neg = (decomposed_attn_score - torch.abs(decomposed_attn_score)).div(2).sum(0).reshape(n_tokens, n_heads) # all experts
+                    # pos = (decomposed_attn_score[top_n_experts, :] + torch.abs(decomposed_attn_score[top_n_experts, :])).div(2).sum(0).reshape(n_tokens, n_heads) # selected experts only
+                    # neg = (decomposed_attn_score[top_n_experts, :] - torch.abs(decomposed_attn_score[top_n_experts, :])).div(2).sum(0).reshape(n_tokens, n_heads) # selected experts only
+
+                    matrix_drawer_H_token_head(pos, "Mode7_TokenHeadPositive_T{}_A{}M{}".format(T, send_L, recv_L), output_dir, (13, 13), [], tokens_str, "T{}_A{}M{} (Token x Head, positive)".format(T, send_L, recv_L))
+                    matrix_drawer_H_token_head(neg, "Mode7_TokenHeadNegative_T{}_A{}M{}".format(T, send_L, recv_L), output_dir, (13, 13), [], tokens_str, "T{}_A{}M{} (Token x Head, negative)".format(T, send_L, recv_L))
+                
+                ## zero patching, check the influence on routing decisions caused by a specified key token and one of its head through the corruption
+                # zero_patched_token, zero_patched_head = 3, 4 ## NOTE: zero_patched_head is in the SENDING layer
+                # zero_patching_router_result = torch.matmul(router_weight_vectors, after_norm2[recv_L, T] - decomposed_attn_rmsnorm.reshape(n_tokens, n_heads, n_dim)[zero_patched_token, zero_patched_head])
+                # zero_patching_top_n_experts = torch.argsort(zero_patching_router_result, descending=True)[:top_n]
+                # print("Original routing decisions:", torch.sort(original_score, descending=True)) # original routing decisions
+                # print("Corrupted routing decisions:", torch.sort(zero_patching_router_result, descending=True)) # corrupted routing decisions (after zero patching)
+                
+                ## check the score assigned by each head
+                # print("Score assigned to top_n:", torch.sum(decomposed_attn_score[top_n_experts, :].reshape(top_n * n_tokens, n_heads), 0)) # on selected experts 
+                # print("Score assigned to all experts:", torch.sum(decomposed_attn_score.reshape(n_experts * n_tokens, n_heads), 0)) # on all experts
+                
+                ## check the positive score and negative score assigned by each head
+                ## sum_score = decomposed_attn_score.reshape(n_experts, n_tokens, n_heads).sum(0).sum(0) # just for check if the impolementation is correct
+                # tmp_das = decomposed_attn_score.reshape(n_experts * n_tokens, n_heads)
+                # sum_score = torch.sum(tmp_das, dim=0)
+                # sum_abs_score = torch.sum(torch.abs(tmp_das), dim=0)
+                # pos_score = (sum_score + sum_abs_score) / 2
+                # neg_score = (sum_score - sum_abs_score) / 2
+                # print(sum_score)
+                # print(pos_score)
+                # print(neg_score)
+                
+                ## check the score assigned by a specified head on a specified key token
+                # which_key_token, which_head = 3, 8
+                # decomposed_attn_score_specified_token_head = torch.matmul(router_weight_vectors, decomposed_attn_rmsnorm.reshape(n_tokens, n_heads, n_dim)[which_key_token, which_head, :])
+                # print(torch.sum(decomposed_attn_score_specified_token_head[top_n_experts])) # on selected experts
+                # print(torch.sum(decomposed_attn_score_specified_token_head)) # on all experts
+
+                ## checker
+                # attn_rmsnorm = rmsnorm_breakdown(after_res1[recv_L, T], [attn_output[send_L, T]], recv_L, model)[0]
+                # print("CHECK: input:", decomposed_attn_rmsnorm.sum(0)[:3], attn_rmsnorm[:3]) # component_sum MUST be equal to the original rmsnorm (precision error is acceptable)
+                # print("CHECK: input consistency:", torch.allclose(decomposed_attn_rmsnorm.sum(0), attn_rmsnorm, atol=1e-5)) ## NOTE: we do not guarantee the precision error is smaller than the threshold
+                # attn_score = torch.matmul(router_weight_vectors, attn_rmsnorm)
+                # print("CHECK: score:", torch.sum(decomposed_attn_score,dim=1)[:3], attn_score[:3]) # the sum of decomposed_attn_score MUST be equal to attn_score (precision error is acceptable)
+
+                # print(decomposed_attn_score.shape)
+                # print(decomposed_attn_score[top_n_experts, :].reshape(top_n, n_tokens, n_heads).shape)
+                # print(torch.sum(decomposed_attn_score[top_n_experts, :].reshape(top_n, n_tokens, n_heads), 2)) # token-level (0)
+                # print(torch.sum(decomposed_attn_score[top_n_experts, :].reshape(top_n, n_tokens, n_heads), 1)) # head-level (1)
+                # print(torch.sum(decomposed_attn_score[top_n_experts, :].reshape(top_n, n_tokens * n_heads), 1)) # attn scores assigned to experts (2)
+                # print(torch.sum(decomposed_attn_score[top_n_experts, :].reshape(top_n * n_tokens, n_heads), 0)) # sum of scores, assigned by each head (3)
+                print(torch.sum(decomposed_attn_score[top_n_experts, :], 0).reshape(n_tokens, n_heads)) # token-head-level (4) [draw mode 1]; also for test batch implementation
+                ## observe the norms
+                # print("key=Token 0, norm of projected head output:", torch.norm(decomposed_attn_rmsnorm.reshape(n_tokens, n_heads, n_dim)[0], p=2, dim=-1))
+                # print("key=Token 9, norm of projected head output:", torch.norm(decomposed_attn_rmsnorm.reshape(n_tokens, n_heads, n_dim)[9], p=2, dim=-1))
+                ## observe positive rate (For Heads in Layer 13), (seems useless)
+                # results: (OLMoE, prompt_maryjohnjohn) A13H1=13, A13H2=43, A13H5=13; (OLMoE, prompt_davidmiketom) A13H1=38, A13H2=16, A13H5=42 
+                # print("key=Token 9, positive score rate, A13H1:", torch.sum(decomposed_attn_score.reshape(n_experts, n_tokens, n_heads)[:, 9, 1] > 0))
+                # print("key=Token 9, positive score rate, A13H2:", torch.sum(decomposed_attn_score.reshape(n_experts, n_tokens, n_heads)[:, 9, 2] > 0))
+                # print("key=Token 9, positive score rate, A13H5:", torch.sum(decomposed_attn_score.reshape(n_experts, n_tokens, n_heads)[:, 9, 5] > 0))
+                # print("key=Token 9, positive score rate:", (decomposed_attn_score > 0).sum(dim=0).reshape(n_tokens, n_heads)[9, :])
+
+    return expert_ids_by_rank

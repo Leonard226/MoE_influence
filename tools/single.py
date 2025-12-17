@@ -1,5 +1,5 @@
 import torch
-from tools.verbose import rmsnorm_breakdown
+from tools.verbose import rmsnorm_breakdown, decompose_attn_out_helper
 
 def decompose_TAM_single(prompt_ls, model, tokenizer, router_weight_ls, top_n):
     """ Decomposition: single prompt, token(T), attn_out(A), and moe_out(M).
@@ -59,3 +59,40 @@ def decompose_TAM_single(prompt_ls, model, tokenizer, router_weight_ls, top_n):
             moe_abs_cumulative_score[T, L] = torch.sum(torch.abs(moe_score[T, L, top_n_experts, :]), dim=0) # sum (abs m)
             
     return token_score, attn_score, moe_score, moe_cumulative_score, attn_cumulative_score, token_cumulative_score, moe_abs_cumulative_score, attn_abs_cumulative_score, token_abs_cumulative_score
+
+def decompose_H_single(prompt_ls, model, tokenizer, router_weight_ls, top_n):
+    """ Decomposition: single prompt, head(H).
+        Note that top_n can vary - top_k or n_experts or other ranges.
+    """
+    ## run
+    batch_token = tokenizer(prompt_ls, return_tensors="pt")
+    _, hook_dict = model(input_ids=batch_token["input_ids"], attention_mask=batch_token["attention_mask"])
+    ## collect info
+    n_tokens = torch.sum(batch_token["attention_mask"])
+
+    attn_v = hook_dict["hook_v"].squeeze(0) # shape: [n_layers, n_heads, n_tokens, head_dim]
+    attn_weights = hook_dict["hook_attn_weights"].squeeze(0) # shape: [n_layers, n_heads, n_tokens, n_tokens] # first n_tokens -> queries , second n_tokens -> keys
+    after_res1 = hook_dict["hook_after_res1"].squeeze(0) # shape: [n_layers, n_tokens, n_dim]
+    after_norm2 = hook_dict["hook_after_norm2"].squeeze(0) # shape: [n_layers, n_tokens, n_dim]
+
+    n_layers = len(router_weight_ls)
+    n_experts, n_dim = router_weight_ls[1].shape
+    n_heads = attn_v.shape[1]
+
+    expert_ids_by_rank = torch.zeros((n_layers, n_tokens, n_experts), dtype=torch.int)
+
+    for send_L in range(0, n_layers): # sending layer
+        decomposed_attn_out = decompose_attn_out_helper(attn_v[send_L], attn_weights[send_L], send_L, model) # shape: [n_tokens, n_tokens, n_heads, n_dim] first n_tokens: queries, second n_tokens: keys
+        for recv_L in range(send_L, n_layers): # receiving layer
+            router_weight_vectors = router_weight_ls[recv_L]
+            for T in range(n_tokens): # examined token (query token)
+                ## decomposition
+                decomposed_attn_rmsnorm = rmsnorm_breakdown(after_res1[recv_L, T], [decomposed_attn_out[T].reshape(-1, n_dim)], recv_L, model)[0] # shape: [n_tokens * n_heads, n_dim]
+                
+                ## score
+                decomposed_attn_score = torch.matmul(router_weight_vectors, decomposed_attn_rmsnorm.T) # shape: [n_experts, n_tokens * n_heads]
+                
+                ## expert selection
+                original_score = torch.matmul(router_weight_vectors, after_norm2[recv_L, T])
+                expert_ids_by_rank[recv_L, T] = torch.argsort(original_score, descending=True)
+                top_n_experts = expert_ids_by_rank[recv_L, T][:top_n] # torch.argsort(original_score, descending=True)[:top_n]

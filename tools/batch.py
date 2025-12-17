@@ -1,7 +1,7 @@
 import torch
 from tqdm import tqdm
 from tools.plot import tril_drawer_TAM
-from tools.analyze import rmsnorm_breakdown_batch
+from tools.analyze import rmsnorm_breakdown_batch, decompose_attn_out_helper_batch
 
 def decompose_TAM_batch(prompt_ls, model, tokenizer, router_weight_ls, bsz=100, max_token_per_prompt=32, output_dir=None):
     """ Decomposition: multiple prompts, token(T), attn_out(A), and moe_out(M).
@@ -84,3 +84,51 @@ def decompose_TAM_batch(prompt_ls, model, tokenizer, router_weight_ls, bsz=100, 
     tril_drawer_TAM(moe_out_score_collect[T].sum(1).div(n_prompts), "moe_cumulative_score_T{}".format(T), output_dir, (11, 11), diagonal=0, add_patch=[], title="moe_cumulative_score_T{}".format(T), xlabel="MoE Layer (Sending)", ylabel="MoE Layer (Receiving)")
     tril_drawer_TAM(attn_out_score_collect[T].sum(1).div(n_prompts), "attn_cumulative_score_T{}".format(T), output_dir, (11, 11), diagonal=1, add_patch=[], title="attn_cumulative_score_T{}".format(T), xlabel="Attention Layer (Sending)", ylabel="MoE Layer (Receiving)")
     return
+
+def decompose_H_batch(prompt_dict_ls, model, tokenizer, router_weight_ls, top_n, n_heads, bsz):
+    """ Decomposition: multiple prompts,  head(H).
+        Note that top_n can vary - top_k or n_experts or other ranges.
+        NOTE: this function consumes a lot of memory. Avoid using this function directly.
+        NOTE: this function is designed for IOI task. The task-agnostic version is in analyze.py.
+    """
+    prompt_ls = [i["text"] for i in prompt_dict_ls]
+    batch_token = tokenizer(prompt_ls, return_tensors="pt", padding=True)
+    n_prompts = len(prompt_ls)
+    router_weight_vectors = torch.stack(router_weight_ls, dim=0) # shape: [n_layers, n_experts, n_dim]
+    n_layers, n_experts, _ = router_weight_vectors.shape
+    
+    # for duplicate token heads
+    # q_token_position_ls = torch.tensor([i["S_token_pos"][1] for i in prompt_dict_ls])
+    # k_token_position_ls = torch.tensor([i["S_token_pos"][0] for i in prompt_dict_ls])
+
+    # for name mover heads
+    q_token_position_ls = torch.tensor([i["END_token_pos"] for i in prompt_dict_ls])
+    k_token_position_ls = torch.tensor([i["IO_token_pos"] for i in prompt_dict_ls])
+
+    # collector = torch.zeros((n_prompts, n_heads))
+    # collector_expert_scores = torch.zeros((n_prompts, n_heads, n_experts))
+
+    for B in tqdm(range(0, n_prompts, bsz)):
+        _, hook_dict = model(input_ids=batch_token["input_ids"][B:B+bsz], attention_mask=batch_token["attention_mask"][B:B+bsz])
+        attn_v = hook_dict["hook_v"] # shape: [n_prompts_B, n_layers, n_heads, max_n_tokens, head_dim]
+        attn_weights = hook_dict["hook_attn_weights"] # shape: [n_prompts_B, n_layers, n_heads, n_tokens, n_tokens] # first n_tokens -> queries , second n_tokens -> keys
+        after_res1 = hook_dict["hook_after_res1"] # shape: [n_prompts_B, n_layers, max_n_tokens, n_dim]
+        after_norm2 = hook_dict["hook_after_norm2"] # shape: [n_prompts_B, n_layers, max_n_tokens, n_dim]
+        n_prompts_B = after_res1.shape[0]
+        decomposed_attn_out = decompose_attn_out_helper_batch(attn_v, attn_weights, n_layers, model) # shape: [n_prompts_B, n_layers, n_tokens, n_tokens, n_heads, n_dim] first n_tokens: queries, second n_tokens: keys
+        head_rmsnorm = rmsnorm_breakdown_batch(after_res1, [decomposed_attn_out], model, mode="H")[0]
+        ## NOTE: head_rmsnorm shape: [n_prompts_B, n_layers, n_layers, max_n_tokens, max_n_tokens, n_heads, n_dim] # first n_layers -> recv_layer , second n_layers -> send_layer
+        original_score = torch.einsum("RED,PRTD->PTER", router_weight_vectors, after_norm2) # shape: [n_prompts_B, max_n_tokens, n_experts, n_layers]
+        top_n_experts = torch.argsort(original_score, dim=2, descending=True)[:, :, :top_n, :]
+        head_score = torch.tril(torch.einsum("RED,PRSQKHD->PQKHERS", router_weight_vectors, head_rmsnorm), diagonal=0)
+        
+        ## checker
+        # print(top_n_experts.shape, top_n_experts[0, 9, :, 3]) # for test (compare with decompose_H_verbose)
+        # print(torch.sum(head_score[0, 9, 3, 4, top_n_experts[0, 9, :, 3], 3, 1])) # for test (compare with decompose_H_verbose)
+        ## use demo
+        # print(head_score[torch.arange(n_prompts_B), q_token_position_ls[B:B+n_prompts_B], k_token_position_ls[B:B+n_prompts_B], :, :, 3, 1].shape)
+        # collector[B:B+bsz] = torch.sum(head_score[torch.arange(n_prompts_B), q_token_position_ls[B:B+n_prompts_B], k_token_position_ls[B:B+n_prompts_B], :, :, 3, 1], dim=2) # duplicate token heads
+        # collector[B:B+bsz] = torch.sum(head_score[torch.arange(n_prompts_B), q_token_position_ls[B:B+n_prompts_B], k_token_position_ls[B:B+n_prompts_B], :, :, 13, 13], dim=2) # name mover heads
+        # collector_expert_scores[B:B+bsz] = head_score[torch.arange(n_prompts_B), q_token_position_ls[B:B+n_prompts_B], k_token_position_ls[B:B+n_prompts_B], :, :, 13, 13]
+        
+    # return collector, collector_expert_scores

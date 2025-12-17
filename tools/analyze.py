@@ -1,5 +1,5 @@
 import torch
-
+import einops
 def rmsnorm_breakdown_batch(vector, components, model, mode="default", variance_epsilon=1e-05, device="cuda:0"):
     n_prompts_B, n_layers, n_tokens, n_dim = vector.shape
     variance = vector.to(device).pow(2).mean(-1, keepdim=True) # shape: [n_prompts_B, n_layers, n_tokens, 1]
@@ -22,3 +22,14 @@ def rmsnorm_breakdown_batch(vector, components, model, mode="default", variance_
     elif mode == "E": # P: prompt, R: receiving layer, S: sending layer, T: token, D: n_dim, E: n_experts
         breakdowns = [torch.einsum("PRTD,PSTED->PRSTED", rsqrt * weight, i.to(device)) for i in components]
     return breakdowns
+
+def decompose_attn_out_helper_batch(v, pattern, n_layers, model):
+    """ Decompose the attention output into the shape of [n_prompts_B, n_layers, n_tokens, n_tokens, n_heads, n_dim] (PSQKHD)
+    Reference: https://github.com/facebookresearch/llm-transparency-tool/blob/f1340f0757b959c75c139f7aa91aef16eddced67/llm_transparency_tool/models/tlens_model.py#L287
+    """
+    # P: prompt, S: sending_layer, H: head, K: key_pos, A: n_head_dim, Q: query_pos, D: n_dim (hidden state dim)
+    z = torch.einsum("PSHKA,PSHQK->PSQKHA", v, pattern)
+    W_O = torch.stack([model.model.layers[layer_id].self_attn.o_proj.weight for layer_id in range(n_layers)])
+    W_O = einops.rearrange(W_O, "n_layers d_model (index d_head)->n_layers index d_head d_model", index=16) # n_heads = 16
+    decomposed_attn = torch.einsum("PSQKHA,SHAD->PSQKHD", z, W_O.float())
+    return decomposed_attn
