@@ -1,2 +1,5 @@
 __pycache__/
 *.pyc
+entropy/
+compare1.py
+compare2.py
