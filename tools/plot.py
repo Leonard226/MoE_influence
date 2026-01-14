@@ -169,3 +169,151 @@ def matrix_drawer_H_with_sum(data, name, output_dir, figsize=(13,13), token_ls=N
         plt.ylabel(ylabel)
     plt.savefig(output_dir + name + ".png") # ".pdf"
     plt.close("all")
+
+def decompose_H_comparison_batch_single_drawer(head_score, tokens_ls, n_layers, n_heads, output_dir):
+    """ plot the scores assigned by output of (L, H, Q, K) to experts in another MoE layer. One prompt. head score shape: PQKHERS """
+    for send_L in range(0, n_layers):
+        for H in range(0, n_heads):
+            for recv_L in range(send_L, n_layers):
+                if send_L != 1 or recv_L != 3 or H != 4:
+                    continue
+                
+                ## NOTE: Selected expert only version is unchecked and unused.
+                # original_score = torch.einsum("RED,PRTD->PTER", router_weight_vectors, after_norm2) # [n_prompts, max_n_tokens, n_experts, n_layers]
+                # original_top_k_experts = torch.argsort(original_score, dim=2, descending=True)[:,:,:top_k, :]
+                # score1 = head_score[0, torch.arange(len(tokens_ls)).reshape(-1, 1).repeat(1, 8), :, H, original_top_k_experts[0, :, :, recv_L], recv_L, send_L] # selected experts only
+                # pos1 = (score1 + torch.abs(score1)).div(2).sum(1)
+                # neg1 = (score1 - torch.abs(score1)).div(2).sum(1)
+
+                score1 = head_score[0, :, :, H, :, recv_L, send_L] # all experts
+                pos1 = (score1 + torch.abs(score1)).div(2).sum(-1)
+                neg1 = (score1 - torch.abs(score1)).div(2).sum(-1)
+                fig,(ax1, ax2) = plt.subplots(1, 2, figsize=(20, 10))
+                fig.suptitle("(All experts) attn_score_sendL{}H{}recvL{}_ioi".format(send_L, H, recv_L))
+                # fig.suptitle("(Selected experts) attn_score_sendL{}H{}recvL{}_ioi".format(send_L, H, recv_L))
+
+                mask = np.zeros_like(pos1.detach().cpu().numpy())
+                mask[np.triu_indices_from(mask, k=1)] = True
+                g1 = sns.heatmap(pos1.detach().cpu().numpy(), mask=mask, square=True, annot=True, fmt=".2f", annot_kws={"size":11}, cmap="Blues", cbar_kws={"shrink": 0.8}, linewidth=1, cbar=False, ax=ax1)
+                g2 = sns.heatmap(neg1.detach().cpu().numpy(), mask=mask, square=True, annot=True, fmt=".2f", annot_kws={"size":11}, cmap="Reds_r", cbar_kws={"shrink": 0.8}, linewidth=1, cbar=False, ax=ax2)
+                for ax in [g1, g2]:
+                    ax.add_patch(Rectangle((0, 4), 5, 1, fill=False, edgecolor="red", lw=3))
+                    ax.add_patch(Rectangle((0, 9), 10, 1, fill=False, edgecolor="red", lw=3))
+                    ax.add_patch(Rectangle((0, 13), 14, 1, fill=False, edgecolor="red", lw=3))
+                    ax.add_patch(Rectangle((1, 4), 1, 1, fill=False, edgecolor="black", lw=5))
+                    ax.add_patch(Rectangle((3, 4), 1, 1, fill=False, edgecolor="black", lw=5))
+                    for k in [9, 13]:
+                        ax.add_patch(Rectangle((1, k), 1, 1, fill=False, edgecolor="black", lw=5))
+                        ax.add_patch(Rectangle((3, k), 1, 1, fill=False, edgecolor="black", lw=5))
+                        ax.add_patch(Rectangle((9, k), 1, 1, fill=False, edgecolor="black", lw=5))
+                ax1.set_title("positive")
+                ax2.set_title("negative")
+                ax1.set_yticklabels(tokens_ls, rotation=0)
+                # plt.savefig(output_dir + "selected_attn_score_sendL{}H{}recvL{}_ioi".format(send_L, H, recv_L) + ".png")
+                plt.savefig(output_dir + "attn_score_sendL{}H{}recvL{}_ioi".format(send_L, H, recv_L) + ".png")
+                plt.close("all")
+
+def decompose_H_comparison_batch_pair_drawer(head_score, tokens_ls, n_layers, n_heads, output_dir):
+    """ plot the scores assigned by output of (L, H, Q, K) to experts in another MoE layer. Two prompts. head score shape: PQKHERS """
+    for send_L in range(0, n_layers):
+        for H in range(0, n_heads):
+            for recv_L in range(send_L, n_layers):
+                if send_L != 1 or recv_L != 3 or H != 4:
+                    continue
+                # if send_L != 13:
+                #     continue
+                # if not (H == 1 or H == 2 or H == 5):
+                #     continue
+                # if send_L != 9 or H != 14 or recv_L != 10:
+                #     continue
+                # if send_L != 1 or H != 8:
+                #     continue
+
+                ## NOTE: Selected expert only version is unchecked and unused. Please refer to function "decompose_H_comparison_batch_single_drawer".
+                # score = head_score[:, torch.arange(len(tokens_ls)).reshape(-1, 1).repeat(1, 8), :, H, original_top_k_experts[0, :, :, recv_L], recv_L, send_L] # selected experts only
+                # pos = (score + torch.abs(score)).div(2).sum(1)
+                # neg = (score - torch.abs(score)).div(2).sum(1)
+                # pos = pos.permute(1, 0, 2)
+                # neg = neg.permute(1, 0, 2)
+
+                score = head_score[:, :, :, H, :, recv_L, send_L] # all experts
+                pos = (score + torch.abs(score)).div(2).sum(-1)
+                neg = (score - torch.abs(score)).div(2).sum(-1)
+                
+                fig, axes = plt.subplots(2, 3, figsize=(25, 15))
+                fig.suptitle("(All experts) attn_score_sendL{}H{}recvL{}_ioi_two_prompts".format(send_L, H, recv_L))
+                # fig.suptitle("(Selected experts) attn_score_sendL{}H{}recvL{}_ioi_two_prompts".format(send_L, H, recv_L))
+
+                mask = np.zeros_like(pos[0].detach().cpu().numpy())
+                mask[np.triu_indices_from(mask, k=1)] = True
+                diff_pos = (pos[0] - pos[1]).detach().cpu().numpy()
+                diff_neg = (neg[0] - neg[1]).detach().cpu().numpy()
+                print("diff_pos max/min:", diff_pos.max(), diff_pos.min())
+
+                if diff_pos.min() < 0 and diff_pos.max() > 0:
+                    g11 = sns.heatmap(diff_pos, mask=mask, square=True, annot=True, fmt=".2f", annot_kws={"size":9}, cmap="RdBu", cbar_kws={"shrink": 0.8}, linewidth=1, cbar=False, ax=axes[0][0], norm=mcolors.TwoSlopeNorm(vcenter=0, vmin=diff_pos.min(), vmax=diff_pos.max()))
+                elif diff_pos.min() >= 0: # bad practice, just a temporal remedy
+                    g11 = sns.heatmap(diff_pos, mask=mask, square=True, annot=True, fmt=".2f", annot_kws={"size":9}, cmap="Blues", cbar_kws={"shrink": 0.8}, linewidth=1, cbar=False, ax=axes[0][0], norm=mcolors.Normalize(vmin=diff_pos.min(), vmax=diff_pos.max()))
+                else:
+                    g11 = sns.heatmap(diff_pos, mask=mask, square=True, annot=True, fmt=".2f", annot_kws={"size":9}, cmap="Reds_r", cbar_kws={"shrink": 0.8}, linewidth=1, cbar=False, ax=axes[0][0], norm=mcolors.Normalize(vmin=diff_pos.min(), vmax=diff_pos.max()))
+                # g11 = sns.heatmap(diff_pos, mask=mask, square=True, annot=True, fmt=".2f", annot_kws={"size":9}, cmap="RdBu", cbar_kws={"shrink": 0.8}, linewidth=1, cbar=False, ax=axes[0][0], norm=mcolors.TwoSlopeNorm(vcenter=0, vmin=diff_pos.min(), vmax=diff_pos.max()))
+                g12 = sns.heatmap(pos[0].detach().cpu().numpy(), mask=mask, square=True, annot=True, fmt=".2f", annot_kws={"size":9}, cmap="Blues", cbar_kws={"shrink": 0.8}, linewidth=1, cbar=False, ax=axes[0][1])
+                g13 = sns.heatmap(pos[1].detach().cpu().numpy(), mask=mask, square=True, annot=True, fmt=".2f", annot_kws={"size":9}, cmap="Blues", cbar_kws={"shrink": 0.8}, linewidth=1, cbar=False, ax=axes[0][2])
+                g21 = sns.heatmap(diff_neg, mask=mask, square=True, annot=True, fmt=".2f", annot_kws={"size":9}, cmap="RdBu", cbar_kws={"shrink": 0.8}, linewidth=1, cbar=False, ax=axes[1][0], norm=mcolors.TwoSlopeNorm(vcenter=0, vmin=diff_neg.min(), vmax=diff_neg.max()))
+                g22 = sns.heatmap(neg[0].detach().cpu().numpy(), mask=mask, square=True, annot=True, fmt=".2f", annot_kws={"size":9}, cmap="Reds_r", cbar_kws={"shrink": 0.8}, linewidth=1, cbar=False, ax=axes[1][1])
+                g23 = sns.heatmap(neg[1].detach().cpu().numpy(), mask=mask, square=True, annot=True, fmt=".2f", annot_kws={"size":9}, cmap="Reds_r", cbar_kws={"shrink": 0.8}, linewidth=1, cbar=False, ax=axes[1][2])
+
+                for ax in [g11, g12, g13, g21, g22, g23]:
+                    ax.add_patch(Rectangle((0, 4), 5, 1, fill=False, edgecolor="red", lw=3))
+                    ax.add_patch(Rectangle((0, 9), 10, 1, fill=False, edgecolor="red", lw=3))
+                    ax.add_patch(Rectangle((0, 13), 14, 1, fill=False, edgecolor="red", lw=3))
+                    ax.add_patch(Rectangle((1, 4), 1, 1, fill=False, edgecolor="black", lw=5))
+                    ax.add_patch(Rectangle((3, 4), 1, 1, fill=False, edgecolor="black", lw=5))
+                    for k in [9, 13]:
+                        ax.add_patch(Rectangle((1, k), 1, 1, fill=False, edgecolor="black", lw=5))
+                        ax.add_patch(Rectangle((3, k), 1, 1, fill=False, edgecolor="black", lw=5))
+                        ax.add_patch(Rectangle((9, k), 1, 1, fill=False, edgecolor="black", lw=5))
+                
+                g11.set_yticklabels(tokens_ls, rotation=0)
+                g21.set_yticklabels(tokens_ls, rotation=0)
+                g11.set_title("diff_pos")
+                g12.set_title("pos_ioi")
+                g13.set_title("pos_abc")
+                g21.set_title("diff_neg")
+                g22.set_title("neg_ioi")
+                g23.set_title("neg_abc")
+                # plt.savefig(output_dir + "selected_attn_score_sendL{}H{}recvL{}_ioi_two_prompts".format(send_L, H, recv_L) + ".png")
+                plt.savefig(output_dir + "attn_score_sendL{}H{}recvL{}_ioi_two_prompts".format(send_L, H, recv_L) + ".png")
+                plt.close("all")
+
+def decompose_H_expert_score_scatter_batch(head_score, query_position, key_position, send_L, recv_L, output_dir):
+    """ scatter the scores assigned by output of (L, H, Q, K) to experts in another MoE layer. The first prompt only. head score shape: PQKHERS """
+    ## scatter of head scores of specific heads
+    # send_L, recv_L = 13, 13
+    # score_A13H0 = head_score[0, -1, 9, 0, :, recv_L, send_L] # all experts, q=Token END, k=Token S2
+    # score_A13H1 = head_score[0, -1, 9, 1, :, recv_L, send_L] # all experts, q=Token END, k=Token S2
+    # score_A13H2 = head_score[0, -1, 9, 2, :, recv_L, send_L] # all experts, q=Token END, k=Token S2
+    # score_A13H5 = head_score[0, -1, 9, 5, :, recv_L, send_L] # all experts, q=Token END, k=Token S2
+    # score_A13H10 = head_score[0, -1, 9, 10, :, recv_L, send_L] # all experts, q=Token END, k=Token S2
+    # score_A13H11 = head_score[0, -1, 9, 11, :, recv_L, send_L] # all experts, q=Token END, k=Token S2
+
+    # plt.scatter([i for i in range(64)], score_A13H0.detach().cpu().numpy(), s=5, c="black",label="A13H0")
+    # plt.scatter([i for i in range(64)], score_A13H1.detach().cpu().numpy(), s=5, c="red",label="A13H1")
+    # plt.scatter([i for i in range(64)], score_A13H2.detach().cpu().numpy(), s=5, c="blue",label="A13H2")
+    # plt.scatter([i for i in range(64)], score_A13H5.detach().cpu().numpy(), s=5, c="green",label="A13H5")
+    # plt.scatter([i for i in range(64)], score_A13H10.detach().cpu().numpy(), s=5, c="pink",label="A13H10")
+    # plt.scatter([i for i in range(64)], score_A13H11.detach().cpu().numpy(), s=5, c="cyan",label="A13H11")
+
+    n_experts = head_score.shape[4]
+    color_ls = ["k","grey","r","sandybrown","orange","gold","yellowgreen","lawngreen","g","aquamarine","cyan","dodgerblue","b","indigo","violet","pink"]
+    plt.figure(figsize=(15,15))
+    for H in range(16):
+        score = head_score[0, query_position, key_position, H, :, recv_L, send_L]
+        plt.scatter([i for i in range(n_experts)], score.detach().cpu().numpy(), s=5, c=color_ls[H], label="A{}H{}".format(send_L, H))
+        print("H{}, score var:{}, score mean:{}".format(H, score.var(), score.mean()))
+    plt.grid()
+    plt.legend()
+    
+    # plt.ylim(-0.2,0.2)
+    plt.savefig(output_dir + "attn_score_sendL{}recvL{}_expert_score_scatter_ioi".format(send_L, recv_L) + ".png")
+    plt.close("all")

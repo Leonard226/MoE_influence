@@ -1,8 +1,11 @@
 import torch
 from tqdm import tqdm
-from tools.plot import tril_drawer_TAM
+from tools.plot import tril_drawer_TAM, decompose_H_comparison_batch_single_drawer, decompose_H_comparison_batch_pair_drawer, decompose_H_expert_score_scatter_batch
 from tools.analyze import rmsnorm_breakdown_batch, decompose_attn_out_helper_batch
-
+import matplotlib.pyplot as plt
+import seaborn as sns
+import numpy as np
+import matplotlib.colors as mcolors
 def decompose_TAM_batch(prompt_ls, model, tokenizer, router_weight_ls, bsz=100, max_token_per_prompt=32, output_dir=None):
     """ Decomposition: multiple prompts, token(T), attn_out(A), and moe_out(M).
         This implementation is primarily to check if the score computation is implemented correctly.
@@ -86,7 +89,7 @@ def decompose_TAM_batch(prompt_ls, model, tokenizer, router_weight_ls, bsz=100, 
     return
 
 def decompose_H_batch(prompt_dict_ls, model, tokenizer, router_weight_ls, top_n, n_heads, bsz):
-    """ Decomposition: multiple prompts,  head(H).
+    """ Decomposition: multiple prompts, head(H).
         Note that top_n can vary - top_k or n_experts or other ranges.
         NOTE: this function consumes a lot of memory. Avoid using this function directly.
         NOTE: this function is designed for IOI task. The task-agnostic version is in analyze.py.
@@ -132,3 +135,177 @@ def decompose_H_batch(prompt_dict_ls, model, tokenizer, router_weight_ls, top_n,
         # collector_expert_scores[B:B+bsz] = head_score[torch.arange(n_prompts_B), q_token_position_ls[B:B+n_prompts_B], k_token_position_ls[B:B+n_prompts_B], :, :, 13, 13]
         
     # return collector, collector_expert_scores
+
+def decompose_H_comparison_batch(prompt_ls, model, tokenizer, router_weight_ls, n_heads, output_dir):
+    """ Decomposition: one or two prompts, head(H).
+        Note that top_n can vary - top_k or n_experts or other ranges.
+        NOTE: this function is customized for IOI task. If two prompts are provided, their length should be the same.
+        NOTE: this function is NOT used in the paper.
+    """
+    ## run
+    batch_token = tokenizer(prompt_ls, return_tensors="pt", padding=False)
+    _, hook_dict = model(input_ids=batch_token["input_ids"], attention_mask=batch_token["attention_mask"])
+    ## collect info
+    tokens_str = [tokenizer.decode(x) for x in batch_token["input_ids"][0]]
+    router_weight_vectors = torch.stack(router_weight_ls, dim=0) # shape: [n_layers, n_experts, n_dim]
+    n_layers, _, _ = router_weight_vectors.shape
+    
+    attn_v = hook_dict["hook_v"] # shape: [n_prompts, n_layers, n_heads, n_tokens, head_dim]
+    attn_weights = hook_dict["hook_attn_weights"] # shape: [n_prompts, n_layers, n_heads, n_tokens, n_tokens] # first n_tokens -> queries , second n_tokens -> keys
+    after_res1 = hook_dict["hook_after_res1"] # shape: [n_prompts, n_layers, n_tokens, n_dim]
+    after_norm2 = hook_dict["hook_after_norm2"] # shape: [n_prompts, n_layers, n_tokens, n_dim]
+    # print(attn_v.shape, attn_weights.shape, after_res1.shape, after_norm2.shape)
+
+    decomposed_attn_out = decompose_attn_out_helper_batch(attn_v, attn_weights, n_layers, model)
+    head_rmsnorm = rmsnorm_breakdown_batch(after_res1, [decomposed_attn_out], model, mode="H")[0]
+    head_score = torch.tril(torch.einsum("RED,PRSQKHD->PQKHERS", router_weight_vectors, head_rmsnorm), diagonal=0)
+    
+    tokens_str = [str(i)+"| "+tokens_str[i] for i in range(len(tokens_str))]
+    ## one sample
+    decompose_H_comparison_batch_single_drawer(head_score, tokens_str, n_layers, n_heads, output_dir)
+    ## two samples
+    decompose_H_comparison_batch_pair_drawer(head_score, tokens_str, n_layers, n_heads, output_dir)
+    ## score distribution
+    query_position, key_position = 9, 3
+    send_L, recv_L = 1, 3
+    decompose_H_expert_score_scatter_batch(head_score, query_position, key_position, send_L, recv_L, output_dir)
+
+# def intersect(A, B):
+#         m, n, p, q = A.shape
+#         A_flat = A.permute(0, 1, 3, 2).reshape(-1, p)  # [m*n*q, p]
+#         B_flat = B.permute(0, 1, 3, 2).reshape(-1, p)  # [m*n*q, p]
+
+#         intersection_counts = torch.tensor([
+#             torch.isin(a_row, b_row).sum().item()
+#             for a_row, b_row in zip(A_flat, B_flat)
+#         ], dtype=torch.int64)
+
+#         # C = intersection_counts.reshape(m, n, q).unsqueeze(2)  # [m, n, 1, q]
+#         C = intersection_counts.reshape(-1, q).sum(0)
+#         return C
+
+# def decompose_TAM_abandoned_figure_batch(prompt_ls, model, tokenizer, router_weight_ls, top_n, bsz=100, max_token_per_prompt=32, output_dir=None):
+#     """ Decomposition: multiple prompts, token(T), attn_out(A), and moe_out(M).
+#         Note that top_n can vary - top_k or n_experts or other ranges.
+#         This implementation is to generate the figure that are not used in the paper.
+#     """
+#     batch_token = tokenizer(prompt_ls, return_tensors="pt", max_length=max_token_per_prompt, padding=False, truncation=True)
+#     n_tokens_ls = torch.sum(batch_token["attention_mask"], dim=1) # a list showing the number of tokens of each prompt
+#     n_prompts, max_n_tokens = batch_token["attention_mask"].shape
+    
+#     router_weight_vectors = torch.stack(router_weight_ls, dim=0) # shape: [n_layers, n_experts, n_dim]
+#     n_layers, n_experts, n_dim = router_weight_vectors.shape
+#     # token_score_collect = torch.zeros((max_n_tokens, n_layers, n_experts, 1))
+#     # moe_out_score_collect = torch.zeros((max_n_tokens, n_layers, n_experts, n_layers)) # first n_layers -> recv_layer , second n_layers -> send_layer
+#     # attn_out_score_collect = torch.zeros((max_n_tokens, n_layers, n_experts, n_layers)) # first n_layers -> recv_layer , second n_layers -> send_layer
+    
+#     token_score_postive_ratio = torch.zeros((max_n_tokens, n_layers, 1))
+#     attn_out_score_postive_ratio = torch.zeros((max_n_tokens, n_layers, n_layers))
+#     moe_out_score_postive_ratio = torch.zeros((max_n_tokens, n_layers, n_layers))
+
+#     attn_out_score_var_collect = torch.zeros((max_n_tokens, n_layers, n_layers)) # first n_layers -> recv_layer , second n_layers -> send_layer
+#     attn_out_score_topk_abs_sum_collect = torch.zeros((max_n_tokens, n_layers, n_layers)) # first n_layers -> recv_layer , second n_layers -> send_layer
+#     expert_score_collect = torch.zeros((n_prompts, max_n_tokens, n_experts, n_layers))
+
+#     hit_rate = torch.zeros((n_layers))
+
+#     for B in tqdm(range(0, n_prompts, bsz)):
+#         _, hook_dict = model(input_ids=batch_token["input_ids"][B:B+bsz], attention_mask=batch_token["attention_mask"][B:B+bsz])
+#         layer_input = hook_dict["hook_layer_input"] # shape: [n_prompts_B, n_layers, max_n_tokens, n_dim]
+#         attn_output = hook_dict["hook_attn_output"] # shape: [n_prompts_B, n_layers, max_n_tokens, n_dim]
+#         after_res1 = hook_dict["hook_after_res1"] # shape: [n_prompts_B, n_layers, max_n_tokens, n_dim]
+#         after_norm2 = hook_dict["hook_after_norm2"] # shape: [n_prompts_B, n_layers, max_n_tokens, n_dim]
+#         mlp_output = hook_dict["hook_mlp_output"] # shape: [n_prompts_B, n_layers, max_n_tokens, n_dim]
+#         n_prompts_B = layer_input.shape[0]
+        
+#         token_components = layer_input[:, 0, :, :].unsqueeze(1) # res_in of Layer 0
+#         token_rmsnorm, attn_out_rmsnorm, moe_out_rmsnorm = rmsnorm_breakdown_batch(after_res1, [token_components, attn_output, mlp_output], model, mode="TAM")
+#         ## NOTE: token_rmsnorm shape: [n_prompts_B, n_layers, 1, max_n_tokens, n_dim]
+#         ## NOTE: moe_out_rmsnorm, attn_out_rmsnorm shape: [n_prompts_B, n_layers, n_layers, max_n_tokens, n_dim] # first n_layers -> recv_layer , second n_layers -> send_layer
+#         original_score = torch.einsum("RED,PRTD->PTER", router_weight_vectors, after_norm2) # shape: [n_prompts_B, max_n_tokens, n_experts, n_layers]
+#         top_n_experts = torch.argsort(original_score, dim=2, descending=True)[:, :, :top_n, :]
+#         token_score = torch.einsum("RED,PRSTD->PTERS", router_weight_vectors, token_rmsnorm)
+#         attn_out_score = torch.tril(torch.einsum("RED,PRSTD->PTERS", router_weight_vectors, attn_out_rmsnorm), diagonal=0)
+#         moe_out_score = torch.tril(torch.einsum("RED,PRSTD->PTERS", router_weight_vectors, moe_out_rmsnorm), diagonal=-1) # shape: [n_prompts_B, max_n_tokens, n_experts, n_layers, n_layers] first n_layers -> recv_layer , second n_layers -> send_layer
+#         # token_score_collect += token_score.sum(dim=0).transpose(1,2)
+#         # attn_out_score_collect += attn_out_score.sum(dim=0).transpose(1,2)
+#         # moe_out_score_collect += moe_out_score.sum(dim=0).transpose(1,2)
+        
+#         ## positive ratio
+#         token_score_postive_ratio += (token_score > 0.0).sum(2).sum(0)
+#         attn_out_score_postive_ratio += (attn_out_score > 0.0).sum(2).sum(0)
+#         moe_out_score_postive_ratio += (moe_out_score > 0.0).sum(2).sum(0)
+
+#         attn_out_score_var_collect += attn_out_score.var(dim=2).sum(dim=0)
+#         attn_out_score_topk_abs_sum_collect += torch.sum(torch.sum(torch.abs(torch.gather(attn_out_score, dim=2, index=top_n_experts.long().unsqueeze(-1).repeat(1, 1, 1, 1, n_layers))), dim=2), dim=0)
+#         expert_score_collect[B:B+bsz] = original_score
+
+#         pred_top_k_experts = torch.argsort(moe_out_score[...,2]+moe_out_score[...,5], dim=2, descending=True)[:, :, :top_n, :]
+#         hit_rate += intersect(top_n_experts, pred_top_k_experts)
+    
+#     hit_rate /= (n_prompts * max_n_tokens)
+#     print("hit_rate:", hit_rate) # must set top_n=top_k or a number around top_k
+#     exit()
+#     ## positive ratio
+#     tril_drawer_TAM(token_score_postive_ratio[1:].div(n_experts).mean(0).div(n_prompts), name="positive_token_score_ratio", output_dir=output_dir, figsize=(11, 11), diagonal=1, add_patch=[], title="token_score_postive_ratio", xlabel="", ylabel="Receiving Layer", need_description=True, tick_mode='T')
+#     tril_drawer_TAM(attn_out_score_postive_ratio[1:].div(n_experts).mean(0).div(n_prompts), name="positive_attn_score_ratio", output_dir=output_dir, figsize=(11, 11), diagonal=1, add_patch=[], title="attn_out_score_postive_ratio", xlabel="Sending Layer", ylabel="Receiving Layer", need_description=True, tick_mode='A')
+#     tril_drawer_TAM(moe_out_score_postive_ratio[1:].div(n_experts).mean(0).div(n_prompts), name="positive_moe_score_ratio", output_dir=output_dir, figsize=(11, 11), diagonal=0, add_patch=[], title="moe_out_score_postive_ratio", xlabel="Sending Layer", ylabel="Receiving Layer", need_description=True, tick_mode='M')
+
+#     ## other metrics
+#     decompose_TAM_abandoned_figure_batch_drawer1(n_prompts, attn_out_score_var_collect, attn_out_score_topk_abs_sum_collect, output_dir)
+#     decompose_TAM_abandoned_figure_batch_drawer2(n_experts, n_layers, expert_score_collect, router_weight_vectors, output_dir)
+
+def simplified_attn_map_score_batch(prompt_ls, model, tokenizer, router_weight_ls, output_dir, n_heads, bsz, max_token_per_prompt):
+    """ Discarded. Not used in the paper. (Variance of score assigned by head, task agnostic) 
+        Only apply statistical study on Ax->Mx (sending layer and receiving layer are in the same block).
+    """
+    batch_token = tokenizer(prompt_ls, return_tensors="pt", max_length=max_token_per_prompt, padding=False, truncation=True)
+    n_prompts, max_n_tokens = batch_token["attention_mask"].shape
+
+    router_weight_vectors = torch.stack(router_weight_ls, dim=0) # shape: [n_layers, n_experts, n_dim]
+    n_layers, _, _ = router_weight_vectors.shape
+
+    ## NOTE: attn_weight_collect is attention map (after softmax)
+    attn_weight_collect = torch.zeros((n_prompts, n_layers, n_heads, max_n_tokens, max_n_tokens)) # first max_n_tokens -> queries, second max_n_tokens -> keys
+    attn_score_var_collect = torch.zeros((n_prompts, n_layers, n_heads, max_n_tokens, max_n_tokens)) # first max_n_tokens -> queries, second max_n_tokens -> keys
+
+    for B in tqdm(range(0, n_prompts, bsz)):
+        _, hook_dict = model(input_ids=batch_token["input_ids"][B:B+bsz], attention_mask=batch_token["attention_mask"][B:B+bsz])
+        attn_v = hook_dict["hook_v"] # shape: [n_prompts_B, n_layers, n_heads, max_n_tokens, head_dim]
+        attn_weights = hook_dict["hook_attn_weights"] # shape: [n_prompts_B, n_layers, n_heads, n_tokens, n_tokens] # first n_tokens -> queries, second n_tokens -> keys
+        after_res1 = hook_dict["hook_after_res1"] # shape: [n_prompts_B, n_layers, max_n_tokens, n_dim]
+        after_norm2 = hook_dict["hook_after_norm2"] # shape: [n_prompts_B, n_layers, max_n_tokens, n_dim]
+        n_prompts_B = after_res1.shape[0]
+        # print(attn_v.shape, attn_weights.shape, after_res1.shape, after_norm2.shape)
+        
+        decomposed_attn_out = decompose_attn_out_helper_batch(attn_v, attn_weights, n_layers, model) # shape: [n_prompts_B, n_layers, n_tokens, n_tokens, n_heads, n_dim] first n_tokens: queries, second n_tokens: keys
+        head_rmsnorm = rmsnorm_breakdown_batch(after_res1, [decomposed_attn_out], model, mode="H_simplified")[0] # PRQKHD
+        ## NOTE: head_rmsnorm shape: [n_prompts_B, n_layers, max_n_tokens, max_n_tokens, n_heads, n_dim] # first n_tokens -> queries, second n_tokens -> keys
+        head_score = torch.tril(torch.einsum("RED,PRQKHD->PQKHER", router_weight_vectors, head_rmsnorm), diagonal=0)
+        attn_weight_collect[B:B+n_prompts_B] = attn_weights
+        attn_score_var_collect[B:B+n_prompts_B] = head_score.var(dim=4, correction=0).permute(0, 4, 3, 1, 2)
+        
+        ## Code for check if implemented correctly (Please use CPU in case the memory is not enough)
+        # check_head_rmsnorm = rmsnorm_breakdown_batch(after_res1, [decomposed_attn_out], model, mode="H")[0] # PRSQKHD
+        # print("CHECK: INPUT:", check_head_rmsnorm[0, 1, 1, 2, 1, 0, :3], head_rmsnorm[0, 1, 2, 1, 0, :3])
+    
+    attn_score_var_collect_scatter = attn_score_var_collect.div((attn_weight_collect.pow(2)+1e-5)) # remove the influence of attn map, can be commented
+    plt.scatter(attn_weight_collect[:, :, :, :, 1:].reshape(-1).detach().cpu().numpy(), attn_score_var_collect_scatter[:, :, :, :, 1:].reshape(-1).detach().cpu().numpy(), s=5, alpha=0.3, c="b", label="Other")
+    plt.scatter(attn_weight_collect[:, :, :, :, 0].reshape(-1).detach().cpu().numpy(), attn_score_var_collect_scatter[:, :, :, :, 0].reshape(-1).detach().cpu().numpy(), s=5, alpha=0.3, c="r", label="Token 0")
+    plt.xlabel("Attention map (after softmax)")
+    plt.ylabel("Variance")
+    plt.savefig(output_dir + "simplified_attn_map_score_scatter" + ".png")
+
+    rows, cols = torch.tril_indices(max_n_tokens, max_n_tokens, offset=0)
+    attn_score_var_collect = attn_score_var_collect[:, :, :, rows, cols].permute(1, 2, 0, 3).reshape(n_layers, n_heads, -1).mean(-1)
+    plt.figure(figsize=(13, 13))
+    data = attn_score_var_collect.detach().cpu().numpy()
+    sns.heatmap(data, square=True, annot=True, fmt=".1e", annot_kws={"size":9}, cmap="Purples", cbar_kws={"shrink":0.8}, linewidth=1, norm=mcolors.LogNorm(vmin=attn_score_var_collect[attn_score_var_collect>0].min(), vmax=attn_score_var_collect.max()))
+    plt.xticks([k + 0.5 for k in range(0, data.shape[1], 5)], [str(k + 1) for k in range(0, data.shape[1], 5)])
+    plt.yticks([k + 0.5 for k in range(0, data.shape[0], 5)], [str(k + 1) for k in range(0, data.shape[0], 5)])
+    plt.title("Var of Score (Ax->Mx, all experts)")
+    plt.xlabel("Head")
+    plt.ylabel("Layer")
+    np.save(output_dir + "attn_map_score_batch" + ".npy", data)
+    plt.savefig(output_dir + "attn_map_score_batch" + ".png")
+    plt.close("all")
