@@ -317,3 +317,87 @@ def decompose_H_expert_score_scatter_batch(head_score, query_position, key_posit
     # plt.ylim(-0.2,0.2)
     plt.savefig(output_dir + "attn_score_sendL{}recvL{}_expert_score_scatter_ioi".format(send_L, recv_L) + ".png")
     plt.close("all")
+
+def M_drawer(data, original_top_k_experts, name, output_dir, title=""):
+    """ Scatter the scores assigned by selected experts in MoE Layer x to all the experts in
+    :param data: decomposed_expert_out_score, shape: [n_experts, original_top_k], the scores assigned by the original top K experts in the SENDING layer to n_experts in the receiving layer
+    :param original_top_k_experts: the original top K experts in the RECEIVING layer
+    """
+    ## vanilla version, monochrome
+    plt.grid()
+    n_experts, top_k = data.shape
+    xs = [i for _ in range(n_experts) for i in range(top_k)]
+    ys = data.reshape(-1).detach().cpu().numpy()
+    plt.scatter(xs, ys, s=5, c="b")
+    plt.title(title)
+    plt.xlabel("Top K experts (Sending Layer)")
+    plt.ylabel("Score of experts (Receiving Layer)")
+    plt.savefig(output_dir + "monochrome_" + name + ".png") # .pdf
+    plt.close("all")
+
+    ## bichrome, highlight the selected experts in the RECEIVING layer in red
+    plt.grid()
+    xs1 = [i for _ in range(top_k) for i in range(top_k)]
+    xs2 = [i for _ in range(n_experts - top_k) for i in range(top_k)]
+    ys1 = data[original_top_k_experts, :].reshape(-1).detach().cpu().numpy()
+    mask = torch.ones((n_experts), dtype=torch.bool)
+    mask[original_top_k_experts] = False
+    ys2 = data[mask, :].reshape(-1).detach().cpu().numpy()
+    plt.scatter(xs2, ys2, s=5, c="b", label="unselected experts")
+    plt.scatter(xs1, ys1, s=5, c="r", label="selected experts")
+    plt.xticks(ticks=np.arange(top_k), labels=data[original_top_k_experts, :].sum(0).detach().cpu().numpy().round(2))
+    plt.title(title)
+    plt.legend()
+    plt.xlabel("Cumulative score assigned by TopK experts in SEND L. to selected experts in RECV L.")
+    plt.ylabel("Score of experts (Receiving Layer)")
+    plt.savefig(output_dir + "bichrome_" + name + ".png") # .pdf
+    plt.close("all")
+
+def matrix_attn_weight_verbose(data, name, output_dir, figsize=(13,13), title="", xlabel="Key Token", ylabel="Head", need_description=True):
+    plt.figure(figsize=figsize)
+    with sns.axes_style("white"):
+        ax = sns.heatmap(data.detach().cpu().numpy(), square=True, annot=True, fmt=".2f", cmap="RdBu", cbar_kws={"shrink": 0.8}, linewidth=.5)
+    if need_description:
+        plt.title(title)
+        plt.xlabel(xlabel)
+        plt.ylabel(ylabel)
+    plt.savefig(output_dir + name + ".png")
+    plt.close("all")
+
+def matrix_attn_weight_comparison_verbose(attn_weights_ORIG, attn_weights_NEW, tokens_str, output_dir):
+    n_layers, n_heads, _, _ = attn_weights_ORIG.shape
+
+    y_ls = [str(i) + "| " + tokens_str[i] for i in range(len(tokens_str))]
+    for L in range(n_layers):
+        for H in range(n_heads):
+            if L != 1 or H != 4:
+                continue
+            data_ORIG = attn_weights_ORIG[L, H]
+            data_NEW = attn_weights_NEW[L, H]
+            data_diff = data_ORIG - data_NEW
+            plt.figure(figsize=(40, 40))
+            fig,(ax1, ax2, ax3) = plt.subplots(1, 3, figsize=(30, 10))
+            fig.suptitle("attn_weight_L{}H{}_diff_ioi_abc".format(L, H))
+            mask = np.zeros_like(data_ORIG.detach().cpu().numpy())
+            mask[np.triu_indices_from(mask, k=1)] = True
+            g1 = sns.heatmap(data_diff.detach().cpu().numpy(), mask=mask, square=True, annot=True, fmt=".2f", annot_kws={"size":11}, cmap="Blues", cbar_kws={"shrink": 0.8}, linewidth=1, cbar=False, ax=ax1, norm=mcolors.Normalize(vmin=0, vmax=1))
+            g2 = sns.heatmap(data_ORIG.detach().cpu().numpy(), mask=mask, square=True, annot=True, fmt=".2f", annot_kws={"size":11}, cmap="Blues", cbar_kws={"shrink": 0.8}, linewidth=1, cbar=False, ax=ax2)
+            g3 = sns.heatmap(data_NEW.detach().cpu().numpy(), mask=mask, square=True, annot=True, fmt=".2f", annot_kws={"size":11}, cmap="Blues", cbar_kws={"shrink": 0.8}, linewidth=1, cbar=False, ax=ax3)
+            for ax in [g1, g2, g3]:
+                ax.add_patch(Rectangle((0, 4), 5, 1, fill=False, edgecolor="red", lw=3))
+                ax.add_patch(Rectangle((0, 9), 10, 1, fill=False, edgecolor="red", lw=3))
+                ax.add_patch(Rectangle((0, 13), 14, 1, fill=False, edgecolor="red", lw=3))
+                ax.add_patch(Rectangle((1, 4), 1, 1, fill=False, edgecolor="black", lw=5))
+                ax.add_patch(Rectangle((3, 4), 1, 1, fill=False, edgecolor="black", lw=5))
+                for k in [9, 13]:
+                    ax.add_patch(Rectangle((1, k), 1, 1, fill=False, edgecolor="black", lw=5))
+                    ax.add_patch(Rectangle((3, k), 1, 1, fill=False, edgecolor="black", lw=5))
+                    ax.add_patch(Rectangle((9, k), 1, 1, fill=False, edgecolor="black", lw=5))
+
+            ax1.set_title("diff")
+            ax2.set_title("ioi")
+            ax3.set_title("abc")
+            ax1.set_yticklabels(y_ls, rotation=0)
+
+            plt.savefig(output_dir + "attn_weight_L{}H{}_diff_ioi_abc".format(L, H) + ".png")
+            plt.close("all")

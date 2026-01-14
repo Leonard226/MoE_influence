@@ -1,7 +1,7 @@
 import torch
 import einops
-from tools.plot import tril_drawer_TAM, matrix_drawer_H_token_head, scatter_drawer_H_expert, scatter_drawer_H_head, matrix_drawer_H_with_sum
-
+from tools.plot import tril_drawer_TAM, matrix_drawer_H_token_head, scatter_drawer_H_expert, scatter_drawer_H_head, matrix_drawer_H_with_sum, M_drawer, matrix_attn_weight_verbose, matrix_attn_weight_comparison_verbose
+from tqdm import tqdm
 def rmsnorm_breakdown(vector, components, layer_id, model, variance_epsilon=1e-05):
     """ Apply RMSNorm on the components (Single prompt)
     :param1 vector: the input of a RMSNorm
@@ -46,7 +46,7 @@ def decompose_TAM_verbose(prompt_ls, model, tokenizer, router_weight_ls, top_n, 
     print(layer_input.shape, attn_output.shape, after_res1.shape, after_norm2.shape, mlp_output.shape)
 
     n_layers = len(router_weight_ls)
-    n_experts = router_weight_ls[1].shape[0]
+    n_experts = router_weight_ls[1].shape[0] # DeepSeekMoE layer 0 is not MoE, so here we preset it to 1
 
     token_score = torch.zeros((n_tokens, n_layers, n_experts, 1))
     token_cumulative_score = torch.zeros((n_tokens, n_layers, 1))
@@ -370,3 +370,125 @@ def decompose_H_verbose(prompt_ls, model, tokenizer, router_weight_ls, top_n, ou
                 # print("key=Token 9, positive score rate:", (decomposed_attn_score > 0).sum(dim=0).reshape(n_tokens, n_heads)[9, :])
 
     return expert_ids_by_rank
+
+def decompose_M_verbose(prompt_ls, model, tokenizer, router_weight_ls, top_k, output_dir):
+    """ Decomposition: single prompt, experts (M).
+        Note that top_k is fixed.
+    """
+    ## run
+    batch_token = tokenizer(prompt_ls, return_tensors="pt")
+    _, hook_dict = model(input_ids=batch_token["input_ids"], attention_mask=batch_token["attention_mask"])
+    ## collect info
+    n_tokens = torch.sum(batch_token["attention_mask"])
+    tokens_str = [tokenizer.decode(x) for x in batch_token["input_ids"][0]]
+
+    after_res1 = hook_dict["hook_after_res1"].squeeze(0) # shape: [n_layers, n_tokens, n_dim]
+    after_norm2 = hook_dict["hook_after_norm2"].squeeze(0) # shape: [n_layers, n_tokens, n_dim]
+    expert_weighted_outputs = hook_dict["hook_expert_weighted_outputs"].squeeze(0) # shape: [n_layers, n_tokens, original_top_k, n_dim]
+    # print(after_res1.shape, after_norm2.shape, expert_weighted_outputs.shape)
+
+    n_layers = len(router_weight_ls)
+    n_experts = router_weight_ls[1].shape[0]
+
+    for send_L in range(0, n_layers): # sending layer
+        for recv_L in range(send_L, n_layers): # receiving layer
+            router_weight_vectors = router_weight_ls[recv_L]
+            for T in range(n_tokens): # examined token
+                if T != 9 or recv_L != 3 or send_L != 1:
+                    continue
+                # if T != 13:
+                #     continue
+
+                ## decomposition
+                expert_outs = expert_weighted_outputs[send_L, T] # shape: [original_top_k, n_dim]
+                expert_out_rmsnorm = rmsnorm_breakdown(after_res1[recv_L,T], [expert_outs], recv_L, model)[0] # shape: [original_top_k, n_dim]
+
+                ## score
+                decomposed_expert_out_score = torch.matmul(router_weight_vectors, expert_out_rmsnorm.T) # shape: [n_experts, original_top_k]
+
+                ## expert selection
+                original_score = torch.matmul(router_weight_vectors, after_norm2[recv_L, T])
+                original_top_k_experts = torch.argsort(original_score, descending=True)[:top_k]
+                # print("layer{}, token{}: {}".format(recv_L, T, original_top_k_experts))
+
+                ## checker
+                # print("CHECK: shape:", expert_out_rmsnorm.shape, decomposed_expert_out_score.shape)
+                
+                M_drawer(decomposed_expert_out_score, original_top_k_experts, "score_assignment_T{}send_M{}recv_M{}".format(T, send_L, recv_L), output_dir, "score_assignment_T{}send_M{}recv_M{}".format(T, send_L, recv_L))
+
+def attn_weights_verbose(prompt_ls, model, tokenizer, output_dir):
+    """ attention weights. (pre-softmax & post-softmax) """
+    ## run
+    batch_token = tokenizer(prompt_ls, return_tensors="pt")
+    _, hook_dict = model(input_ids=batch_token["input_ids"], attention_mask=batch_token["attention_mask"])
+    ## collect info
+    tokens_str = [tokenizer.decode(x) for x in batch_token["input_ids"][0]]
+    attn_weights = hook_dict["hook_attn_weights"].squeeze(0) # shape: [n_layers, n_heads, Q_n_tokens, K_n_tokens]
+    attn_weights_before_softmax = hook_dict["hook_attn_weights_before_softmax"].squeeze(0) # shape: [n_layers, n_heads, Q_n_tokens, K_n_tokens]
+    n_layers, n_heads, _, _ = attn_weights.shape
+    print(attn_weights.shape, attn_weights_before_softmax.shape)
+
+    ## examples
+    L, H, T = 1, 4, 9
+    matrix_drawer_H_token_head(attn_weights[L, H], "attn_weights_L{}H{}".format(L, H), output_dir, (13, 13), [], tokens_str, "attn_weights_L{}H{}".format(L, H), xlabel="Key Token", ylabel="Query Token")
+    
+    matrix_attn_weight_verbose(attn_weights[L, :, T, :(T + 1)], "attn_weights_L{}T{}".format(L, T), output_dir, figsize=(13, 13), title="attn_weights_L{}T{}".format(L, T), xlabel="Key Token", ylabel="Head")
+    matrix_attn_weight_verbose(attn_weights_before_softmax[L, :, T, :(T + 1)], "attn_weights_before_softmax_L{}T{}".format(L, T), output_dir, figsize=(13, 13), title="attn_weights_before_softmax_L{}T{}".format(L, T), xlabel="Key Token", ylabel="Head")
+
+def attn_weights_comparison_verbose(prompt_ls, model, tokenizer, output_dir):
+    """ same as function 'attn_weights_verbose', but demonstrate two prompts simultaneously for comparison
+    len(prompt_ls) == 2
+    """
+    ## run
+    batch_token = tokenizer(prompt_ls, return_tensors="pt")
+    _, hook_dict = model(input_ids=batch_token["input_ids"], attention_mask=batch_token["attention_mask"])
+    ## collect info
+    tokens_str = [tokenizer.decode(x) for x in batch_token["input_ids"][0]]
+    attn_weights = hook_dict["hook_attn_weights"] # shape: [2, n_layers, n_heads, Q_n_tokens, K_n_tokens]
+
+    ## example
+    matrix_attn_weight_comparison_verbose(attn_weights[0], attn_weights[1], tokens_str, output_dir)
+
+def attn_weights_score_comparison_verbose(prompt_ls, model, tokenizer, router_weight_ls, top_n, output_dir):
+    """ Find the correlation between attention weights and the expert scores assigned by output of attention heads. """
+    ## run
+    batch_token = tokenizer(prompt_ls, return_tensors="pt")
+    _, hook_dict = model(input_ids=batch_token["input_ids"], attention_mask=batch_token["attention_mask"])
+    ## collect info
+    tokens_str = [tokenizer.decode(x) for x in batch_token["input_ids"][0]]
+    attn_v = hook_dict["hook_v"].squeeze(0) # shape: [n_layers, n_heads, n_tokens, head_dim]
+    attn_weights = hook_dict["hook_attn_weights"].squeeze(0) # shape: [n_layers, n_heads, n_tokens, n_tokens] # first n_tokens -> queries , second n_tokens -> keys
+    after_res1 = hook_dict["hook_after_res1"].squeeze(0) # shape: [n_layers, n_tokens, n_dim]
+    after_norm2 = hook_dict["hook_after_norm2"].squeeze(0) # shape: [n_layers, n_tokens, n_dim]
+    n_layers, n_heads, n_tokens, _ = attn_weights.shape
+    n_experts, n_dim = router_weight_ls[1].shape
+    
+    decomposed_score_collect = torch.zeros((n_layers, n_layers, n_tokens, n_tokens, n_heads, n_experts)) # [recv_L, send_L, Q, K, H, E]
+    decomposed_score_topk_sum_collect = torch.zeros((n_layers, n_layers, n_tokens, n_tokens, n_heads))
+
+    for send_L in tqdm(range(0, n_layers)): # sending layer
+        decomposed_attn_out = decompose_attn_out_helper(attn_v[send_L], attn_weights[send_L], send_L, model) # shape: [n_tokens, n_tokens, n_heads, n_dim] first n_tokens: queries, second n_tokens: keys
+        for recv_L in range(send_L, n_layers): # receiving layer
+            router_weight_vectors = router_weight_ls[recv_L]
+            for T in range(n_tokens): # examined token (query token)
+                # print("send_L{} recv_L{} T{}".format(send_L, recv_L, T))
+
+                ## decomposition
+                decomposed_attn_out_rmsnorm = rmsnorm_breakdown(after_res1[recv_L, T], [decomposed_attn_out[T].reshape(-1, n_dim)], recv_L, model)[0] # shape: [n_tokens * n_heads, n_dim]
+                
+                ## score
+                decomposed_attn_out_score = torch.matmul(router_weight_vectors, decomposed_attn_out_rmsnorm.T) # [n_experts, n_tokens * n_heads]
+                decomposed_score_collect[recv_L, send_L, T] = decomposed_attn_out_score.reshape(n_experts, n_tokens, n_heads).permute(1, 2, 0)
+                
+                original_score = torch.matmul(router_weight_vectors, after_norm2[recv_L, T])
+                top_n_experts = torch.argsort(original_score, descending=True)[:top_n]
+                decomposed_score_topk_sum_collect[recv_L, send_L, T] = decomposed_attn_out_score[top_n_experts].sum(0).reshape(n_tokens, n_heads)
+    
+    corr_mat = torch.zeros((n_layers, n_tokens))
+    for L in range(n_layers): # sending layer
+        for T in range(n_tokens): # query
+            # print(torch.corrcoef(torch.stack((attn_weights[L, :, T].flatten(), decomposed_score_topk_sum_collect[L, L, T].flatten()))))
+            corr_mat[L, T] = torch.corrcoef(torch.stack((attn_weights[L, :, T].flatten(), decomposed_score_topk_sum_collect[L, L, T].flatten())))[0,1] # each shape is [K * H]
+
+    matrix_drawer_H_token_head(corr_mat.T, "corr_mat", output_dir, figsize=(13,13), add_patch=[], token_ls=tokens_str, title="correlation between attn_weights and the sum of scores of top_K expert", xlabel="Layer", ylabel="Token", need_description=True)
+    return
