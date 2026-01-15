@@ -4,16 +4,16 @@ from tools.plot import tril_drawer_TAM, matrix_drawer_H_token_head, scatter_draw
 from tqdm import tqdm
 def rmsnorm_breakdown(vector, components, layer_id, model, variance_epsilon=1e-05):
     """ Apply RMSNorm on the components (Single prompt)
-    :param1 vector: the input of a RMSNorm
+    :param1 vector: the input of a RMSNorm, shape: [n_dim]
     :param2 components: components of the "vector". Note that their sum should be equal to the "vector".
     :param3 layer_id: which layer? Should be an integer.
     :param4 model: assigned model
     :param5 variance_epsilon: term for numerical stability
     :return: a list of RMSNorm-ed components
     """
-    variance = vector.pow(2).mean(-1, keepdim=True)
-    rsqrt = torch.rsqrt(variance + variance_epsilon)
-    weight = model.model.layers[layer_id].post_attention_layernorm.weight.data
+    variance = vector.pow(2).mean(-1, keepdim=True) # shape: [1]
+    rsqrt = torch.rsqrt(variance + variance_epsilon) # shape: [1]
+    weight = model.model.layers[layer_id].post_attention_layernorm.weight.data # shape: [n_dim]
     breakdowns = [weight * (i * rsqrt) for i in components]
     return breakdowns
 
