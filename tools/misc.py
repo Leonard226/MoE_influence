@@ -464,87 +464,85 @@ def G_matrix_analysis(router_weight_ls):
     # print(G_eigs[:, -1]) # maxs
 
 ## NOTE: the following code is unchecked
-# from tqdm import tqdm
-# import plotly.express as px
+from tqdm import tqdm
+import plotly.express as px
+from tools.analyze import logit_diff_batch, prob_batch, matrix_drawer_patch
 
-# def activation_patching(prompt_dict_ls_ORIG, prompt_dict_ls_NEW, model, tokenizer, send_info, recv_info, output_dir, n_layers, n_heads, bsz=20):
-#     def logit_diff_batch(logits, token_id1_ls, token_id2_ls):
-#         """Logit difference (Multiple prompts)
-#         :param1 logits: shape: [n_prompts, vocab_size]
-#         :param2 token_id1_ls: shape: [n_prompts]
-#         :param3 token_id2_ls: shape: [n_prompts]
-#         :return: shape: [n_prompts]
-#         """
-#         return logits[torch.arange(logits.shape[0]), token_id1_ls] - logits[torch.arange(logits.shape[0]), token_id2_ls]
-#     ## prepration
-#     prompt_ls_ORIG = [ i["text"] for i in prompt_dict_ls_ORIG ]
-#     prompt_ls_NEW = [ i["text"] for i in prompt_dict_ls_NEW ]
-#     io_token_id_ls_ORIG = torch.tensor([ i["IO_token_id"][0] for i in prompt_dict_ls_ORIG ], dtype=torch.int) ## NOTE: possible variant: ["IO_token_id"] for GPT2
-#     s1_token_id_ls_ORIG = torch.tensor([ i["S_token_id"][0] for i in prompt_dict_ls_ORIG ], dtype=torch.int) ## NOTE: possible variant: ["S1_token_id"] for GPT2
-#     end_token_pos_ls_ORIG = torch.tensor([ i["END_token_pos"] for i in prompt_dict_ls_ORIG ], dtype=torch.int)
-#     recv_type = recv_info["type"]
-#     print(recv_type)
-#     ## metrics
-#     n_prompts = len(prompt_dict_ls_ORIG)
-#     logit_diff_matrix = torch.zeros((n_prompts, n_layers, n_heads, len(recv_type)))
-#     logit_diff_ORIG = torch.zeros((n_prompts))
-#     prob_io_name_matrix = torch.zeros((n_prompts, n_layers, n_heads, len(recv_type)))
-#     prob_io_name_ORIG = torch.zeros((n_prompts))
-#     prob_s_name_matrix = torch.zeros((n_prompts, n_layers, n_heads, len(recv_type)))
-#     prob_s_name_ORIG = torch.zeros((n_prompts))
-#     for B in tqdm(range(0, n_prompts, bsz)):
-#         ## tokenization
-#         batch_token_ORIG = tokenizer(prompt_ls_ORIG[B:B+bsz], return_tensors="pt", padding=True)
-#         batch_token_NEW = tokenizer(prompt_ls_NEW[B:B+bsz], return_tensors="pt", padding=True)
-#         ## token positions, token id's
-#         cur_bsz = len(batch_token_ORIG["input_ids"]) # current batch size
-#         send_token_pos_ls = torch.tensor(send_info["token_pos_ls"][B:B+cur_bsz]) # positions of sending tokens
-#         recv_token_pos_ls = torch.tensor(recv_info["token_pos_ls"][B:B+cur_bsz]) # positions of receiving tokens
-#         io_name_id_ls = io_token_id_ls_ORIG[B:B+cur_bsz] # id's of IO tokens
-#         s1_name_id_ls = s1_token_id_ls_ORIG[B:B+cur_bsz] # id's of S1 tokens
-#         ## input
-#         model_outputs_ORIG, hook_dict_ORIG = model(input_ids=batch_token_ORIG["input_ids"], attention_mask=batch_token_ORIG["attention_mask"]) # forward pass B
-#         _, hook_dict_NEW = model(input_ids=batch_token_NEW["input_ids"], attention_mask=batch_token_NEW["attention_mask"]) # forward pass A
-#         ## prediction
-#         prediction_ORIG = model_outputs_ORIG[0][torch.arange(cur_bsz), end_token_pos_ls_ORIG[B:B+cur_bsz]]
-#         ## metrics
-#         logit_diff_ORIG[B:B+bsz] = logit_diff_batch(prediction_ORIG, io_name_id_ls, s1_name_id_ls)
-#         # prob_io_ORIG[B:B+bsz] = prob(prediction_ORIG, io_name_id_ls)
-#         # prob_s_ORIG[B:B+bsz] = prob(prediction_ORIG, s_name_id_ls)
-#         ## preparation
-#         # q2_CORR = hook_dict_CORR["hook_q2"]
-#         # k2_CORR = hook_dict_CORR["hook_k2"]
-#         ## Now, patching # patch_pos_q, patch_pos_k are used in fine grain patch
-#         for L in range(0, n_layers):
-#             for H in range(0, n_heads):
-#                 for cur_patch_type, counter in zip(recv_type, range(len(recv_type))):
-#                     patch_ls = None
-#                     match cur_patch_type:
-#                         case "q":
-#                             patch_ls = [["q_head", L, H, recv_token_pos_ls, hook_dict_NEW["hook_q"][torch.arange(cur_bsz), L, H, recv_token_pos_ls]]]
-#                         case "k":
-#                             patch_ls = [["k_head", L, H, recv_token_pos_ls, hook_dict_NEW["hook_k"][torch.arange(cur_bsz), L, H, recv_token_pos_ls]]]
-#                         case "v":
-#                             patch_ls = [["v_head", L, H, recv_token_pos_ls, hook_dict_NEW["hook_v"][torch.arange(cur_bsz), L, H, recv_token_pos_ls]]]
-#                         case "o":
-#                             # patch_ls = [["before_matmul_wo_activation_patching", L, H, recv_token_pos_ls, hook_dict_NEW["hook_before_matmul_wo"][torch.arange(cur_bsz), L, H, recv_token_pos_ls]]] # NOTE: for OLMoE
-#                             patch_ls = [["before_matmul_wo_activation_patching", L, H, recv_token_pos_ls, hook_dict_NEW["hook_before_matmul_wo"][torch.arange(cur_bsz), L, recv_token_pos_ls, H]]] # NOTE: for GPT2
-#                         case "Q": # "q2->one_token"
-#                             pass
-#                         case "K": # "k2->one_token"
-#                             pass
-#                         case "V": # "v->one_token"
-#                             pass
-#                     model_outputs_P, _ = model(input_ids=batch_token_ORIG["input_ids"], attention_mask=batch_token_ORIG["attention_mask"], patching=patch_ls)
-#                     prediction_P = model_outputs_P[0][torch.arange(cur_bsz), end_token_pos_ls_ORIG[B:B+cur_bsz]]
-#                     logit_diff_matrix[B:B+cur_bsz, L, H, counter] = logit_diff_batch(prediction_P, io_name_id_ls, s1_name_id_ls)
-#                     ## TODO: prob...
-#     logit_diff_ORIG = logit_diff_ORIG.unsqueeze(1).repeat(1, n_layers * n_heads * len(recv_type)).reshape(n_prompts, n_layers, n_heads, len(recv_type))
-#     logit_diff_normalized_matrix = torch.div(logit_diff_matrix - logit_diff_ORIG, logit_diff_ORIG).mean(0)
-#     for cur_recv_type, counter in zip(recv_type, range(len(recv_type))):
-#         fig = px.imshow(logit_diff_normalized_matrix[:,:,counter].detach().cpu().numpy(), color_continuous_scale="RdBu", color_continuous_midpoint=0,)
-#         fig.update_xaxes(side="top")
-#         fig.show()
+def activation_patching(prompt_dict_ls_ORIG, prompt_dict_ls_NEW, model, tokenizer, send_info, recv_info, output_dir, n_layers, n_heads, bsz=20, demo_now=False):
+    ## prepration
+    prompt_ls_ORIG = [ i["text"] for i in prompt_dict_ls_ORIG ]
+    prompt_ls_NEW = [ i["text"] for i in prompt_dict_ls_NEW ]
+    io_token_id_ls_ORIG = torch.tensor([ i["IO_token_id"][0] for i in prompt_dict_ls_ORIG ], dtype=torch.int)
+    s1_token_id_ls_ORIG = torch.tensor([ i["S_token_id"][0] for i in prompt_dict_ls_ORIG ], dtype=torch.int)
+    end_token_pos_ls_ORIG = torch.tensor([ i["END_token_pos"] for i in prompt_dict_ls_ORIG ], dtype=torch.int)
+    recv_type = recv_info["type"]
+
+    ## metrics
+    n_prompts = len(prompt_dict_ls_ORIG)
+    logit_diff_matrix = torch.zeros((n_prompts, n_layers, n_heads, len(recv_type)))
+    logit_diff_ORIG = torch.zeros((n_prompts))
+    prob_io_name_matrix = torch.zeros((n_prompts, n_layers, n_heads, len(recv_type)))
+    prob_io_name_ORIG = torch.zeros((n_prompts))
+
+    for B in tqdm(range(0, n_prompts, bsz)):
+        ## tokenization
+        batch_token_ORIG = tokenizer(prompt_ls_ORIG[B:B+bsz], return_tensors="pt", padding=True)
+        batch_token_NEW = tokenizer(prompt_ls_NEW[B:B+bsz], return_tensors="pt", padding=True)
+        ## token positions, token id's
+        cur_bsz = len(batch_token_ORIG["input_ids"]) # current batch size
+        # send_token_pos_ls = torch.tensor(send_info["token_pos_ls"][B:B+cur_bsz]) # positions of sending tokens
+        recv_token_pos_ls = torch.tensor(recv_info["token_pos_ls"][B:B+cur_bsz]) # positions of receiving tokens
+        io_name_id_ls = io_token_id_ls_ORIG[B:B+cur_bsz] # id's of IO tokens
+        s1_name_id_ls = s1_token_id_ls_ORIG[B:B+cur_bsz] # id's of S1 tokens
+        ## input
+        model_outputs_ORIG, hook_dict_ORIG = model(input_ids=batch_token_ORIG["input_ids"], attention_mask=batch_token_ORIG["attention_mask"]) # forward pass B
+        _, hook_dict_NEW = model(input_ids=batch_token_NEW["input_ids"], attention_mask=batch_token_NEW["attention_mask"]) # forward pass A
+        ## prediction
+        prediction_ORIG = model_outputs_ORIG[0][torch.arange(cur_bsz), end_token_pos_ls_ORIG[B:B+cur_bsz]]
+        ## metrics
+        logit_diff_ORIG[B:B+bsz] = logit_diff_batch(prediction_ORIG, io_name_id_ls, s1_name_id_ls)
+        prob_io_name_ORIG[B:B+bsz] = prob_batch(prediction_ORIG, io_name_id_ls)
+        ## preparation
+        # q2_CORR = hook_dict_CORR["hook_q2"]
+        # k2_CORR = hook_dict_CORR["hook_k2"]
+        ## Now, patching # patch_pos_q, patch_pos_k are used in fine grain patch
+        for L in range(0, n_layers):
+            for H in range(0, n_heads):
+                for counter, cur_recv_type in enumerate(recv_type):
+                    patch_ls = None
+                    match cur_recv_type:
+                        case "q":
+                            patch_ls = [["q_head", L, H, recv_token_pos_ls, hook_dict_NEW["hook_q"][torch.arange(cur_bsz), L, H, recv_token_pos_ls]]]
+                        case "k":
+                            patch_ls = [["k_head", L, H, recv_token_pos_ls, hook_dict_NEW["hook_k"][torch.arange(cur_bsz), L, H, recv_token_pos_ls]]]
+                        case "v":
+                            patch_ls = [["v_head", L, H, recv_token_pos_ls, hook_dict_NEW["hook_v"][torch.arange(cur_bsz), L, H, recv_token_pos_ls]]]
+                        case "o":
+                            bmw_C = hook_dict_ORIG["hook_before_matmul_wo"][:, L].detach().clone()
+                            bmw_C[torch.arange(cur_bsz), H, recv_token_pos_ls] = hook_dict_NEW["hook_before_matmul_wo"][torch.arange(cur_bsz), L, H, recv_token_pos_ls] # NOTE: for OLMoE
+                            # bmw_C[torch.arange(cur_bsz), recv_token_pos_ls, H] = hook_dict_NEW["hook_before_matmul_wo"][torch.arange(cur_bsz), L, recv_token_pos_ls, H] # NOTE: for GPT2
+                            patch_ls = [["before_matmul_wo", L, H, bmw_C]]
+                        case "Q": # "q2->one_token"
+                            pass
+                        case "K": # "k2->one_token"
+                            pass
+                        case "V": # "v->one_token"
+                            pass
+                    model_outputs_P, _ = model(input_ids=batch_token_ORIG["input_ids"], attention_mask=batch_token_ORIG["attention_mask"], patching=patch_ls)
+                    prediction_P = model_outputs_P[0][torch.arange(cur_bsz), end_token_pos_ls_ORIG[B:B+cur_bsz]]
+                    logit_diff_matrix[B:B+cur_bsz, L, H, counter] = logit_diff_batch(prediction_P, io_name_id_ls, s1_name_id_ls)
+                    prob_io_name_matrix[B:B+cur_bsz, L, H, counter] = prob_batch(prediction_P, io_name_id_ls)
+
+    logit_diff_ORIG = logit_diff_ORIG.unsqueeze(1).repeat(1, n_layers * n_heads * len(recv_type)).reshape(n_prompts, n_layers, n_heads, len(recv_type))
+    logit_diff_normalized_matrix = torch.div(logit_diff_matrix - logit_diff_ORIG, logit_diff_ORIG).mean(0)
+
+    for counter, cur_recv_type in enumerate(recv_type):
+        if output_dir is not None:
+                matrix_drawer_patch(logit_diff_normalized_matrix[:, :, counter], "logit_diffs_normalized_{}".format(cur_recv_type), output_dir, title="logit_diffs_normalized_{}".format(cur_recv_type))
+        if demo_now:
+            fig = px.imshow(logit_diff_normalized_matrix[:, :, counter].detach().cpu().numpy(), color_continuous_scale="RdBu", color_continuous_midpoint=0, title="logit_diffs_normalized_{}".format(cur_recv_type), labels=dict(x="Head", y="Layer", color="Logit diff. variation"))
+            fig.update_xaxes(side="top")
+            fig.show()
 
 # def check_prob(prompt):
 #     ## TODO: fix this function

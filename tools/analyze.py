@@ -6,6 +6,7 @@ import matplotlib.colors as mcolors
 import seaborn as sns
 from matplotlib.patches import Rectangle
 import plotly.express as px
+from tqdm import tqdm
 
 def matrix_drawer_patch(data, name, output_dir, figsize=(13, 13), add_patch=[], title="", xlabel="Head", ylabel="Layer", need_description=False):
     """ matrix for path patching """
@@ -31,7 +32,7 @@ def matrix_drawer_patch(data, name, output_dir, figsize=(13, 13), add_patch=[], 
     cbar = ax.collections[0].colorbar
     cbar.ax.tick_params(labelsize=30)
     cbar.ax.set_title("Logit diff.\nvariation", fontsize=30, pad=5)
-    cbar.set_ticklabels(["-20%", "0%", "20%", "40%"])
+    # cbar.set_ticklabels(["-20%", "0%", "20%", "40%"])
     plt.xticks([k + 0.5 for k in range(0, data.shape[1], 5)], [str(k) for k in range(0, data.shape[1], 5)], fontsize=30)
     plt.yticks([k + 0.5 for k in range(0, data.shape[0], 5)], [str(k) for k in range(0, data.shape[0], 5)], fontsize=30, rotation=0)
     if need_description:
@@ -187,3 +188,122 @@ def decompose_attn_out_helper_batch(v, pattern, n_layers, model):
     W_O = einops.rearrange(W_O, "n_layers d_model (index d_head)->n_layers index d_head d_model", index=16) # n_heads = 16
     decomposed_attn = torch.einsum("PSQKHA,SHAD->PSQKHD", z, W_O.float())
     return decomposed_attn
+
+def path_patching(prompt_dict_ls_ORIG, prompt_dict_ls_NEW, model, tokenizer, send_info, recv_info, output_dir, n_layers, n_heads, bsz=20, demo_now=False):
+    """ Figure *a (Appendix)
+        path patching: For more info, check https://github.com/redwoodresearch/Easy-Transformer 
+        example (GPT-2):
+        prompt_orig = "After the lunch, Matthew and Andrew went to the hospital. Matthew gave a basketball to Andrew" # Matthew: 9308, Andrew: 6858
+        prompt_new = "After the lunch, Erin and Tiffany went to the hospital. Jesse gave a basketball to Tiffany" # Erin: 28894, Tiffany: 40928, Jesse: 18033
+        prompt_dict_ls_ORIG = [{"text":prompt_orig, "IO_token_id":[6858], "S_token_id":[9308], "S2_token_id":[9308], "END_token_pos":16}] * 10
+        prompt_dict_ls_NEW = [{"text":prompt_new, "IO_token_id":[40928], "S_token_id":[28894], "S2_token_id":[18033], "END_token_pos":16}] * 10
+        send_info = {"token_pos_ls":([16]*10)} # example: [ i[END_token_pos] for i in prompt_dict_ls_ORIG ]
+        recv_info = {"type":"l","token_pos_ls":([16]*10)}
+        # send_info = {"token_pos_ls":([12]*10)}
+        # recv_info = {"type":"qkv","token_pos_ls":([12]*10),"head_pos":[(7, 3), (7, 9), (8, 6), (8, 10)]}
+    """
+
+    ## preparation
+    prompt_ls_ORIG = [ i["text"] for i in prompt_dict_ls_ORIG ]
+    prompt_ls_NEW = [ i["text"] for i in prompt_dict_ls_NEW ]
+    io_token_id_ls_ORIG = torch.tensor([ i["IO_token_id"][0] for i in prompt_dict_ls_ORIG ], dtype=torch.int)
+    s1_token_id_ls_ORIG = torch.tensor([ i["S_token_id"][0] for i in prompt_dict_ls_ORIG ], dtype=torch.int)
+    end_token_pos_ls_ORIG = torch.tensor([ i["END_token_pos"] for i in prompt_dict_ls_ORIG ], dtype=torch.int)
+    recv_type = recv_info["type"]
+
+    ## metrics
+    n_prompts = len(prompt_dict_ls_ORIG)
+    logit_diff_matrix = torch.zeros((n_prompts, n_layers, n_heads, len(recv_type)))
+    logit_diff_ORIG = torch.zeros((n_prompts))
+    prob_io_name_matrix = torch.zeros((n_prompts, n_layers, n_heads, len(recv_type)))
+    prob_io_name_ORIG = torch.zeros((n_prompts))
+
+    ## Now, process X_ORIG (forward pass B), X_NEW (forward pass A)
+    for B in tqdm(range(0, n_prompts, bsz)):
+        ## tokenization
+        batch_token_ORIG = tokenizer(prompt_ls_ORIG[B:B+bsz], return_tensors="pt", padding=True)
+        batch_token_NEW = tokenizer(prompt_ls_NEW[B:B+bsz], return_tensors="pt", padding=True)
+        ## token positions, token id's
+        cur_bsz = len(batch_token_ORIG["input_ids"]) # current batch size
+        send_token_pos_ls = torch.tensor(send_info["token_pos_ls"][B:B+cur_bsz]) # positions of sending tokens
+        recv_token_pos_ls = torch.tensor(recv_info["token_pos_ls"][B:B+cur_bsz]) # positions of receiving tokens
+        io_name_id_ls = io_token_id_ls_ORIG[B:B+cur_bsz] # id's of IO tokens
+        s1_name_id_ls = s1_token_id_ls_ORIG[B:B+cur_bsz] # id's of S1 tokens
+        # print(prompt_ls_ORIG[0], send_token_pos_ls[0], recv_token_pos_ls[0], io_name_id_ls[0], s1_name_id_ls[0], batch_token_ORIG["input_ids"][0]) # for check
+        ## input
+        model_outputs_ORIG, hook_dict_ORIG = model(input_ids=batch_token_ORIG["input_ids"], attention_mask=batch_token_ORIG["attention_mask"]) # forward pass B
+        _, hook_dict_NEW = model(input_ids=batch_token_NEW["input_ids"], attention_mask=batch_token_NEW["attention_mask"]) # forward pass A
+        ## prediction
+        prediction_ORIG = model_outputs_ORIG[0][torch.arange(cur_bsz), end_token_pos_ls_ORIG[B:B+cur_bsz]]
+        ## metrics
+        logit_diff_ORIG[B:B+bsz] = logit_diff_batch(prediction_ORIG, io_name_id_ls, s1_name_id_ls)
+        prob_io_name_ORIG[B:B+bsz] = prob_batch(prediction_ORIG, io_name_id_ls)
+        ## preparation
+        # attn_out_ORIG = hook_dict_ORIG["hook_attn_output"] # shape: [cur_bsz, n_layers, max_n_tokens, n_dim]
+        q_ORIG = hook_dict_ORIG["hook_q"] # shape: [cur_bsz, n_layers, n_heads, max_n_tokens, n_head_dim]
+        k_ORIG = hook_dict_ORIG["hook_k"] # shape: [cur_bsz, n_layers, n_heads, max_n_tokens, n_head_dim]
+        v_ORIG = hook_dict_ORIG["hook_v"] # shape: [cur_bsz, n_layers, n_heads, max_n_tokens, n_head_dim]
+        before_matmul_wo_ORIG = hook_dict_ORIG["hook_before_matmul_wo"] # shape: [cur_bsz, n_layers, n_heads, max_n_tokens, n_head_dim] (OLMoE) / [cur_bsz, n_layers, max_n_tokens, n_heads, n_head_dim] (GPT2)
+        before_matmul_wo_NEW = hook_dict_NEW["hook_before_matmul_wo"]
+        # print(q_ORIG.shape, k_ORIG.shape, v_ORIG.shape, before_matmul_wo_ORIG.shape)
+
+        ## Now, patching (forward pass C)
+        patch_C = []
+        # freeze all heads
+        for L in range(0, n_layers):# min_recv_layer_id):
+            patch_C.append(["q", L, q_ORIG[:, L]])
+            patch_C.append(["k", L, k_ORIG[:, L]])
+            patch_C.append(["v", L, v_ORIG[:, L]])
+        # replace sender (heads) one by one
+        for send_L in range(0, n_layers): # TODO: no need to loop if send_L >= deepest recv_L, may modify here to save time
+            for send_H in range(0, n_heads):
+                ## construct the patch
+                bmw_C = before_matmul_wo_ORIG[:,send_L].detach().clone()
+                bmw_C[torch.arange(cur_bsz), send_H, send_token_pos_ls] = before_matmul_wo_NEW[torch.arange(cur_bsz), send_L, send_H, send_token_pos_ls] # NOTE: for OLMoE
+                # NOTE: If need patching 2 tokens at the same time, add it here manually
+                # bmw_C[torch.arange(cur_bsz), send_token_pos_ls, send_H] = before_matmul_wo_NEW[torch.arange(cur_bsz), send_L, send_token_pos_ls, send_H] # NOTE: for GPT2
+
+                patch_C_extra = [["before_matmul_wo", send_L, send_H, bmw_C]]
+                model_outputs_C, hook_dict_C = model(input_ids=batch_token_ORIG["input_ids"], attention_mask=batch_token_ORIG["attention_mask"], patching=(patch_C + patch_C_extra))
+
+                prediction_C = model_outputs_C[0][torch.arange(cur_bsz), end_token_pos_ls_ORIG[B:B+cur_bsz]] # for check
+                # print("C", send_L, send_H, logit_diff_batch(prediction_C, io_name_id_ls, s1_name_id_ls)) # for check
+                for counter, cur_recv_type in enumerate(recv_type):
+                    if "l" == cur_recv_type: # last resid_post, so forward pass D is not necessary
+                        prediction_C = model_outputs_C[0][torch.arange(cur_bsz), end_token_pos_ls_ORIG[B:B+cur_bsz]]
+                        logit_diff_matrix[B:B+cur_bsz, send_L, send_H, counter] = logit_diff_batch(prediction_C, io_name_id_ls, s1_name_id_ls)
+                        prob_io_name_matrix[B:B+cur_bsz, send_L, send_H, counter] = prob_batch(prediction_C, io_name_id_ls)
+                    else: # "q"/"k"/"v"
+                        ## Now, patching (forward pass D)
+                        patch_D = []
+                        for d_L, d_H in recv_info["head_pos"]:
+                            match cur_recv_type: # can be compacted as one statement ... cur_recv_type + "_head" 
+                                case "q":
+                                    patch_D.append(["q_head", d_L, d_H, recv_token_pos_ls, hook_dict_C["hook_q"][torch.arange(cur_bsz), d_L, d_H, recv_token_pos_ls]])
+                                case "k":
+                                    patch_D.append(["k_head", d_L, d_H, recv_token_pos_ls, hook_dict_C["hook_k"][torch.arange(cur_bsz), d_L, d_H, recv_token_pos_ls]])
+                                case "v":
+                                    patch_D.append(["v_head", d_L, d_H, recv_token_pos_ls, hook_dict_C["hook_v"][torch.arange(cur_bsz), d_L, d_H, recv_token_pos_ls]])
+                        model_outputs_D, _ = model(input_ids=batch_token_ORIG["input_ids"], attention_mask=batch_token_ORIG["attention_mask"], patching=patch_D)
+                        prediction_D = model_outputs_D[0][torch.arange(cur_bsz), end_token_pos_ls_ORIG[B:B+cur_bsz]]
+                        # print("D", send_L, send_H, logit_diff_batch(prediction_D, io_name_id_ls, s1_name_id_ls)) # for check
+                        logit_diff_matrix[B:B+cur_bsz, send_L, send_H, counter] = logit_diff_batch(prediction_D, io_name_id_ls, s1_name_id_ls)
+                        prob_io_name_matrix[B:B+cur_bsz, send_L, send_H, counter] = prob_batch(prediction_D, io_name_id_ls)
+    
+    logit_diff_ORIG = logit_diff_ORIG.unsqueeze(1).repeat(1, n_layers * n_heads * len(recv_type)).reshape(n_prompts, n_layers, n_heads, len(recv_type))
+    logit_diff_normalized_matrix = torch.div(logit_diff_matrix - logit_diff_ORIG, logit_diff_ORIG).mean(0)
+    # print(logit_diff_normalized_matrix)
+
+    prob_io_name_ORIG =prob_io_name_ORIG.unsqueeze(1).repeat(1, n_layers * n_heads * len(recv_type)).reshape(n_prompts, n_layers, n_heads, len(recv_type))
+    prob_io_name_diff_matrix = (prob_io_name_matrix - prob_io_name_ORIG).mean(0)
+    
+    for counter, cur_recv_type in enumerate(recv_type):
+        if output_dir is not None:
+            matrix_drawer_patch(logit_diff_normalized_matrix[:, :, counter], "logit_diffs_normalized_{}".format(cur_recv_type), output_dir, title="logit_diffs_normalized_{}".format(cur_recv_type))
+        if demo_now:
+            fig = px.imshow(logit_diff_normalized_matrix[:, :, counter].detach().cpu().numpy(), color_continuous_scale="RdBu", color_continuous_midpoint=0, title="logit_diffs_normalized_{}".format(cur_recv_type), labels=dict(x="Head", y="Layer", color="Logit diff. variation"))
+            fig.update_xaxes(side="top")
+            fig.show()
+            # fig = px.imshow(prob_io_name_diff_matrix[:, :, counter].detach().cpu().numpy(), color_continuous_scale="RdBu", color_continuous_midpoint=0, title="prob_io_name_diff_{}".format(cur_recv_type), labels=dict(x="Head", y="Layer", color="Prob diff"))
+            # fig.update_xaxes(side="top")
+            # fig.show()
