@@ -7,6 +7,7 @@ import seaborn as sns
 from matplotlib.patches import Rectangle
 import plotly.express as px
 from tqdm import tqdm
+import nltk
 
 def matrix_drawer_patch(data, name, output_dir, figsize=(13, 13), add_patch=[], title="", xlabel="Head", ylabel="Layer", need_description=False):
     """ matrix for path patching """
@@ -43,7 +44,7 @@ def matrix_drawer_patch(data, name, output_dir, figsize=(13, 13), add_patch=[], 
     plt.savefig(output_dir + name + ".pdf", bbox_inches="tight", pad_inches=0.01)
     plt.close("all")
 
-def tril_drawer_tam(data, name, output_dir, figsize=(11,11), diagonal=1, add_patch=[], title="", xlabel="", ylabel="", need_lognorm=False, need_description=True, tick_mode=None, cbar_label=None, need_no_annotations=True, demo_now=False):
+def tril_drawer_tam_analyze(data, name, output_dir, figsize=(11,11), diagonal=1, add_patch=[], title="", xlabel="", ylabel="", need_lognorm=False, need_description=True, tick_mode=None, cbar_label=None, need_no_annotations=True, demo_now=False):
     """ lower triangular matrix. for moe->moe, diagnoal=0; for attn->moe, diagonal=1. """
     data = data.detach().cpu().numpy()
     
@@ -154,29 +155,106 @@ def prob_batch(logits, token_id_ls):
     return probs[torch.arange(probs.shape[0]), token_id_ls]
 
 def rmsnorm_breakdown_batch(vector, components, model, mode="default", variance_epsilon=1e-05, device="cuda:0"):
+    """
+    Break down the input into components.
+    Original RMSNorm(x) = c * gamma * rsqrt(x)
+    Contribution of a component: RMSNorm(c) = c * gamma * rsqrt(x)
+    :param vector: the vector to be decomposed. NOTE: the decomposition is linear. the vector is the input of an MoE layer.
+    :param components: the components of the input "vector". NOTE: the components contribute to the numerator.
+    :param model: assigned model
+    :param mode: type of decomposition
+    :param variance_epsilon: just adopt the setting in the original implementation
+    :param device: you can assign another gpu to relieve the burden
+    """
+    n_prompts_B, n_layers, n_tokens, n_dim = vector.shape
+    variance = vector.to(device).pow(2).mean(-1, keepdim=True) # shape: [n_prompts_B, n_layers, n_tokens, 1]
+    rsqrt = torch.rsqrt(variance + variance_epsilon) # shape: [n_prompts_B, n_layers, n_tokens, 1]
+    weight = torch.stack([model.model.layers[layer_id].post_attention_layernorm.weight.data.to(device) for layer_id in range(n_layers)], dim=0) # shape: [n_layers, n_dim]
+    weight_to_test = weight.view(1, n_layers, 1, n_dim).expand(*vector.shape) ## to be tested
+    print(weight.shape)
+    weight = weight.repeat(n_prompts_B * n_tokens, 1, 1).reshape(n_prompts_B, n_tokens, n_layers, n_dim).permute(0, 2, 1, 3) # shape: [n_prompts_B, n_layers, n_tokens, n_dim]
+    
+    if mode == "TAM": # P: prompt, R: receiving layer, S: sending layer, T: token, D: n_dim
+        breakdowns = [torch.einsum("PRTD,PSTD->PRSTD", rsqrt * weight, i.to(device)) for i in components]
+    elif mode == "H": # P: prompt, R: receiving layer, S: sending layer, Q: q_token, K: k_token, H: head, D: n_dim
+        breakdowns = [torch.einsum("PRQD,PSQKHD->PRSQKHD", rsqrt * weight, i.to(device)) for i in components]
+    elif mode == "H_simplified": # unused in this file, TODO: check this branch
+        n_heads = components[0].shape[4]
+        tmp_results = torch.zeros((n_prompts_B, n_layers, n_tokens, n_tokens, n_heads, n_dim))
+        for j in range(n_layers):
+            tmp_results[:, j, ...] = torch.einsum("PQD,PQKHD->PQKHD", (rsqrt * weight)[:, j, ...], components[0][:, j, ...].to(device))
+        breakdowns = [tmp_results]
+        # simplified version, unchecked TODO: check it
+        # rsqrt_mul_weight = rsqrt * weight
+        # tmp_results = rsqrt_mul_weight.unsqueeze(3).unsqueeze(4) * components[0].to(device)
+        # breakdowns = [tmp_results]
+    elif mode == "H_agnostic":
+        breakdowns = [torch.einsum("PRQD,PSQHD->PRSQHD", rsqrt * weight, i.to(device)) for i in components]
+    elif mode == "E": # P: prompt, R: receiving layer, S: sending layer, T: token, D: n_dim, E: n_experts
+        breakdowns = [torch.einsum("PRTD,PSTED->PRSTED", rsqrt * weight, i.to(device)) for i in components]
+    # else: # plain implementation, no longer used
+    #     breakdowns = [weight * (i * rsqrt) for i in components]
+    return breakdowns
+
+def ground_truth_diff(vector, components, model, mode="default", variance_epsilon=1e-05, device="cuda:0"):
+    """
+    Using RMSNorm(x) - RMSNorm(x-c) to compute the contribution of a component
+    
+    :param vector: the vector to be decomposed. NOTE: the decomposition is NOT linear. the vector is the input of an MoE layer.
+    :param components: the components of the input "vector".
+    :param model: assigned model
+    :param mode: type of decomposition
+    :param variance_epsilon: just adopt the setting in the original implementation
+    :param device: you can assign another gpu to relieve the burden
+    """
     n_prompts_B, n_layers, n_tokens, n_dim = vector.shape
     variance = vector.to(device).pow(2).mean(-1, keepdim=True) # shape: [n_prompts_B, n_layers, n_tokens, 1]
     rsqrt = torch.rsqrt(variance + variance_epsilon) # shape: [n_prompts_B, n_layers, n_tokens, 1]
     weight = torch.stack([model.model.layers[layer_id].post_attention_layernorm.weight.data.to(device) for layer_id in range(n_layers)], dim=0) # shape: [n_layers, n_dim]
     weight = weight.repeat(n_prompts_B * n_tokens, 1, 1).reshape(n_prompts_B, n_tokens, n_layers, n_dim).permute(0, 2, 1, 3) # shape: [n_prompts_B, n_layers, n_tokens, n_dim]
-    if mode == "TAM": # P: prompt, R: receiving layer, S: sending layer, T: token, D: n_dim
-        breakdowns = [torch.einsum("PRTD,PSTD->PRSTD", rsqrt * weight, i.to(device)) for i in components]
-    elif mode == "H": # P: prompt, R: receiving layer, S: sending layer, Q: q_token, K: k_token, H: head, D: n_dim
-        breakdowns = [torch.einsum("PRQD,PSQKHD->PRSQKHD", rsqrt * weight, i.to(device)) for i in components]
-    elif mode == "H_simplified": # unused in this file
-        n_heads = components[0].shape[4]
-        print(n_heads)
-        tmp_results = torch.zeros((n_prompts_B, n_layers, n_tokens, n_tokens, n_heads, n_dim))
-        for j in range(n_layers):
-            tmp_results[:, j, ...] = torch.einsum("PQD,PQKHD->PQKHD", (rsqrt * weight)[:, j, ...], components[0][:, j, ...].to(device))
-        breakdowns = [tmp_results]
+    original_rmsnorm = torch.einsum("PRTD,PRTD->PRTD", rsqrt * weight, vector.to(device))
+
+    if mode == "default":
+        if components.shape[1] > 1:
+            rigor_breakdown_rmsnorm = torch.empty((n_prompts_B, n_layers, n_layers, n_tokens, n_dim))
+            for L in range(n_layers):
+                tmp_vector = vector[:, L, :, :].unsqueeze(1).expand(n_prompts_B, n_layers, n_tokens, n_dim) - components
+                tmp_variance = tmp_vector.to(device).pow(2).mean(-1, keepdim=True)
+                tmp_rsqrt = torch.rsqrt(tmp_variance + variance_epsilon)
+                # print('aaa',tmp_rsqrt.shape, weight[:,L,:,:].unsqueeze(1).shape, (tmp_rsqrt*(weight[:,L,:,:].unsqueeze(1))).shape, tmp_vector.shape)
+                tmp_rmsnorm = torch.einsum("PRTD,PRTD->PRTD", tmp_rsqrt*(weight[:,L,:,:].unsqueeze(1)), tmp_vector)
+                rigor_breakdown_rmsnorm[:,L,...]= original_rmsnorm[:,L,...].unsqueeze(1).expand(n_prompts_B, n_layers, n_tokens, n_dim) - tmp_rmsnorm
+        else:
+            rigor_breakdown_rmsnorm = torch.empty((n_prompts_B, n_layers, 1, n_tokens, n_dim))
+            for L in range(n_layers):
+                tmp_vector = vector[:, L, :, :].unsqueeze(1) - components
+                tmp_variance = tmp_vector.to(device).pow(2).mean(-1, keepdim=True)
+                tmp_rsqrt = torch.rsqrt(tmp_variance + variance_epsilon)
+                # print('bbb',tmp_rsqrt.shape, weight[:,L,:,:].unsqueeze(1).shape, (tmp_rsqrt*(weight[:,L,:,:].unsqueeze(1))).shape, tmp_vector.shape)
+                tmp_rmsnorm = torch.einsum("PRTD,PRTD->PRTD", tmp_rsqrt*(weight[:,L,:,:].unsqueeze(1)), tmp_vector)
+                # print('ccc', original_rmsnorm[:,L,...].unsqueeze(1).shape, tmp_rmsnorm.shape)
+                rigor_breakdown_rmsnorm[:,L,...]= original_rmsnorm[:,L,...].unsqueeze(1) - tmp_rmsnorm
+    elif mode == "E":
+        n_experts = components.shape[3]
+        rigor_breakdown_rmsnorm = torch.empty((n_prompts_B, n_layers, n_layers, n_tokens, n_experts, n_dim))
+        for L in range(n_layers):
+            # print(vector[:, L, :, :].unsqueeze(2).unsqueeze(1).shape, components.shape)
+            tmp_vector = vector[:, L, :, :].unsqueeze(2).unsqueeze(1).expand(n_prompts_B, n_layers, n_tokens, n_experts, n_dim) - components
+            tmp_variance = tmp_vector.to(device).pow(2).mean(-1, keepdim=True)
+            tmp_rsqrt = torch.rsqrt(tmp_variance + variance_epsilon)
+            tmp_rmsnorm = torch.einsum("PRTED,PRTED->PRTED", tmp_rsqrt*(weight[:,L,:,:].unsqueeze(2).unsqueeze(1)), tmp_vector)
+            rigor_breakdown_rmsnorm[:,L,...]= original_rmsnorm[:,L,...].unsqueeze(2).unsqueeze(1).expand(n_prompts_B, n_layers, n_tokens, n_experts, n_dim) - tmp_rmsnorm
     elif mode == "H_agnostic":
-        breakdowns = [torch.einsum("PRQD,PSQHD->PRSQHD", rsqrt * weight, i.to(device)) for i in components]
-    elif mode == "E": # P: prompt, R: receiving layer, S: sending layer, T: token, D: n_dim, E: n_experts
-        breakdowns = [torch.einsum("PRTD,PSTED->PRSTED", rsqrt * weight, i.to(device)) for i in components]
-    # else: # unused, unchecked
-    #     breakdowns = [weight * (i * rsqrt) for i in components]
-    return breakdowns
+        n_heads = components.shape[3]
+        rigor_breakdown_rmsnorm = torch.empty((n_prompts_B, n_layers, n_layers, n_tokens, n_heads, n_dim))
+        for L in range(n_layers):
+            tmp_vector = vector[:, L, :, :].unsqueeze(2).unsqueeze(1).expand(n_prompts_B, n_layers, n_tokens, n_heads, n_dim) - components
+            tmp_variance = tmp_vector.to(device).pow(2).mean(-1, keepdim=True)
+            tmp_rsqrt = torch.rsqrt(tmp_variance + variance_epsilon)
+            tmp_rmsnorm = torch.einsum("PRTHD,PRTHD->PRTHD", tmp_rsqrt*(weight[:,L,:,:].unsqueeze(2).unsqueeze(1)), tmp_vector)
+            rigor_breakdown_rmsnorm[:,L,...]= original_rmsnorm[:,L,...].unsqueeze(2).unsqueeze(1).expand(n_prompts_B, n_layers, n_tokens, n_heads, n_dim) - tmp_rmsnorm
+    # return original_rmsnorm
+    return rigor_breakdown_rmsnorm
 
 def decompose_attn_out_helper_batch(v, pattern, n_layers, model):
     """ Decompose the attention output into the shape of [n_prompts_B, n_layers, n_tokens, n_tokens, n_heads, n_dim] (PSQKHD)
@@ -307,3 +385,76 @@ def path_patching(prompt_dict_ls_ORIG, prompt_dict_ls_NEW, model, tokenizer, sen
             # fig = px.imshow(prob_io_name_diff_matrix[:, :, counter].detach().cpu().numpy(), color_continuous_scale="RdBu", color_continuous_midpoint=0, title="prob_io_name_diff_{}".format(cur_recv_type), labels=dict(x="Head", y="Layer", color="Prob diff"))
             # fig.update_xaxes(side="top")
             # fig.show()
+
+def pos_tagging(prompt_ls, tokenizer, max_token_per_prompt, dataset_sz=-1):
+    """ Add part-of-speech tag to each token. 
+        If dataset_sz=-1, then it will try to use all the given prompts.
+        TODO: may use spaCy to replace nltk?
+    """
+    # reference: https://github.com/slavpetrov/universal-pos-tags/blob/master/en-ptb.map
+    pos_swap_map = {".":'.', "(":'.', ")":'.', ":":'.', "''":'.', "EX":'DET', "JJS":'ADJ', "WRB":'ADV', "VBG":'VERB', "VBP":'VERB', "NN":'NOUN', "SYM":'X', "VB":'VERB', "UH":'X', "NNPS":'NOUN', "NNP":'NOUN', "``":'.', "$":'.', "NNS":'NOUN', "JJR":'ADJ', "MD":'VERB', "RP":'PRT', "VBD":'VERB', "DT":'DET', "POS":'PRT', "RBR":'ADV', ",":'.', "VBZ":'VERB', "PDT":'DET', "VBN":'VERB', "WP$":'PRON', "WDT":'DET', "WP":'PRON', "PRP$":'PRON', "CD":'NUM', "IN":'ADP', "#":'.', "CC":'CONJ', "RB":'ADV', "FW":'X', "RBS":'ADV', "PRP":'PRON', "LS":'X', "JJ":'ADJ', "TO":'PRT'} 
+    # prompt_pos_ls = []
+    # for prompt in prompt_ls:
+    #     pos_tagging = nltk.pos_tag(nltk.tokenize.word_tokenize(prompt))
+    #     prompt_pos_ls.append([[i[0], pos_swap_map[i[1]]] for i in pos_tagging])
+    token_pos_ls = []
+    saved_prompt_id = []
+    # bad_token_dict = dict()
+    # bad_token_counter = 0
+
+    encodings = tokenizer(prompt_ls, return_offsets_mapping=True, add_special_tokens=False, return_tensors="pt", max_length=max_token_per_prompt, padding=False, truncation=True) # padding=False may be removed?
+    tokenized_words = [nltk.tokenize.word_tokenize(p) for p in prompt_ls]
+    pos_tags = nltk.pos_tag_sents(tokenized_words)
+   
+    for i, cur_prompt in enumerate(prompt_ls):
+        tokens = tokenizer.convert_ids_to_tokens(encodings["input_ids"][i])
+        offsets = encodings["offset_mapping"][i]
+        pos_tagging = pos_tags[i]
+        ## find the intervals of the words given by nltk
+        cursor = 0
+        word_info = []
+        for cur_word, cur_pos in pos_tagging: # robust enough?
+            word_begin = cur_prompt.find(cur_word, cursor)
+            word_end = word_begin + len(cur_word)
+            word_info.append((word_begin, word_end, cur_pos, cur_word))
+            cursor = word_end
+        # print(word_info)
+
+        cur_token_pos_ls = []
+        word_idx = 0
+        for tok, (tok_begin, tok_end) in zip(tokens, offsets):
+            tok_pos = None
+            
+            while word_idx < len(word_info) and tok_begin >= word_info[word_idx][1]: # word_info[word_idx][1] is the next position after the last character of a word
+                word_idx += 1
+            if word_idx < len(word_info):
+                word_begin, word_end, word_pos, _ = word_info[word_idx]
+                # if tok_end <= word_end and ((tok_begin >= word_begin) or (tok_begin == (word_begin - 1) and word_begin > 0 and cur_prompt[word_begin - 1] == " ")): # alternative
+                if tok_end <= word_end and ((tok_begin >= word_begin) or (tok_begin == (word_begin - 1) and cur_prompt[word_begin - 1] == " ")): # may be other characters instead of " ", but we disregard those characters for simplicity
+                    tok_pos = pos_swap_map[word_pos]
+                
+            if tok_pos is None:
+                tok_pos = "?" # failure
+                # print("{} [{}]".format(i,tok), "tag undetermined")
+                # bad_token_dict[tok] = bad_token_dict.get(tok, 0) + 1
+                # bad_token_counter += 1
+                
+            cur_token_pos_ls.append((tok, tok_pos))
+
+        if len(cur_token_pos_ls) == max_token_per_prompt:
+            saved_prompt_id.append(i)
+        else:
+            print("Not long enough: id {} len {}".format(i, len(cur_token_pos_ls)))
+        token_pos_ls.append(cur_token_pos_ls)
+
+        if dataset_sz != -1 and len(saved_prompt_id) >= dataset_sz:
+            break
+
+    # print(bad_token_counter)
+    # print(sorted(bad_token_dict))
+    print("len of token_pos_ls", len(token_pos_ls))
+    # batch_token = tokenizer([prompt_ls[j] for j in saved_prompt_id], return_tensors="pt", max_length=max_token_per_prompt, padding=False, truncation=True)
+    batch_token = {k: v[saved_prompt_id] for k, v in encodings.items() if k != "offset_mapping"}
+    # return saved_prompt_id, batch_token, [token_pos_ls[i] for i in saved_prompt_id]
+    return batch_token, token_pos_ls
+
