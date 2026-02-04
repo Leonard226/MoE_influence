@@ -9,6 +9,10 @@ import plotly.express as px
 from tqdm import tqdm
 import nltk
 
+# If you use nltk for the first time, you may need these codes
+# nltk.download('punkt_tab')
+# nltk.download('averaged_perceptron_tagger_eng')
+
 def matrix_drawer_patch(data, name, output_dir, figsize=(13, 13), add_patch=[], title="", xlabel="Head", ylabel="Layer", need_description=False):
     """ matrix for path patching """
     data = data.detach().cpu().numpy()
