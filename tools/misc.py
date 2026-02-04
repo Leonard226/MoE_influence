@@ -4,7 +4,7 @@ import torch
 import numpy as np
 import matplotlib.pyplot as plt
 import torch.nn as nn
-from tools.verbose import rmsnorm_breakdown
+from tools.verbose import rmsnorm_breakdown, decompose_attn_out_helper, prob
 
 def layer_print(model):
     """ Print layer info of the assigned model. """
@@ -544,16 +544,52 @@ def activation_patching(prompt_dict_ls_ORIG, prompt_dict_ls_NEW, model, tokenize
             fig.update_xaxes(side="top")
             fig.show()
 
-# def check_prob(prompt):
-#     ## TODO: fix this function
-#     attn_v, attn_weights, final_var = run_regular(prompt, 'check_attn_prob')
-#     which_layer = 13
-#     decomposed_attn_output = decomposed_attn(attn_v[which_layer], attn_weights[which_layer], which_layer)
-#     tmp = torch.sum(decomposed_attn_output, dim=1)
-#     for j in range(n_heads):
-#         bsvalues = get_final_logits(tmp[-1,j], final_var[0])
-#         #print(bsvalues.shape)
-#         # print(io_name_id, s_name_id) # Mary: 6393 John: 2516
-#         print('head:{}'.format(j))
-#         print('io_bsvalue:{: .2e} s_bsvalue:{: .2e}'.format(bsvalues[2516].item(), bsvalues[6393].item()))
-#         print('io_prob:{: .2e} s_prob:{: .2e}'.format(prob(bsvalues, 2516).item(), prob(bsvalues, 6393).item()))
+def check_expert_output(prompt_ls, model, tokenizer, router_weight_ls):
+    """ check the dot product of input and the expert output """
+    batch_token = tokenizer(prompt_ls, return_tensors="pt")
+    _, hook_dict = model(input_ids=batch_token["input_ids"], attention_mask=batch_token["attention_mask"])
+
+    n_layers = len(router_weight_ls)
+    n_experts = router_weight_ls[1].shape[0]
+
+    silu = nn.SiLU()
+    P = 0 # first prompt
+    T = 7 # which token
+    for L in range(n_layers):
+        x = hook_dict["hook_after_norm2"][P, L, T]
+        for E in range(n_experts):
+            W_gate_LE = model.model.layers[L].mlp.experts[E].gate_proj.weight
+            W_up_LE = model.model.layers[L].mlp.experts[E].up_proj.weight
+            W_down_LE = model.model.layers[L].mlp.experts[E].down_proj.weight
+            
+            gate_vector = silu(torch.matmul(W_gate_LE, x))
+            up_vector = torch.matmul(W_up_LE, x)
+            out_vector = torch.matmul(W_down_LE, gate_vector * up_vector)            
+            dot_product = torch.dot(x, out_vector) # dot product of the input x and the output of the expert
+            
+            if E in hook_dict["hook_selected_experts"][P, L, T]:
+                print("Layer {} Expert {} dot_product {} selected".format(L, E, round(dot_product.item(), 2)))
+            else:
+                print("Layer {} Expert {} dot_product {}".format(L, E, round(dot_product.item(), 2)))
+
+def check_head_output(prompt_ls, model, tokenizer):
+    """ check the logit and probability of the head output (projected by output embedding matrix) """    
+    batch_token = tokenizer(prompt_ls, return_tensors="pt")
+    _, hook_dict = model(input_ids=batch_token["input_ids"], attention_mask=batch_token["attention_mask"])
+
+    final_var = hook_dict["hook_layer_output"][0, -1, -1].pow(2).mean(-1, keepdim=True) # 0= first prompt, -1=last layer, -1=last token
+
+    L = 13
+    T = 13
+    decomposed_attn_out = decompose_attn_out_helper(hook_dict["hook_v"][0, L], hook_dict["hook_attn_weights"][0, L], L, model)
+    n_heads = decomposed_attn_out.shape[2]
+    
+    sum_QH = decomposed_attn_out.sum(dim=1) # [Q, K, H, D] -> [Q, H, D]
+    print(hook_dict["hook_attn_output"][0, L, T, :3], decomposed_attn_out.sum(2).sum(1)[T, :3]) # for check if the implementation is correct, they should be equal
+    
+    for H in range(n_heads):
+        output_logits = project_to_logits(sum_QH[T, H], final_var[0], model)
+        print("Layer {} Head {} Query Token {}".format(L, H, T))
+        print("io_bsvalue:{: .2e} s_bsvalue:{: .2e}".format(output_logits[2516].item(), output_logits[6393].item())) # IO=Mary: 6393, S=John: 2516
+        print("io_prob:{: .2e} s_prob:{: .2e}".format(prob(output_logits, 2516).item(), prob(output_logits, 6393).item()))
+
