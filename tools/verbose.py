@@ -2,6 +2,7 @@ import torch
 import einops
 from tools.plot import tril_drawer_TAM, matrix_drawer_H_token_head, scatter_drawer_H_expert, scatter_drawer_H_head, matrix_drawer_H_with_sum, M_drawer, matrix_attn_weight_verbose, matrix_attn_weight_comparison_verbose
 from tqdm import tqdm
+
 def rmsnorm_breakdown(vector, components, layer_id, model, variance_epsilon=1e-05):
     """ Apply RMSNorm on the components (Single prompt)
     :param1 vector: the input of a RMSNorm, shape: [n_dim]

@@ -6,6 +6,7 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 import numpy as np
 import matplotlib.colors as mcolors
+
 def decompose_TAM_batch(prompt_ls, model, tokenizer, router_weight_ls, bsz=100, max_token_per_prompt=32, output_dir=None):
     """ Decomposition: multiple prompts, token(T), attn_out(A), and moe_out(M).
         This implementation is primarily to check if the score computation is implemented correctly.
