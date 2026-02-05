@@ -8,6 +8,10 @@ from matplotlib.patches import Rectangle
 import plotly.express as px
 from tqdm import tqdm
 import nltk
+from sklearn.manifold import TSNE
+import matplotlib.patches as mpatches
+
+np.random.seed(42) # if you want reproducibility for tsne figures
 
 # If you use nltk for the first time, you may need these codes
 # nltk.download('punkt_tab')
@@ -462,3 +466,134 @@ def pos_tagging(prompt_ls, tokenizer, max_token_per_prompt, dataset_sz=-1):
     # return saved_prompt_id, batch_token, [token_pos_ls[i] for i in saved_prompt_id]
     return batch_token, token_pos_ls
 
+def decompose_token_tsne(prompt_ls, model, tokenizer, router_weight_ls, output_dir, bsz=50, max_token_per_prompt=32, dataset_sz=1000, demo_now=False):
+    """ Figures 2a, 2b """
+    batch_token, token_pos_ls = pos_tagging(prompt_ls, tokenizer, max_token_per_prompt, dataset_sz) # get the POS of tokens
+    n_prompts, max_n_tokens = batch_token["attention_mask"].shape
+    print("num of prompts: {}".format(n_prompts))
+
+    router_weight_vectors = torch.stack(router_weight_ls, dim=0) # shape: [n_layers, n_experts, n_dim]
+    n_layers, n_experts, n_dim = router_weight_vectors.shape
+
+    token_score_collect = torch.zeros((n_prompts, max_n_tokens, n_experts, n_layers, 1), device="cpu") # n_layers -> recv_layer
+    token_embedding_collect = torch.zeros((n_prompts, max_n_tokens, n_dim), device="cpu")
+
+    for B in tqdm(range(0, n_prompts, bsz)):
+        _, hook_dict = model(input_ids=batch_token["input_ids"][B:B+bsz], attention_mask=batch_token["attention_mask"][B:B+bsz])
+        layer_input = hook_dict["hook_layer_input"] # shape: [n_prompts, n_layers, max_n_tokens, n_dim]
+        after_res1 = hook_dict["hook_after_res1"] # shape: [n_prompts, n_layers, max_n_tokens, n_dim]
+        token_components = layer_input[:, 0, :, :].unsqueeze(1) # res_in of Layer 0
+        token_rmsnorm = rmsnorm_breakdown_batch(after_res1, [token_components], model, mode="TAM")[0]
+        ## NOTE: token_rmsnorm shape: [n_prompts, n_layers, 1, max_n_tokens, n_dim]
+        token_score = torch.einsum("RED,PRSTD->PTERS", router_weight_vectors.float(), token_rmsnorm)
+        token_score_collect[B:B+bsz, :, :, :, :] = token_score
+        token_embedding_collect[B:B+bsz, :, :] = layer_input[:, 0, :, :]
+
+        # for check
+        # print(layer_input.shape, after_res1.shape, token_rmsnorm.shape, batch_token["attention_mask"][B:B+bsz].sum(1))
+    
+    ## part-of-speech (Figure 1a)
+    token_score_plot = token_score_collect.reshape(n_prompts * max_n_tokens, -1)
+    T_tsne = TSNE(n_components=2, learning_rate="auto", init="random", perplexity=30, max_iter=800).fit_transform(token_score_plot.detach().numpy())
+    tsne_min, tsne_max = T_tsne.min(0), T_tsne.max(0)
+    tsne_norm = (T_tsne - tsne_min) / (tsne_max - tsne_min)
+
+    plt.figure(figsize=(20, 20))
+
+    POS_colors = {"VERB":'grey', "NOUN":'red', "PRON":'peru',"ADJ":'orange', "ADV":'yellowgreen', "ADP":'lightgreen', "CONJ":'green', "DET":'aqua', "NUM":'blue', "PRT":'steelblue', "X":'purple', ".":'pink', "?":'yellow'}
+    pos_ls = []
+    color_ls = []
+    alpha_ls = [] # we want to filter out the token with undetermined pos ("?")
+    for k in token_pos_ls:
+        # pos_ls.extend([i[1] for i in k]) # used for px.scatter
+        pos_ls.extend(k)
+        color_ls.extend([POS_colors[i[1]] for i in k])
+        alpha_ls.extend([1 if i[1] != "?" else 0 for i in k])
+    print("len of pos_ls:", len(pos_ls))
+    
+    np.save(output_dir + "tsne_norm" + ".npy", tsne_norm)
+    np.save(output_dir + "color_ls" + ".npy", color_ls)
+    np.save(output_dir + "alpha_ls" + ".npy", alpha_ls)
+    fig, ax = plt.subplots()
+    ax.scatter(tsne_norm[:, 0], tsne_norm[:, 1], s=5, c=color_ls, alpha=alpha_ls)
+    content_patches = [mpatches.Patch(color="red", label="Noun"), 
+                       mpatches.Patch(color="orange", label="Adjective"),
+                       mpatches.Patch(color="grey", label="Verb"),
+                       mpatches.Patch(color="yellowgreen", label="Adverb"),
+                       mpatches.Patch(color="blue", label="Number")
+                       ]
+
+    function_patches = [mpatches.Patch(color="green", label="Conjunction"),
+                        mpatches.Patch(color="aqua", label="Determiner"),
+                        mpatches.Patch(color="lightgreen", label="Adposition"),
+                        mpatches.Patch(color="pink", label="Punctuation"),
+                        mpatches.Patch(color="peru", label="Pronoun"),
+                        mpatches.Patch(color="steelblue", label="Particle")]
+
+    other_patches = [mpatches.Patch(color="purple", label="Foreign word, typo, abbr.")]
+
+    legend_content = ax.legend(handles=content_patches, title="Content words", loc="upper left", bbox_to_anchor=(1.05, 1))
+    ax.add_artist(legend_content)
+    legend_function = ax.legend(handles=function_patches, title="Function words", loc="upper left", bbox_to_anchor=(1.05, 0.6))
+    ax.add_artist(legend_function)
+    legend_other = ax.legend(handles=other_patches, title="Other words", loc="upper left", bbox_to_anchor=(0.85, 0.15))
+    ax.add_artist(legend_other)
+
+    plt.axis("off")
+    plt.tight_layout(rect=[0, 0, 0.75, 1])
+    plt.savefig(output_dir + "token_POS_distribution" + ".png") # ".pdf"
+    plt.close("all")
+    
+    ## position (Figure 2b)
+    ## We do not use this version.
+    # tsne_norm2 = tsne_norm.reshape(n_prompts, max_n_tokens, -1)
+    # print(tsne_norm2.shape)
+    # selection = [0, 1, 5, 10]
+    # plt.figure(figsize=(9, 9))
+    # position_colors = ["red","black", "grey", "blue"]
+    # for k, position in enumerate(selection):
+    #     plt.scatter(tsne_norm2[:, k, 0], tsne_norm2[:, k, 1], s=5, c=position_colors[k], label=str(position))
+    # plt.legend()
+    # plt.axis("off")
+    # plt.tight_layout()
+    # plt.savefig(output_dir + "token_position_distribution" + ".png") # ".pdf"
+    # plt.close("all")
+    
+    selection = [0, 1, 5, 10, 15, 20]
+    position_colors = ["red", "black", "grey", "blue", "purple", "aqua"]
+    token_score_plot2 = token_score_collect[:, selection, :, :].reshape(n_prompts * len(selection), -1)
+    T_tsne2 = TSNE(n_components=2, learning_rate="auto", init="random", perplexity=30, max_iter=800).fit_transform(token_score_plot2.detach().numpy())
+    tsne_min2, tsne_max2 = T_tsne2.min(0), T_tsne2.max(0)
+    tsne_norm2 = (T_tsne2 - tsne_min2) / (tsne_max2 - tsne_min2)
+    np.save(output_dir + "tsne_norm2" + ".npy", tsne_norm2)
+    
+    fig2, ax2 = plt.subplots(figsize=(9, 9))
+    tsne_norm2 = tsne_norm2.reshape(n_prompts, len(selection), -1)
+    for k, (position, color) in enumerate(zip(selection, position_colors)):
+        ax2.scatter(tsne_norm2[:, k, 0], tsne_norm2[:, k, 1], s=5, c=color, label=str(position))
+
+    # ax2.legend(title="Position of token", loc="upper left", bbox_to_anchor=(1.05, 1)) # just change the legend
+    
+    legend_patches = [mpatches.Patch(color=position_colors[k], label=str(selection[k])) for k in range(len(selection))] 
+    legend_position = ax2.legend(handles=legend_patches, title="Position of token", loc="upper left", bbox_to_anchor=(1.05, 1))
+    ax2.add_artist(legend_position)
+    
+    ax2.axis("off")
+    fig2.tight_layout(rect=[0, 0, 0.75, 1])
+    fig2.savefig(output_dir + "token_position_distribution" + ".png") # ".pdf"
+    plt.close("all")
+    
+    ## embedding (for comparison, not used in the paper)
+    token_embedding_plot = token_embedding_collect.reshape(n_prompts * max_n_tokens, -1)
+    T_tsne3 = TSNE(n_components=2, learning_rate="auto", init="random", perplexity=100, max_iter=1200).fit_transform(token_embedding_plot.detach().cpu().numpy())
+    tsne_min3, tsne_max3 = T_tsne3.min(0), T_tsne3.max(0)
+    tsne_norm3 = (T_tsne3 - tsne_min3) / (tsne_max3 - tsne_min3)
+
+    if demo_now:
+        fig = px.scatter(x=tsne_norm[:, 0], y=tsne_norm[:, 1], color=pos_ls, title="token_POS_distribution (Figure 2a)")
+        fig.show()
+        fig = px.scatter(x=tsne_norm3[:, 0], y=tsne_norm3[:, 1], color=pos_ls, title="token_embedding_POS_distribution")
+        fig.show()
+        fig = px.scatter(x=tsne_norm2[:, :, 0].reshape(-1), y=tsne_norm2[:, :, 1].reshape(-1), color=["position" + str(i) for i in selection] * n_prompts, title="token_position_distribution (Figure 2b)")
+        fig.show()
+    return
