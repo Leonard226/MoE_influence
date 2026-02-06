@@ -165,8 +165,8 @@ def prob_batch(logits, token_id_ls):
 def rmsnorm_breakdown_batch(vector, components, model, mode="default", variance_epsilon=1e-05, device="cuda:0"):
     """
     Break down the input into components.
-    Original RMSNorm(x) = c * gamma * rsqrt(x)
-    Contribution of a component: RMSNorm(c) = c * gamma * rsqrt(x)
+    Original RMSNorm(x) = x * gamma * rsqrt(x)
+    Contribution of a component c: ContributionRMSNorm(c, x) = c * gamma * rsqrt(x)
     :param vector: the vector to be decomposed. NOTE: the decomposition is linear. the vector is the input of an MoE layer.
     :param components: the components of the input "vector". NOTE: the components contribute to the numerator.
     :param model: assigned model
@@ -178,15 +178,13 @@ def rmsnorm_breakdown_batch(vector, components, model, mode="default", variance_
     variance = vector.to(device).pow(2).mean(-1, keepdim=True) # shape: [n_prompts_B, n_layers, n_tokens, 1]
     rsqrt = torch.rsqrt(variance + variance_epsilon) # shape: [n_prompts_B, n_layers, n_tokens, 1]
     weight = torch.stack([model.model.layers[layer_id].post_attention_layernorm.weight.data.to(device) for layer_id in range(n_layers)], dim=0) # shape: [n_layers, n_dim]
-    weight_to_test = weight.view(1, n_layers, 1, n_dim).expand(*vector.shape) ## to be tested
-    print(weight.shape)
-    weight = weight.repeat(n_prompts_B * n_tokens, 1, 1).reshape(n_prompts_B, n_tokens, n_layers, n_dim).permute(0, 2, 1, 3) # shape: [n_prompts_B, n_layers, n_tokens, n_dim]
+    weight = weight.view(1, n_layers, 1, n_dim).expand(*vector.shape) # shape: [n_prompts_B, n_layers, n_tokens, n_dim]
     
     if mode == "TAM": # P: prompt, R: receiving layer, S: sending layer, T: token, D: n_dim
         breakdowns = [torch.einsum("PRTD,PSTD->PRSTD", rsqrt * weight, i.to(device)) for i in components]
     elif mode == "H": # P: prompt, R: receiving layer, S: sending layer, Q: q_token, K: k_token, H: head, D: n_dim
         breakdowns = [torch.einsum("PRQD,PSQKHD->PRSQKHD", rsqrt * weight, i.to(device)) for i in components]
-    elif mode == "H_simplified": # unused in this file, TODO: check this branch
+    elif mode == "H_simplified": # sending layer and receiving layer are the same layer; unused in this file. TODO: check this branch
         n_heads = components[0].shape[4]
         tmp_results = torch.zeros((n_prompts_B, n_layers, n_tokens, n_tokens, n_heads, n_dim))
         for j in range(n_layers):
@@ -194,8 +192,9 @@ def rmsnorm_breakdown_batch(vector, components, model, mode="default", variance_
         breakdowns = [tmp_results]
         # simplified version, unchecked TODO: check it
         # rsqrt_mul_weight = rsqrt * weight
-        # tmp_results = rsqrt_mul_weight.unsqueeze(3).unsqueeze(4) * components[0].to(device)
-        # breakdowns = [tmp_results]
+        # tmp_results_test = rsqrt_mul_weight.unsqueeze(3).unsqueeze(4) * components[0].to(device)
+        # breakdowns_test = [tmp_results]
+        # print(torch.allclose(breakdowns[0], breakdowns_test[0]))
     elif mode == "H_agnostic":
         breakdowns = [torch.einsum("PRQD,PSQHD->PRSQHD", rsqrt * weight, i.to(device)) for i in components]
     elif mode == "E": # P: prompt, R: receiving layer, S: sending layer, T: token, D: n_dim, E: n_experts
@@ -204,9 +203,9 @@ def rmsnorm_breakdown_batch(vector, components, model, mode="default", variance_
     #     breakdowns = [weight * (i * rsqrt) for i in components]
     return breakdowns
 
-def ground_truth_diff(vector, components, model, mode="default", variance_epsilon=1e-05, device="cuda:0"):
+def diff_breakdown_batch(vector, components, model, mode="default", variance_epsilon=1e-05, device="cuda:0"):
     """
-    Using RMSNorm(x) - RMSNorm(x-c) to compute the contribution of a component
+    Using RMSNorm(x) - RMSNorm(x-c) to compute the contribution of a component c
     
     :param vector: the vector to be decomposed. NOTE: the decomposition is NOT linear. the vector is the input of an MoE layer.
     :param components: the components of the input "vector".
@@ -219,30 +218,17 @@ def ground_truth_diff(vector, components, model, mode="default", variance_epsilo
     variance = vector.to(device).pow(2).mean(-1, keepdim=True) # shape: [n_prompts_B, n_layers, n_tokens, 1]
     rsqrt = torch.rsqrt(variance + variance_epsilon) # shape: [n_prompts_B, n_layers, n_tokens, 1]
     weight = torch.stack([model.model.layers[layer_id].post_attention_layernorm.weight.data.to(device) for layer_id in range(n_layers)], dim=0) # shape: [n_layers, n_dim]
-    weight = weight.repeat(n_prompts_B * n_tokens, 1, 1).reshape(n_prompts_B, n_tokens, n_layers, n_dim).permute(0, 2, 1, 3) # shape: [n_prompts_B, n_layers, n_tokens, n_dim]
-    original_rmsnorm = torch.einsum("PRTD,PRTD->PRTD", rsqrt * weight, vector.to(device))
+    weight = weight.view(1, n_layers, 1, n_dim).expand(*vector.shape) # shape: [n_prompts_B, n_layers, n_tokens, n_dim]
+    original_rmsnorm = rsqrt * weight * vector # .to(device)
 
     if mode == "default":
-        if components.shape[1] > 1:
-            rigor_breakdown_rmsnorm = torch.empty((n_prompts_B, n_layers, n_layers, n_tokens, n_dim))
-            for L in range(n_layers):
-                tmp_vector = vector[:, L, :, :].unsqueeze(1).expand(n_prompts_B, n_layers, n_tokens, n_dim) - components
-                tmp_variance = tmp_vector.to(device).pow(2).mean(-1, keepdim=True)
-                tmp_rsqrt = torch.rsqrt(tmp_variance + variance_epsilon)
-                # print('aaa',tmp_rsqrt.shape, weight[:,L,:,:].unsqueeze(1).shape, (tmp_rsqrt*(weight[:,L,:,:].unsqueeze(1))).shape, tmp_vector.shape)
-                tmp_rmsnorm = torch.einsum("PRTD,PRTD->PRTD", tmp_rsqrt*(weight[:,L,:,:].unsqueeze(1)), tmp_vector)
-                rigor_breakdown_rmsnorm[:,L,...]= original_rmsnorm[:,L,...].unsqueeze(1).expand(n_prompts_B, n_layers, n_tokens, n_dim) - tmp_rmsnorm
-        else:
-            rigor_breakdown_rmsnorm = torch.empty((n_prompts_B, n_layers, 1, n_tokens, n_dim))
-            for L in range(n_layers):
-                tmp_vector = vector[:, L, :, :].unsqueeze(1) - components
-                tmp_variance = tmp_vector.to(device).pow(2).mean(-1, keepdim=True)
-                tmp_rsqrt = torch.rsqrt(tmp_variance + variance_epsilon)
-                # print('bbb',tmp_rsqrt.shape, weight[:,L,:,:].unsqueeze(1).shape, (tmp_rsqrt*(weight[:,L,:,:].unsqueeze(1))).shape, tmp_vector.shape)
-                tmp_rmsnorm = torch.einsum("PRTD,PRTD->PRTD", tmp_rsqrt*(weight[:,L,:,:].unsqueeze(1)), tmp_vector)
-                # print('ccc', original_rmsnorm[:,L,...].unsqueeze(1).shape, tmp_rmsnorm.shape)
-                rigor_breakdown_rmsnorm[:,L,...]= original_rmsnorm[:,L,...].unsqueeze(1) - tmp_rmsnorm
-    elif mode == "E":
+        new_vector = vector.unsqueeze(2) - components.unsqueeze(1) # new_vector = x - c, shape: [n_prompts_B, n_layers, n_sending_layers, n_tokens, n_dim]
+        new_variance = new_vector.pow(2).mean(-1, keepdim=True)
+        new_rsqrt = torch.rsqrt(new_variance + variance_epsilon) # shape: [n_prompts_B, n_layers, n_sending_layers, n_tokens, 1]
+        new_rmsnorm = new_rsqrt * weight.unsqueeze(2) * new_vector
+        diff_breakdown_rmsnorm = original_rmsnorm.unsqueeze(2) - new_rmsnorm # shape: [n_prompts_B, n_layers, n_sending_layers, n_tokens, n_dim]
+        
+    elif mode == "E": # TODO: check this
         n_experts = components.shape[3]
         rigor_breakdown_rmsnorm = torch.empty((n_prompts_B, n_layers, n_layers, n_tokens, n_experts, n_dim))
         for L in range(n_layers):
@@ -252,7 +238,7 @@ def ground_truth_diff(vector, components, model, mode="default", variance_epsilo
             tmp_rsqrt = torch.rsqrt(tmp_variance + variance_epsilon)
             tmp_rmsnorm = torch.einsum("PRTED,PRTED->PRTED", tmp_rsqrt*(weight[:,L,:,:].unsqueeze(2).unsqueeze(1)), tmp_vector)
             rigor_breakdown_rmsnorm[:,L,...]= original_rmsnorm[:,L,...].unsqueeze(2).unsqueeze(1).expand(n_prompts_B, n_layers, n_tokens, n_experts, n_dim) - tmp_rmsnorm
-    elif mode == "H_agnostic":
+    elif mode == "H_agnostic": # TODO: check this
         n_heads = components.shape[3]
         rigor_breakdown_rmsnorm = torch.empty((n_prompts_B, n_layers, n_layers, n_tokens, n_heads, n_dim))
         for L in range(n_layers):
@@ -262,7 +248,19 @@ def ground_truth_diff(vector, components, model, mode="default", variance_epsilo
             tmp_rmsnorm = torch.einsum("PRTHD,PRTHD->PRTHD", tmp_rsqrt*(weight[:,L,:,:].unsqueeze(2).unsqueeze(1)), tmp_vector)
             rigor_breakdown_rmsnorm[:,L,...]= original_rmsnorm[:,L,...].unsqueeze(2).unsqueeze(1).expand(n_prompts_B, n_layers, n_tokens, n_heads, n_dim) - tmp_rmsnorm
     # return original_rmsnorm
-    return rigor_breakdown_rmsnorm
+    ## check if the implementation is consistent with the previous one
+    # rigor_breakdown_rmsnorm = torch.empty((n_prompts_B, n_layers, 1, n_tokens, n_dim))
+    # for L in range(n_layers):
+    #     tmp_vector = vector[:, L, :, :].unsqueeze(1) - components
+    #     tmp_variance = tmp_vector.to(device).pow(2).mean(-1, keepdim=True)
+    #     tmp_rsqrt = torch.rsqrt(tmp_variance + variance_epsilon)
+    #     # print('bbb',tmp_rsqrt.shape, weight[:,L,:,:].unsqueeze(1).shape, (tmp_rsqrt*(weight[:,L,:,:].unsqueeze(1))).shape, tmp_vector.shape)
+    #     tmp_rmsnorm = torch.einsum("PRTD,PRTD->PRTD", tmp_rsqrt*(weight[:,L,:,:].unsqueeze(1)), tmp_vector)
+    #     # print('ccc', original_rmsnorm[:,L,...].unsqueeze(1).shape, tmp_rmsnorm.shape)
+    #     rigor_breakdown_rmsnorm[:,L,...]= original_rmsnorm[:,L,...].unsqueeze(1) - tmp_rmsnorm
+    # print("consistent", torch.allclose(rigor_breakdown_rmsnorm, diff_breakdown_rmsnorm))
+    # exit()
+    return diff_breakdown_rmsnorm
 
 def decompose_attn_out_helper_batch(v, pattern, n_layers, model):
     """ Decompose the attention output into the shape of [n_prompts_B, n_layers, n_tokens, n_tokens, n_heads, n_dim] (PSQKHD)
@@ -483,7 +481,9 @@ def decompose_token_tsne(prompt_ls, model, tokenizer, router_weight_ls, output_d
         layer_input = hook_dict["hook_layer_input"] # shape: [n_prompts, n_layers, max_n_tokens, n_dim]
         after_res1 = hook_dict["hook_after_res1"] # shape: [n_prompts, n_layers, max_n_tokens, n_dim]
         token_components = layer_input[:, 0, :, :].unsqueeze(1) # res_in of Layer 0
-        token_rmsnorm = rmsnorm_breakdown_batch(after_res1, [token_components], model, mode="TAM")[0]
+        # token_rmsnorm = rmsnorm_breakdown_batch(after_res1, [token_components], model, mode="TAM")[0]
+        token_rmsnorm = diff_breakdown_batch(after_res1, token_components, model, mode="default") # NOTE: decomposition based on difference
+        
         ## NOTE: token_rmsnorm shape: [n_prompts, n_layers, 1, max_n_tokens, n_dim]
         token_score = torch.einsum("RED,PRSTD->PTERS", router_weight_vectors.float(), token_rmsnorm)
         token_score_collect[B:B+bsz, :, :, :, :] = token_score
@@ -551,8 +551,8 @@ def decompose_token_tsne(prompt_ls, model, tokenizer, router_weight_ls, output_d
     # selection = [0, 1, 5, 10]
     # plt.figure(figsize=(9, 9))
     # position_colors = ["red","black", "grey", "blue"]
-    # for k, position in enumerate(selection):
-    #     plt.scatter(tsne_norm2[:, k, 0], tsne_norm2[:, k, 1], s=5, c=position_colors[k], label=str(position))
+    # for k, (position, color) in enumerate(zip(selection, position_colors)):
+    #     plt.scatter(tsne_norm2[:, k, 0], tsne_norm2[:, k, 1], s=5, c=color, label=str(position))
     # plt.legend()
     # plt.axis("off")
     # plt.tight_layout()
