@@ -68,6 +68,8 @@ def decompose_TAM_batch(prompt_ls, model, tokenizer, router_weight_ls, bsz=100, 
         ## Code for check if implemented correctly
         # print("CHECK: shape:", layer_input.shape, attn_output.shape, after_res1.shape, after_norm2.shape, mlp_output.shape)
         # print("CHECK: shape:", token_score.shape, moe_out_score.shape, attn_out_score.shape, token_rmsnorm.shape, attn_out_rmsnorm.shape, moe_out_rmsnorm.shape)
+        # print("CHECK: ", after_res1[0, 1, 2, :3], token_components[0, 0, 2, :3] + attn_output[0, :2, 2, :3].sum(0) + mlp_output[0, 0, 2, :3]) # should be equal
+        # print("CHECK: ", after_norm2[0, 1, 2, :3], (token_rmsnorm[0, 1, 0, 2, :3] + attn_out_rmsnorm[0, 1, :2, 2, :3].sum(dim=0) + moe_out_rmsnorm[0, 1, 0, 2, :3])) # should be equal
         # print("CHECK: score:", original_score[0,13,0,5], token_score[0,13,0,5,0] + torch.sum(attn_out_score[0,13,0,5,:]) + torch.sum(moe_out_score[0,13,0,5,:]))
         # test_original_score = torch.einsum("PTRED,PRTD->PTRE", router_weight_vectors.repeat(n_prompts_B * max_n_tokens, 1, 1, 1).reshape(n_prompts_B, max_n_tokens, n_layers, n_experts, n_dim), after_norm2).transpose(2,3)
         # print("CHECK: score:", test_original_score[0,13,0,5])

@@ -131,7 +131,7 @@ def tril_drawer_tam_analyze(data, name, output_dir, figsize=(11,11), diagonal=1,
                 plt.yticks([k + 0.5 for k in range(0, data.shape[0], 5)], [str(k) for k in range(0, data.shape[0], 5)])
 
         plt.savefig(output_dir + name + "no_annotations"+".png", bbox_inches="tight", pad_inches=0)
-        plt.savefig(output_dir + "_" + name + "no_annotations"+".pdf", bbox_inches="tight", pad_inches=0)
+        plt.savefig(output_dir + name + "no_annotations"+".pdf", bbox_inches="tight", pad_inches=0)
         plt.close("all")
 
     if demo_now:
@@ -215,11 +215,11 @@ def diff_breakdown_batch(vector, components, model, mode="default", variance_eps
     :param device: you can assign another gpu to relieve the burden
     """
     n_prompts_B, n_layers, n_tokens, n_dim = vector.shape
-    variance = vector.to(device).pow(2).mean(-1, keepdim=True) # shape: [n_prompts_B, n_layers, n_tokens, 1]
+    variance = vector.pow(2).mean(-1, keepdim=True) # shape: [n_prompts_B, n_layers, n_tokens, 1]
     rsqrt = torch.rsqrt(variance + variance_epsilon) # shape: [n_prompts_B, n_layers, n_tokens, 1]
-    weight = torch.stack([model.model.layers[layer_id].post_attention_layernorm.weight.data.to(device) for layer_id in range(n_layers)], dim=0) # shape: [n_layers, n_dim]
+    weight = torch.stack([model.model.layers[layer_id].post_attention_layernorm.weight.data for layer_id in range(n_layers)], dim=0) # shape: [n_layers, n_dim]
     weight = weight.view(1, n_layers, 1, n_dim).expand(*vector.shape) # shape: [n_prompts_B, n_layers, n_tokens, n_dim]
-    original_rmsnorm = rsqrt * weight * vector # .to(device)
+    original_rmsnorm = rsqrt * weight * vector
 
     if mode == "default":
         new_vector = vector.unsqueeze(2) - components.unsqueeze(1) # new_vector = x - c, shape: [n_prompts_B, n_layers, n_sending_layers, n_tokens, n_dim]
@@ -481,8 +481,8 @@ def decompose_token_tsne(prompt_ls, model, tokenizer, router_weight_ls, output_d
         layer_input = hook_dict["hook_layer_input"] # shape: [n_prompts, n_layers, max_n_tokens, n_dim]
         after_res1 = hook_dict["hook_after_res1"] # shape: [n_prompts, n_layers, max_n_tokens, n_dim]
         token_components = layer_input[:, 0, :, :].unsqueeze(1) # res_in of Layer 0
-        # token_rmsnorm = rmsnorm_breakdown_batch(after_res1, [token_components], model, mode="TAM")[0]
-        token_rmsnorm = diff_breakdown_batch(after_res1, token_components, model, mode="default") # NOTE: decomposition based on difference
+        token_rmsnorm = rmsnorm_breakdown_batch(after_res1, [token_components], model, mode="TAM")[0]
+        # token_rmsnorm = diff_breakdown_batch(after_res1, token_components, model, mode="default") # NOTE: decomposition based on difference
         
         ## NOTE: token_rmsnorm shape: [n_prompts, n_layers, 1, max_n_tokens, n_dim]
         token_score = torch.einsum("RED,PRSTD->PTERS", router_weight_vectors.float(), token_rmsnorm)
@@ -596,4 +596,244 @@ def decompose_token_tsne(prompt_ls, model, tokenizer, router_weight_ls, output_d
         fig.show()
         fig = px.scatter(x=tsne_norm2[:, :, 0].reshape(-1), y=tsne_norm2[:, :, 1].reshape(-1), color=["position" + str(i) for i in selection] * n_prompts, title="token_position_distribution (Figure 2b)")
         fig.show()
+    return
+
+def decompose_TAM_tril(prompt_ls, model, tokenizer, router_weight_ls, output_dir, top_n, bsz=100, max_token_per_prompt=32, demo_now=False):
+    """ Decomposition: multiple prompts, token(T), attn_out(A), and moe_out(M).
+        Note that top_n can vary - top_k or n_experts or other ranges.
+        Figures 2c and 3.
+    """
+    batch_token = tokenizer(prompt_ls, return_tensors="pt", max_length=max_token_per_prompt, padding=False, truncation=True) # should not use padding in principle
+    n_prompts, max_n_tokens = batch_token["attention_mask"].shape
+    
+    router_weight_vectors = torch.stack(router_weight_ls, dim=0)#.float() # shape: [n_layers, n_experts, n_dim]
+    n_layers, n_experts, _ = router_weight_vectors.shape
+
+    token_score_var_collect = torch.zeros((max_n_tokens, n_layers, 1))
+    attn_out_score_var_collect = torch.zeros((max_n_tokens, n_layers, n_layers)) # first n_layers -> recv_layer , second n_layers -> send_layer
+    moe_out_score_var_collect = torch.zeros((max_n_tokens, n_layers, n_layers)) # first n_layers -> recv_layer , second n_layers -> send_layer
+
+    token_score_topn_sum_collect = torch.zeros((max_n_tokens, n_layers, 1))
+    moe_out_score_topn_sum_collect = torch.zeros((max_n_tokens, n_layers, n_layers)) # first n_layers -> recv_layer , second n_layers -> send_layer
+    attn_out_score_topn_sum_collect = torch.zeros((max_n_tokens, n_layers, n_layers)) # first n_layers -> recv_layer , second n_layers -> send_layer
+    token_score_topn_abs_sum_collect = torch.zeros((max_n_tokens, n_layers, 1))
+    moe_out_score_topn_abs_sum_collect = torch.zeros((max_n_tokens, n_layers, n_layers)) # first n_layers -> recv_layer , second n_layers -> send_layer
+    attn_out_score_topn_abs_sum_collect = torch.zeros((max_n_tokens, n_layers, n_layers)) # first n_layers -> recv_layer , second n_layers -> send_layer
+    
+    expert_score_collect = torch.zeros((n_prompts, max_n_tokens, n_experts, n_layers))
+    
+    ## NOTE: extra info
+    token_rmsnorm_norm = torch.zeros((max_n_tokens, n_layers, 1)) # TRS
+    moe_out_rmsnorm_norm = torch.zeros((max_n_tokens, n_layers, n_layers))
+    attn_out_rmsnorm_norm = torch.zeros((max_n_tokens, n_layers, n_layers))
+    token_rmsnorm2_norm = torch.zeros((max_n_tokens, n_layers, 1))
+    moe_out_rmsnorm2_norm = torch.zeros((max_n_tokens, n_layers, n_layers))
+    attn_out_rmsnorm2_norm = torch.zeros((max_n_tokens, n_layers, n_layers))
+
+    token_norm = torch.zeros((max_n_tokens, 1))
+    moe_out_norm = torch.zeros((max_n_tokens, n_layers))
+    attn_out_norm = torch.zeros((max_n_tokens, n_layers))
+    token_id_collect = torch.zeros(len(prompt_ls))
+    m1e9_count = 0
+    m1e18_count = 0
+
+    def transfer(data):
+        out = []
+        for r in data:
+            tmp = []
+            for c in r:
+                if c < 16:
+                    tmp.append('A'+str(c))
+                elif c < 32:
+                    tmp.append('M'+str(c-16))
+                else:
+                    tmp.append('T')
+            out.append(tmp)
+        print(out)
+        # print(data)
+
+    for B in tqdm(range(0, n_prompts, bsz)):
+        ## NOTE: for checking predicted tokens, commented by default
+        # model_outputs, hook_dict = model(input_ids=batch_token["input_ids"][B:B+bsz], attention_mask=batch_token["attention_mask"][B:B+bsz])
+        # prediction = model_outputs[0] # [batch_size, n_tokens, vocab_size]
+        # predicted_top1 = torch.argsort(prediction[:, -1], descending=True)[:, :1]
+        # token_id_collect[B:B + predicted_top1.shape[0]] = predicted_top1[:, 0]
+        # for i in range(bsz):
+        #     predicted_token_id = torch.argsort(prediction[i, -1], descending=True)[:1] # 0=first prompt, -1=last token
+        #     predicted_text = [tokenizer.decode(x) for x in predicted_token_id]
+        #     print(predicted_text, predicted_token_id)
+        # continue
+
+        _, hook_dict = model(input_ids=batch_token["input_ids"][B:B+bsz], attention_mask=batch_token["attention_mask"][B:B+bsz])
+        layer_input = hook_dict["hook_layer_input"] # shape: [n_prompts_B, n_layers, max_n_tokens, n_dim]
+        attn_output = hook_dict["hook_attn_output"] # shape: [n_prompts_B, n_layers, max_n_tokens, n_dim]
+        after_res1 = hook_dict["hook_after_res1"] # shape: [n_prompts_B, n_layers, max_n_tokens, n_dim]
+        after_norm2 = hook_dict["hook_after_norm2"] # shape: [n_prompts_B, n_layers, max_n_tokens, n_dim]
+        mlp_output = hook_dict["hook_mlp_output"] # shape: [n_prompts_B, n_layers, max_n_tokens, n_dim]
+        n_prompts_B = layer_input.shape[0]
+        
+        token_components = layer_input[:, 0, :, :].unsqueeze(1) # res_in of Layer 0
+        token_rmsnorm, attn_out_rmsnorm, moe_out_rmsnorm = rmsnorm_breakdown_batch(after_res1, [token_components, attn_output, mlp_output], model, mode="TAM")
+
+        ## NOTE: token_rmsnorm shape: [n_prompts_B, n_layers, 1, max_n_tokens, n_dim]
+        ## NOTE: moe_out_rmsnorm, attn_out_rmsnorm shape: [n_prompts_B, n_layers, n_layers, max_n_tokens, n_dim] # first n_layers -> recv_layer , second n_layers -> send_layer
+        original_score = torch.einsum("RED,PRTD->PTER", router_weight_vectors.float(), after_norm2) # shape: [n_prompts_B, max_n_tokens, n_experts, n_layers] # .float() for qwen
+        top_n_experts = torch.argsort(original_score, dim=2, descending=True)[:, :, :top_n, :]
+        token_score = torch.einsum("RED,PRSTD->PTERS", router_weight_vectors.float(), token_rmsnorm)
+        attn_out_score = torch.tril(torch.einsum("RED,PRSTD->PTERS", router_weight_vectors.float(), attn_out_rmsnorm), diagonal=0)
+        moe_out_score = torch.tril(torch.einsum("RED,PRSTD->PTERS", router_weight_vectors.float(), moe_out_rmsnorm), diagonal=-1) # shape: [n_prompts_B, max_n_tokens, n_experts, n_layers, n_layers] first n_layers -> recv_layer , second n_layers -> send_layer
+        
+        ## NOTE: additional experiment 1 (causal intervention experiment)
+        token_rmsnorm2 = diff_breakdown_batch(after_res1, token_components, model, mode="default")
+        attn_out_rmsnorm2 = diff_breakdown_batch(after_res1, attn_output, model, mode="default")
+        moe_out_rmsnorm2 = diff_breakdown_batch(after_res1, mlp_output, model, mode="default")
+        token_score = torch.einsum("RED,PRSTD->PTERS", router_weight_vectors.float(), token_rmsnorm2)
+        attn_out_score = torch.tril(torch.einsum("RED,PRSTD->PTERS", router_weight_vectors.float(), attn_out_rmsnorm2), diagonal=0)
+        moe_out_score = torch.tril(torch.einsum("RED,PRSTD->PTERS", router_weight_vectors.float(), moe_out_rmsnorm2), diagonal=-1)
+        
+        ######
+        ## NOTE: additional experiment 2 (remove a high-variance expert and observe)
+        top_k = 8
+        L, E = 4, 14  # options: L4E14, L2E30
+        tmp_mlp_output = mlp_output.clone()
+        mask = (top_n_experts[:, :, :top_k, L] == E).unsqueeze(-1)
+        expert_weighted_outputs = hook_dict["hook_expert_weighted_outputs"] # shape: [n_prompts_B, n_layers, max_n_tokens, original_top_k, n_dim]
+        tmp_mlp_output[:, L] -= (expert_weighted_outputs[:, L] * mask).sum(dim=2)
+        tmp_moe_out_rmsnorm = rmsnorm_breakdown_batch(after_res1, [tmp_mlp_output], model, mode="TAM")[0]
+        tmp_moe_out_score = torch.tril(torch.einsum("RED,PRSTD->PTERS", router_weight_vectors.float(), tmp_moe_out_rmsnorm), diagonal=-1)
+        m1e9_count += torch.nonzero(top_n_experts[:, :, :top_k, 1] == 9).shape[0]
+        m1e18_count += torch.nonzero(top_n_experts[:, :, :top_k, 1] == 18).shape[0]
+        # OBSOLETE implementation (Do not use)
+        # top_k_experts_indices = torch.nonzero(top_n_experts[:, :, :top_k, L] == E)
+        # expert_weighted_outputs = hook_dict["hook_expert_weighted_outputs"] # shape: [n_prompts_B, n_layers, max_n_tokens, original_top_k, n_dim]
+        # tmp_mlp_output2 = mlp_output.clone()
+        # for p, t, e in top_k_experts_indices:
+        #     tmp_mlp_output2[p, L, t] -= expert_weighted_outputs[p, L, t, e] # remove the influence of expert (L, E)
+        # print(torch.allclose(tmp_mlp_output, tmp_mlp_output2))
+        ######
+        ## variance (will be averaged)
+        token_score_var_collect += token_score.var(dim=2).sum(dim=0)
+        attn_out_score_var_collect += attn_out_score.var(dim=2).sum(dim=0)
+        moe_out_score_var_collect += moe_out_score.var(dim=2).sum(dim=0)
+
+        ## check the components with largest variance for each token
+        # compact_vars = torch.cat([attn_out_score.var(dim=2), moe_out_score.var(dim=2), token_score.var(dim=2)], dim=-1)
+        # compact_vars_argsort = torch.argsort(compact_vars, descending=True, dim=-1)
+        # print(compact_vars_argsort.shape)
+        # print(tokenizer.decode(batch_token["input_ids"][B]))
+        # for k in range(10):
+        #     print(k, tokenizer.decode(batch_token["input_ids"][B, k]))
+        #     print(transfer(compact_vars_argsort[B,k,:,:5].detach().cpu().numpy()))
+        # exit()
+
+        ## top-n
+        ind_token = top_n_experts.long().unsqueeze(-1)
+        ind_other = top_n_experts.long().unsqueeze(-1).expand(-1, -1, -1, -1, n_layers).contiguous()
+        token_score_topn_sum_collect += torch.gather(token_score, dim=2, index=ind_token).sum(dim=(0, 2))
+        moe_out_score_topn_sum_collect += torch.gather(moe_out_score, dim=2, index=ind_other).sum(dim=(0, 2))
+        attn_out_score_topn_sum_collect += torch.gather(attn_out_score, dim=2, index=ind_other).sum(dim=(0, 2))
+        token_score_topn_abs_sum_collect += torch.gather(token_score, dim=2, index=ind_token).abs().sum(dim=(0, 2))
+        moe_out_score_topn_abs_sum_collect += torch.gather(moe_out_score, dim=2, index=ind_other).abs().sum(dim=(0, 2))
+        attn_out_score_topn_abs_sum_collect += torch.gather(attn_out_score, dim=2, index=ind_other).abs().sum(dim=(0, 2))
+
+        ## expert score collection
+        expert_score_collect[B:B+bsz] = original_score
+        
+        ## NOTE: check if implemented correctly
+        # tmp_token_score_topn = torch.gather(token_score, dim=2, index=top_n_experts.long().unsqueeze(-1))
+        # print(token_score[0,1,:,2,0])
+        # print(top_n_experts[0,1,:,2])
+        # print(tmp_token_score_topn[0,1,:,2,0]) # sort token_score by top_n_experts
+        # tmp_moe_out_score_topn = torch.gather(moe_out_score, dim=2, index=top_n_experts.long().unsqueeze(-1).repeat(1,1,1,1,n_layers))
+        # print(moe_out_score[0,1,:,3,2])
+        # print(top_n_experts[0,1,:,3])
+        # print(tmp_moe_out_score_topn[0,1,:,3,2])
+        # exit()
+
+        ## NOTE: check the angle between component and the input vector of RMSNorm, commented by default
+        # for x in range(n_layers):
+        #     cos_sim_token = torch.dot(mlp_output[1, 6, 2], after_res1[1, x, 2])/ (torch.norm(mlp_output[1, 6, 2]) * torch.norm(after_res1[1, x, 2]))
+        #     print(cos_sim_token, torch.norm(mlp_output[1, 6, 2]), torch.norm(after_res1[1, x, 2]), x)
+        # cos_sim_attn_out = torch.nn.functional.cosine_similarity(attn_output, after_res1, dim=-1)
+        # print(cos_sim_attn_out.shape, attn_output.shape, cos_sim_attn_out.shape)
+        # exit()
+
+        ## NOTE: for check
+        # tmp_after_norm2 = diff_breakdown_batch(after_res1, after_res1, model, mode="default", variance_epsilon=1e-05, device="cuda:0")
+        # print(tmp_after_norm2[0,0,0,:3], after_norm2[0,0,0,:3])
+        # tmp_after_norm2 = diff_breakdown_batch(after_res1, attn_output, model, mode="default", variance_epsilon=1e-05, device="cuda:0")
+        # tmp_attn_out_score = torch.tril(torch.einsum("RED,PRSTD->PTERS", router_weight_vectors.float(), tmp_after_norm2), diagonal=0)
+        # print(tmp_attn_out_score[0,0,0,:,0], attn_out_score[0,0,0,:,0])
+        
+        token_rmsnorm_norm += (torch.norm(token_rmsnorm, p=2, dim=-1)).sum(0).permute(2,0,1)
+        moe_out_rmsnorm_norm += torch.tril((torch.norm(moe_out_rmsnorm, p=2, dim=-1)).sum(0).permute(2,0,1), diagonal=-1)
+        attn_out_rmsnorm_norm += torch.tril((torch.norm(attn_out_rmsnorm, p=2, dim=-1)).sum(0).permute(2,0,1), diagonal=0)
+        token_rmsnorm2_norm += (torch.norm(token_rmsnorm2, p=2, dim=-1)).sum(0).permute(2,0,1)
+        moe_out_rmsnorm2_norm += torch.tril((torch.norm(moe_out_rmsnorm2, p=2, dim=-1)).sum(0).permute(2,0,1), diagonal=-1)
+        attn_out_rmsnorm2_norm += torch.tril((torch.norm(attn_out_rmsnorm2, p=2, dim=-1)).sum(0).permute(2,0,1), diagonal=0)
+
+        attn_out_norm += (torch.norm(attn_output, p=2, dim=-1)).sum(0).permute(1,0)
+        moe_out_norm += (torch.norm(mlp_output, p=2, dim=-1)).sum(0).permute(1,0)
+        token_norm += (torch.norm(token_components, p=2, dim=-1)).sum(0).permute(1,0)
+
+    token_vars = token_score_var_collect[1:].mean(0).div(n_prompts) # drop leading token
+    attn_vars = attn_out_score_var_collect[1:].mean(0).div(n_prompts) # drop leading token
+    moe_vars = moe_out_score_var_collect[1:].mean(0).div(n_prompts) # drop leading token
+    
+    compact_vars = torch.cat([attn_vars, moe_vars, token_vars], dim=1)
+    compact_vars_argsort = torch.argsort(compact_vars, descending=True, dim=1)
+    
+    transfer(compact_vars_argsort[:,:5].detach().cpu().numpy()) # retrieve the sending layers with largest variance of assigned scores for each receiving layers
+
+    ## var, pos/neg score of tokens (w/o Token 0)
+    tril_drawer_tam_analyze(token_score_var_collect[1:].mean(0).div(n_prompts), name="token_var_without_T0", output_dir=output_dir, figsize=(3, 11), diagonal=1, add_patch=[], title="", xlabel="", ylabel="Receiving MoE Layer", need_lognorm=True, need_description=True, tick_mode="T", cbar_label="Variance", demo_now=demo_now)
+    tril_drawer_tam_analyze((token_score_topn_sum_collect[1:] + token_score_topn_abs_sum_collect[1:]).div(2 * top_n).mean(0).div(n_prompts), name="token_avg_positive_without_T0", output_dir=output_dir, figsize=(3, 11), diagonal=1, add_patch=[], title="", xlabel="", ylabel="Receiving MoE Layer", need_description=True, tick_mode="T", cbar_label="Average Positive Score", demo_now=demo_now)
+    tril_drawer_tam_analyze((token_score_topn_sum_collect[1:] - token_score_topn_abs_sum_collect[1:]).div(2 * top_n).mean(0).div(n_prompts), name="token_avg_negative_without_T0", output_dir=output_dir, figsize=(3, 11), diagonal=1, add_patch=[], title="", xlabel="", ylabel="Receiving MoE Layer", need_description=True, tick_mode="T", cbar_label="Average Negative Score", demo_now=demo_now)
+    
+    ## var, pos/neg of attn and moe (w/o Token 0)
+    tril_drawer_tam_analyze(attn_out_score_var_collect[1:].mean(0).div(n_prompts), name="attn_var_without_T0", output_dir=output_dir, figsize=(11, 11), diagonal=1, add_patch=[], title="Variance of scores assigned by attention layers", xlabel="Sending Attention Layer", ylabel="Receiving MoE Layer", need_lognorm=True, need_description=True, tick_mode="A", cbar_label="Variance", demo_now=demo_now)
+    tril_drawer_tam_analyze(moe_out_score_var_collect[1:].mean(0).div(n_prompts), name="moe_var_without_T0", output_dir=output_dir, figsize=(11, 11), diagonal=0, add_patch=[], title="Variance of scores assigned by MoE layers", xlabel="Sending MoE Layer", ylabel="Receiving MoE Layer", need_lognorm=True, need_description=True, tick_mode="M", cbar_label="Variance", demo_now=demo_now)
+    tril_drawer_tam_analyze((attn_out_score_topn_sum_collect[1:] + attn_out_score_topn_abs_sum_collect[1:]).div(2 * top_n).mean(0).div(n_prompts), name="attn_avg_positive_without_T0", output_dir=output_dir, figsize=(11, 11), diagonal=1, add_patch=[], title="Average Positive Scores assigned by attention layers", xlabel="Sending Attention Layer", ylabel="Receiving MoE Layer", need_description=True, tick_mode="A", cbar_label="Average Positive Score", demo_now=demo_now)
+    tril_drawer_tam_analyze((attn_out_score_topn_sum_collect[1:] - attn_out_score_topn_abs_sum_collect[1:]).div(2 * top_n).mean(0).div(n_prompts), name="attn_avg_negative_without_T0", output_dir=output_dir, figsize=(11, 11), diagonal=1, add_patch=[], title="Average Negative Scores assigned by attention layers", xlabel="Sending Attention Layer", ylabel="Receiving MoE Layer", need_description=True, tick_mode="A", cbar_label="Average Negative Score", demo_now=demo_now)
+    tril_drawer_tam_analyze((moe_out_score_topn_sum_collect[1:] + moe_out_score_topn_abs_sum_collect[1:]).div(2 * top_n).mean(0).div(n_prompts), name="moe_avg_positive_without_T0", output_dir=output_dir, figsize=(11, 11), diagonal=0, add_patch=[], title="Average Positive Scores assigned by MoE layers", xlabel="Sending MoE Layer", ylabel="Receiving MoE Layer", need_description=True, tick_mode="M", cbar_label="Average Positive Score", demo_now=demo_now)
+    tril_drawer_tam_analyze((moe_out_score_topn_sum_collect[1:] - moe_out_score_topn_abs_sum_collect[1:]).div(2 * top_n).mean(0).div(n_prompts), name="moe_avg_negative_without_T0", output_dir=output_dir, figsize=(11, 11), diagonal=0, add_patch=[], title="Average Negative Scores assigned by MoE layers", xlabel="Sending MoE Layer", ylabel="Receiving MoE Layer", need_description=True, tick_mode="M", cbar_label="Average Negative Score", demo_now=demo_now)
+    
+    ## var, pos/neg scores of tokens (Token 0 only)
+    tril_drawer_tam_analyze(token_score_var_collect[0].div(n_prompts), name="token_var_T0", output_dir=output_dir, figsize=(3, 11), diagonal=1, add_patch=[], title="", xlabel="", ylabel="Receiving MoE Layer", need_lognorm=True, need_description=True, tick_mode="T", cbar_label="Variance", demo_now=False)
+    tril_drawer_tam_analyze((token_score_topn_sum_collect[0] + token_score_topn_abs_sum_collect[0]).div(2 * top_n).div(n_prompts), name="token_avg_positive_T0", output_dir=output_dir, figsize=(3, 11), diagonal=1, add_patch=[], title="", xlabel="", ylabel="Receiving MoE Layer", need_description=True, tick_mode="T", cbar_label="Average Positive Score", demo_now=False)
+    tril_drawer_tam_analyze((token_score_topn_sum_collect[0] - token_score_topn_abs_sum_collect[0]).div(2 * top_n).div(n_prompts), name="token_avg_negative_T0", output_dir=output_dir, figsize=(3, 11), diagonal=1, add_patch=[], title="", xlabel="", ylabel="Receiving MoE Layer", need_description=True, tick_mode="T", cbar_label="Average Negative Score", demo_now=False)
+
+    ## var, pos/neg of attn and moe (Token 0 only)
+    tril_drawer_tam_analyze(attn_out_score_var_collect[0].div(n_prompts), name="attn_var_T0", output_dir=output_dir, figsize=(11, 11), diagonal=1, add_patch=[], title="Variance of scores assigned by attention layers (Token 0 only)", xlabel="Sending Attention Layer", ylabel="Receiving MoE Layer", need_lognorm=True, need_description=True, tick_mode="A", cbar_label="Variance", demo_now=False)
+    tril_drawer_tam_analyze(moe_out_score_var_collect[0].div(n_prompts), name="moe_var_T0", output_dir=output_dir, figsize=(11, 11), diagonal=0, add_patch=[], title="Variance of scores assigned by MoE layers (Token 0 only)", xlabel="Sending MoE Layer", ylabel="Receiving MoE Layer", need_lognorm=True, need_description=True, tick_mode="M", cbar_label="Variance", demo_now=False)
+    tril_drawer_tam_analyze((attn_out_score_topn_sum_collect[0] + attn_out_score_topn_abs_sum_collect[0]).div(2 * top_n).div(n_prompts), name="attn_avg_positive_T0", output_dir=output_dir, figsize=(11, 11), diagonal=1, add_patch=[], title="Average Positive Scores assigned by attention layers (Token 0 only)", xlabel="Sending Attention Layer", ylabel="Receiving MoE Layer", need_description=True, tick_mode="A", cbar_label="Average Positive Score", demo_now=False)
+    tril_drawer_tam_analyze((attn_out_score_topn_sum_collect[0] - attn_out_score_topn_abs_sum_collect[0]).div(2 * top_n).div(n_prompts), name="attn_avg_negative_T0", output_dir=output_dir, figsize=(11, 11), diagonal=1, add_patch=[], title="Average Negative Scores assigned by attention layers (Token 0 only)", xlabel="Sending Attention Layer", ylabel="Receiving MoE Layer", need_description=True, tick_mode="A", cbar_label="Average Negative Score", demo_now=False)
+    tril_drawer_tam_analyze((moe_out_score_topn_sum_collect[0] + moe_out_score_topn_abs_sum_collect[0]).div(2 * top_n).div(n_prompts), name="moe_avg_positive_T0", output_dir=output_dir, figsize=(11, 11), diagonal=0, add_patch=[], title="Average Positive Scores assigned by MoE layers (Token 0 only)", xlabel="Sending MoE Layer", ylabel="Receiving MoE Layer", need_description=True, tick_mode="M", cbar_label="Average Positive Score", demo_now=False)
+    tril_drawer_tam_analyze((moe_out_score_topn_sum_collect[0] - moe_out_score_topn_abs_sum_collect[0]).div(2 * top_n).div(n_prompts), name="moe_avg_negative_T0", output_dir=output_dir, figsize=(11, 11), diagonal=0, add_patch=[], title="Average Negative Scores assigned by MoE layers (Token 0 only)", xlabel="Sending MoE Layer", ylabel="Receiving MoE Layer", need_description=True, tick_mode="M", cbar_label="Average Negative Score", demo_now=False)
+    
+    ## var, mean of the scores
+    print("score var: ", expert_score_collect.reshape(-1, n_experts, n_layers).var(dim=1, correction=0).mean(0)) # variance of expert scores in each layer
+    print("score mean: ", expert_score_collect.reshape(-1, n_layers).mean(0)) # mean of expert scores in each layer
+    
+    ## norm
+    tril_drawer_tam_analyze((moe_out_rmsnorm_norm[1:]).mean(0).div(n_prompts), name="old_moe_norm_without_T0", output_dir=output_dir, figsize=(11, 11), diagonal=0, add_patch=[], title="Old Average Norm of components from MoE layers", xlabel="Sending MoE Layer", ylabel="Receiving MoE Layer", need_description=True, tick_mode="M", cbar_label="Norm", demo_now=demo_now)
+    tril_drawer_tam_analyze((attn_out_rmsnorm_norm[1:]).mean(0).div(n_prompts), name="old_attn_norm_without_T0", output_dir=output_dir, figsize=(11, 11), diagonal=1, add_patch=[], title="Old Average Norm of components from attention layers", xlabel="Sending Attention Layer", ylabel="Receiving MoE Layer", need_description=True, tick_mode="A", cbar_label="Norm", demo_now=demo_now)
+    tril_drawer_tam_analyze((moe_out_rmsnorm2_norm[1:]).mean(0).div(n_prompts), name="new_moe_norm_without_T0", output_dir=output_dir, figsize=(11, 11), diagonal=0, add_patch=[], title="New Average Norm of components from MoE layers", xlabel="Sending MoE Layer", ylabel="Receiving MoE Layer", need_description=True, tick_mode="M", cbar_label="Norm", demo_now=demo_now)
+    tril_drawer_tam_analyze((attn_out_rmsnorm2_norm[1:]).mean(0).div(n_prompts), name="new_attn_norm_without_T0", output_dir=output_dir, figsize=(11, 11), diagonal=1, add_patch=[], title="New Average Norm of components from attention layers", xlabel="Sending Attention Layer", ylabel="Receiving MoE Layer", need_description=True, tick_mode="A", cbar_label="Norm", demo_now=demo_now)
+    
+    print("moe out norm", moe_out_norm[1:].mean(0).div(n_prompts))
+    print("attn out norm", attn_out_norm[1:].mean(0).div(n_prompts))
+    plt.scatter([i for i in range(n_layers)], moe_out_norm[1:].mean(0).div(n_prompts).detach().cpu().numpy(), s=5, c='b', label="L2-norm, MoE layer output")
+    plt.scatter([i for i in range(n_layers)], attn_out_norm[1:].mean(0).div(n_prompts).detach().cpu().numpy(), s=5, c='g', label="L2-norm, attention layer output")
+    plt.grid()
+    plt.title("Average L2 norm of layer output")
+    plt.legend()
+    plt.xlabel("Layer")
+    plt.ylabel("L2 norm")
+    np.save(output_dir + "l2_norm_moe_output" + ".npy", moe_out_norm[1:].mean(0).div(n_prompts).detach().cpu().numpy())
+    np.save(output_dir + "l2_norm_attn_output" + ".npy", attn_out_norm[1:].mean(0).div(n_prompts).detach().cpu().numpy())
+    plt.savefig(output_dir + "l2_norm" + ".png") # ".pdf"
+    plt.close("all")
+
+    print("hit counters", m1e9_count, m1e18_count)
     return
