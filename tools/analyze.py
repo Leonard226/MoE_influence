@@ -812,7 +812,7 @@ def decompose_TAM_tril(prompt_ls, model, tokenizer, router_weight_ls, output_dir
     tril_drawer_tam_analyze((moe_out_score_topn_sum_collect[0] - moe_out_score_topn_abs_sum_collect[0]).div(2 * top_n).div(n_prompts), name="moe_avg_negative_T0", output_dir=output_dir, figsize=(11, 11), diagonal=0, add_patch=[], title="Average Negative Scores assigned by MoE layers (Token 0 only)", xlabel="Sending MoE Layer", ylabel="Receiving MoE Layer", need_description=True, tick_mode="M", cbar_label="Average Negative Score", demo_now=False)
     
     ## var, mean of the scores
-    print("score var: ", expert_score_collect.reshape(-1, n_experts, n_layers).var(dim=1, correction=0).mean(0)) # variance of expert scores in each layer
+    print("score var: ", expert_score_collect.reshape(-1, n_experts, n_layers).var(dim=1).mean(0)) # variance of expert scores in each layer
     print("score mean: ", expert_score_collect.reshape(-1, n_layers).mean(0)) # mean of expert scores in each layer
     
     ## norm
@@ -837,3 +837,166 @@ def decompose_TAM_tril(prompt_ls, model, tokenizer, router_weight_ls, output_dir
 
     print("hit counters", m1e9_count, m1e18_count)
     return
+
+def decompose_IOI_map_score(prompt_dict_ls_1, prompt_dict_ls_2, model, tokenizer, router_weight_ls, output_dir, n_heads, top_n, bsz, demo_now=False):
+    """ 1. score assigned by attention layer output. Apply simplified implementation. (q/k/h)
+        2. attention map (after softmax)
+        Note that top_n can vary - top_k or n_experts or other ranges.
+        Figure * b~g. (appendix)
+    """
+    n_prompts = len(prompt_dict_ls_1)
+    router_weight_vectors = torch.stack(router_weight_ls, dim=0) # shape: [n_layers, n_experts, n_dim]
+    n_layers, _, _ = router_weight_vectors.shape
+
+    def helper(prompt_dict_ls):
+        prompt_ls = [i["text"] for i in prompt_dict_ls]
+        token_pos_ls_dict = {"END": torch.tensor([i["END_token_pos"] for i in prompt_dict_ls]), 
+                             "S2": torch.tensor([i["S_token_pos"][1] for i in prompt_dict_ls]), 
+                             "S1+1": torch.tensor([i["S1+1_token_pos"] for i in prompt_dict_ls]), 
+                             "S1": torch.tensor([i["S_token_pos"][0] for i in prompt_dict_ls]), 
+                             "IO": torch.tensor([i["IO_token_pos"] for i in prompt_dict_ls])}
+        q_token_pos_ls = ["END", "END", "END", "END", "END", "S2", "S2", "S2", "S1+1"]
+        k_token_pos_ls = ["END", "S2", "S1+1", "S1", "IO", "S1+1", "S1", "IO", "S1"]
+        score_var_collect = torch.zeros((len(q_token_pos_ls), n_heads, n_layers, n_layers)) # first n_layers -> recv, second n_layers -> send
+        score_avg_collect = torch.zeros((len(q_token_pos_ls), n_heads, n_layers, n_layers)) # first n_layers -> recv, second n_layers -> send
+        attn_map_collect = torch.zeros((len(q_token_pos_ls), n_layers, n_heads)) # first n_layers -> recv, second n_layers -> send
+        # attn_map_with_norm_collect = torch.zeros((len(q_token_pos_ls), n_layers, n_heads)) # softmax(q*k)^2 * ||v||^2
+        
+        for B in tqdm(range(0, n_prompts, bsz)):
+            batch_token = tokenizer(prompt_ls[B:B+bsz], return_tensors="pt", padding=True)
+            _, hook_dict = model(input_ids=batch_token["input_ids"], attention_mask=batch_token["attention_mask"])
+            attn_v = hook_dict["hook_v"] # shape: [n_prompts_B, n_layers, n_heads, max_n_tokens, head_dim]
+            attn_weights = hook_dict["hook_attn_weights"] # shape: [n_prompts_B, n_layers, n_heads, n_tokens, n_tokens] # first n_tokens -> queries, second n_tokens -> keys
+            after_res1 = hook_dict["hook_after_res1"] # shape: [n_prompts_B, n_layers, max_n_tokens, n_dim]
+            after_norm2 = hook_dict["hook_after_norm2"] # shape: [n_prompts_B, n_layers, max_n_tokens, n_dim]
+            decomposed_attn_out = decompose_attn_out_helper_batch(attn_v, attn_weights, n_layers, model) # shape: [n_prompts_B, n_layers, n_tokens, n_tokens, n_heads, n_dim] first n_tokens -> queries, second n_tokens -> keys
+            
+            n_prompts_B = attn_weights.shape[0]
+            for j in range(len(q_token_pos_ls)): ## NOTE: we only draw S2 -> END, S1 -> END, and IO -> END in the paper
+                cur_q_token_pos_ls = token_pos_ls_dict[q_token_pos_ls[j]]
+                cur_k_token_pos_ls = token_pos_ls_dict[k_token_pos_ls[j]]
+                simplified_decomposed_attn_out = decomposed_attn_out[torch.arange(n_prompts_B), :, cur_q_token_pos_ls[B:B+n_prompts_B], cur_k_token_pos_ls[B:B+n_prompts_B]] # shape: [n_prompts_B, n_layers, n_heads, n_dim]
+                simplified_decomposed_attn_out = simplified_decomposed_attn_out.unsqueeze(2).unsqueeze(2)  # shape: [n_prompts_B, n_layers, 1, 1, n_heads, n_dim]
+                head_rmsnorm = rmsnorm_breakdown_batch(after_res1[torch.arange(n_prompts_B), :, cur_q_token_pos_ls[B:B+n_prompts_B]].unsqueeze(2), [simplified_decomposed_attn_out], model, mode="H")[0]
+                
+                original_score = torch.einsum("RED,PRTD->PTER", router_weight_vectors, after_norm2) # shape: [n_prompts_B, max_n_tokens, n_experts, n_layers]
+                top_n_experts = torch.argsort(original_score, dim=2, descending=True)[:, :, :top_n, :]
+                head_score = torch.tril(torch.einsum("RED,PRSQKHD->PQKHERS", router_weight_vectors, head_rmsnorm.to(router_weight_vectors.device)), diagonal=0)
+
+                ## CHECK 1
+                # print(head_score.shape, top_n_experts.shape)
+                # print("CHECK: before top-n:", head_score[4, 0, 0, 3, :, 3, 2])
+
+                ## if top-n is needed
+                ind = top_n_experts[torch.arange(n_prompts_B), cur_q_token_pos_ls[B:B+n_prompts_B]].view(n_prompts_B, 1, 1, 1, top_n, n_layers, 1).expand(n_prompts_B, 1, 1, n_heads, top_n, n_layers, n_layers)
+                head_score = torch.gather(head_score, dim=4, index=ind)
+
+                ## CHECK 2
+                # print(top_n_experts[4, cur_q_token_pos_ls[B+4], :, 3])
+                # print("CHECK: after top-n:", head_score[4, 0, 0, 3, :, 3, 2])
+                
+                ##
+                score_var_collect[j] += head_score[:, 0, 0].var(dim=2).sum(0)
+                score_avg_collect[j] += head_score[:, 0, 0].mean(dim=2).sum(0) ## NOTE: not used in the paper
+                attn_map_collect[j] += attn_weights[torch.arange(n_prompts_B), :, :, cur_q_token_pos_ls[B:B+n_prompts_B], cur_k_token_pos_ls[B:B+n_prompts_B]].sum(0)
+                ## unused
+                # attn_map_with_norm_collect[j] += simplified_decomposed_attn_out[torch.arange(n_prompts_B), :, 0, 0, :].norm(dim=-1).sum(0)
+        
+        score_var_collect = score_var_collect.div(n_prompts)
+        score_avg_collect = score_avg_collect.div(n_prompts)
+        attn_map_collect = attn_map_collect.div(n_prompts)
+        # attn_map_with_norm_collect = attn_map_with_norm_collect.div(n_prompts)
+        # return score_var_collect, score_avg_collect, attn_map_collect, attn_map_with_norm_collect
+        return score_var_collect, _, attn_map_collect, _
+    
+    def drawer(data, name): # for avg or var of scores (Ax->My), NOT used in the paper
+        map_name = ["END->END", "END->S2", "END->S1+1", "END->S1", "END->IO", "S2->S1+1", "S2->S1", "S2->IO", "S1+1->S1"]
+        for i in range(len(map_name)):
+            for L in range(n_layers):
+                plt.figure(figsize=(12,12))
+                to_draw = data[i, :, L, :(L+1)].permute(1,0).detach().cpu().numpy() # data shape: [num_maps, n_heads, n_layers, n_layers] # first n_layers -> recv, second n_layers -> send
+                if to_draw.min() < 0:
+                    sns.heatmap(to_draw, square=True, annot=True, fmt=".0e", annot_kws={"size":9}, cmap="RdBu", cbar_kws={"shrink": 0.8}, linewidth=1, norm=mcolors.TwoSlopeNorm(vcenter = 0, vmin=to_draw.min(), vmax=to_draw.max()))
+                else:
+                    sns.heatmap(to_draw, square=True, annot=True, fmt=".0e", annot_kws={"size":9}, cmap="Blues", cbar_kws={"shrink": 0.8}, linewidth=1, norm=mcolors.LogNorm(vmin=to_draw.min(), vmax=to_draw.max()))
+                plt.title("attention_score_batch_" + name + "_" + str(i) + "_" + map_name[i] + "to layer" + str(L))
+                plt.savefig(output_dir + "attention_score_batch_" + name + "_" + str(i) + "_" + map_name[i] + "to_L" + str(L) + ".png")
+                plt.close("all")
+
+    def drawer2(data): # for var of scores (Figures * b~d), used in the paper
+        # 1=S2, 3=S1, 4=IO
+        # mats = [data[4, :, 15, :16].permute(1, 0).detach().cpu().numpy(), data[3, :, 15, :16].permute(1, 0).detach().cpu().numpy(), data[1, :, 15, :16].permute(1, 0).detach().cpu().numpy()] # IO, S1, S2 # -> last MoE layer
+        mats = [data[4, :, 13:16, 13].permute(1, 0).detach().cpu().numpy(), data[3, :, 13:16, 13].permute(1, 0).detach().cpu().numpy(), data[1, :, 13:16, 13].permute(1, 0).detach().cpu().numpy()] # IO, S1, S2 -> MoE layer in the same block
+        fig, axes = plt.subplots(1, 3, figsize=(25, 15), sharex=False, sharey=False)
+        g11 = sns.heatmap(mats[0], square=True, annot=True, fmt=".1e", annot_kws={"size":5}, cmap="Oranges", cbar_kws={"shrink": 0.5}, linewidth=1, cbar=False, ax=axes[0])
+        g12 = sns.heatmap(mats[1], square=True, annot=True, fmt=".1e", annot_kws={"size":5}, cmap="Oranges", cbar_kws={"shrink": 0.5}, linewidth=1, cbar=False, ax=axes[1])
+        g13 = sns.heatmap(mats[2], square=True, annot=True, fmt=".1e", annot_kws={"size":5}, cmap="Oranges", cbar_kws={"shrink": 0.5}, linewidth=1, cbar=False, ax=axes[2])
+        im = axes[-1].collections[0]
+        fig.colorbar(im, ax=axes, location="right", shrink=0.5)
+        np.save(output_dir + "qk_our_score_END_IO" + ".npy", mats[0])
+        np.save(output_dir + "qk_our_score_END_S1" + ".npy", mats[1])
+        np.save(output_dir + "qk_our_score_END_S2" + ".npy", mats[2])
+        plt.savefig(output_dir + "qk_our_score" + ".png", bbox_inches="tight", pad_inches=0.01)
+        plt.savefig(output_dir + "qk_our_score" + ".pdf", bbox_inches="tight", pad_inches=0.01)
+        plt.close("all")
+        if demo_now:
+            fig = px.imshow(mats[0], color_continuous_scale="Oranges", title="var IO->END", labels=dict(x="Head", y="Layer"))
+            fig.show()
+            fig = px.imshow(mats[1], color_continuous_scale="Oranges", title="var S1->END", labels=dict(x="Head", y="Layer"))
+            fig.show()
+            fig = px.imshow(mats[2], color_continuous_scale="Oranges", title="var S2->END", labels=dict(x="Head", y="Layer"))
+            fig.show()
+        
+    def drawer3(map_collect): # for attn map (Figures * e~g), used in the paper
+        # 1=S2, 3=S1, 4=IO
+        map_collect = map_collect.detach().cpu().numpy()
+        mats = [map_collect[4], map_collect[3], map_collect[1]]
+        fig, axes = plt.subplots(1, 3, figsize=(25, 15), sharex=False, sharey=False)
+        g11 = sns.heatmap(mats[0], square=True, annot=True, fmt=".1e", annot_kws={"size":5}, cmap="Blues", cbar_kws={"shrink": 0.5}, linewidth=1, cbar=False, ax=axes[0])
+        g12 = sns.heatmap(mats[1], square=True, annot=True, fmt=".1e", annot_kws={"size":5}, cmap="Blues", cbar_kws={"shrink": 0.5}, linewidth=1, cbar=False, ax=axes[1])
+        g13 = sns.heatmap(mats[2], square=True, annot=True, fmt=".1e", annot_kws={"size":5}, cmap="Blues", cbar_kws={"shrink": 0.5}, linewidth=1, cbar=False, ax=axes[2])
+        im = axes[-1].collections[0]
+        fig.colorbar(im, ax=axes, location="right", shrink=0.5)
+        np.save(output_dir + "attn_map_END_IO" + ".npy", mats[0])
+        np.save(output_dir + "attn_map_END_S1" + ".npy", mats[1])
+        np.save(output_dir + "attn_map_END_S2" + ".npy", mats[2])
+        plt.savefig(output_dir + "attn_map" + ".png", bbox_inches="tight", pad_inches=0.01)
+        plt.savefig(output_dir + "attn_map" + ".pdf", bbox_inches="tight", pad_inches=0.01)
+        plt.close("all")
+        if demo_now:
+            fig = px.imshow(mats[0], color_continuous_scale="Blues", title="attn map IO->END", labels=dict(x="Head", y="Layer"))
+            fig.show()
+            fig = px.imshow(mats[1], color_continuous_scale="Blues", title="attn map S1->END", labels=dict(x="Head", y="Layer"))
+            fig.show()
+            fig = px.imshow(mats[2], color_continuous_scale="Blues", title="attn map S2->END", labels=dict(x="Head", y="Layer"))
+            fig.show()
+
+    def drawer4(map_collect1, map_collect2): # for attn map (compare two maps), not used in the paper
+        map_diff = (map_collect1 - map_collect2).permute(1, 2, 0).detach().cpu().numpy()
+        for L in range(n_layers):
+            plt.figure(figsize=(12,12))
+            if map_diff[L].min() < 0:
+                ax = sns.heatmap(map_diff[L], square=True, annot=True, fmt=".3f", annot_kws={"size":9}, cmap="RdBu", cbar_kws={"shrink": 0.8}, linewidth=1, norm=mcolors.TwoSlopeNorm(vcenter = 0, vmin=map_diff[L].min(), vmax=map_diff[L].max()))
+            else:
+                ax = sns.heatmap(map_diff[L], square=True, annot=True, fmt=".3f", annot_kws={"size":9}, cmap="Blues", cbar_kws={"shrink": 0.8}, linewidth=1, norm=mcolors.Normalize(vmin=0, vmax=map_diff[L].max()))
+            ax.set_xticklabels(labels=["END->END", "END->S2", "END->S1+1", "END->S1", "END->IO", "S2->S1+1", "S2->S1", "S2->IO", "S1+1->S1"], rotation=45)
+
+            plt.title("attention_map_batch_layer_" + str(L))
+            plt.savefig(output_dir + "attention_map_batch_layer_" + str(L) + ".png")
+            plt.close("all")
+    
+    # score_var_collect_1, score_avg_collect_1, attn_map_collect_1, attn_map_with_norm_collect_1 = helper(prompt_dict_ls_1)
+    
+    # score_var_collect_2, score_avg_collect_2, attn_map_collect_2, _ = helper(prompt_dict_ls_2)
+    score_var_collect_1, _, attn_map_collect_1, _ = helper(prompt_dict_ls_1)
+    
+    # drawer(score_avg_collect_1, "avg")
+    
+    # drawer(score_var_collect_1 - score_var_collect_2, "var_diff")
+    # drawer(score_var_collect_1, "var")
+    
+    drawer2(score_var_collect_1)
+    
+    drawer3(attn_map_collect_1)
+    # drawer4(attn_map_collect_1, attn_map_collect_2)
+    # drawer3(attn_map_with_norm_collect_1)
