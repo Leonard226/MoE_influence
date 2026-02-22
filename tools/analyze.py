@@ -239,14 +239,17 @@ def diff_breakdown_batch(vector, components, model, mode="default", variance_eps
             tmp_rmsnorm = torch.einsum("PRTED,PRTED->PRTED", tmp_rsqrt*(weight[:,L,:,:].unsqueeze(2).unsqueeze(1)), tmp_vector)
             rigor_breakdown_rmsnorm[:,L,...]= original_rmsnorm[:,L,...].unsqueeze(2).unsqueeze(1).expand(n_prompts_B, n_layers, n_tokens, n_experts, n_dim) - tmp_rmsnorm
     elif mode == "H_agnostic": # TODO: check this
+        # vector shape: [n_prompts_B, n_layers, n_tokens, n_dim] (PRTD)
+        # components shape: [n_prompts_B, n_layers, n_tokens, n_heads, n_dim] (output of heads) (PSTHD)
         n_heads = components.shape[3]
-        rigor_breakdown_rmsnorm = torch.empty((n_prompts_B, n_layers, n_layers, n_tokens, n_heads, n_dim))
+        diff_breakdown_rmsnorm = torch.zeros((n_prompts_B, n_layers, n_layers, n_tokens, n_heads, n_dim)) # PRSTHD
         for L in range(n_layers):
-            tmp_vector = vector[:, L, :, :].unsqueeze(2).unsqueeze(1).expand(n_prompts_B, n_layers, n_tokens, n_heads, n_dim) - components
+            tmp_vector = vector[:, L, :, :].unsqueeze(2).unsqueeze(1).expand(n_prompts_B, L + 1, n_tokens, n_heads, n_dim) - components[:, :(L+1), ...]
             tmp_variance = tmp_vector.to(device).pow(2).mean(-1, keepdim=True)
             tmp_rsqrt = torch.rsqrt(tmp_variance + variance_epsilon)
-            tmp_rmsnorm = torch.einsum("PRTHD,PRTHD->PRTHD", tmp_rsqrt*(weight[:,L,:,:].unsqueeze(2).unsqueeze(1)), tmp_vector)
-            rigor_breakdown_rmsnorm[:,L,...]= original_rmsnorm[:,L,...].unsqueeze(2).unsqueeze(1).expand(n_prompts_B, n_layers, n_tokens, n_heads, n_dim) - tmp_rmsnorm
+            tmp_rmsnorm = torch.einsum("PRTHD,PRTHD->PRTHD", tmp_rsqrt * (weight[:, L, :, :].unsqueeze(2).unsqueeze(1)).expand(n_prompts_B, L + 1, n_tokens, n_heads, n_dim), tmp_vector)
+            diff_breakdown_rmsnorm[:, L, :(L+1)]= original_rmsnorm[:, L, ...].unsqueeze(2).unsqueeze(1).expand(n_prompts_B, L + 1, n_tokens, n_heads, n_dim) - tmp_rmsnorm
+        
     # return original_rmsnorm
     ## check if the implementation is consistent with the previous one
     # rigor_breakdown_rmsnorm = torch.empty((n_prompts_B, n_layers, 1, n_tokens, n_dim))
@@ -684,12 +687,12 @@ def decompose_TAM_tril(prompt_ls, model, tokenizer, router_weight_ls, output_dir
         moe_out_score = torch.tril(torch.einsum("RED,PRSTD->PTERS", router_weight_vectors.float(), moe_out_rmsnorm), diagonal=-1) # shape: [n_prompts_B, max_n_tokens, n_experts, n_layers, n_layers] first n_layers -> recv_layer , second n_layers -> send_layer
         
         ## NOTE: additional experiment 1 (causal intervention experiment)
-        token_rmsnorm2 = diff_breakdown_batch(after_res1, token_components, model, mode="default")
-        attn_out_rmsnorm2 = diff_breakdown_batch(after_res1, attn_output, model, mode="default")
-        moe_out_rmsnorm2 = diff_breakdown_batch(after_res1, mlp_output, model, mode="default")
-        token_score = torch.einsum("RED,PRSTD->PTERS", router_weight_vectors.float(), token_rmsnorm2)
-        attn_out_score = torch.tril(torch.einsum("RED,PRSTD->PTERS", router_weight_vectors.float(), attn_out_rmsnorm2), diagonal=0)
-        moe_out_score = torch.tril(torch.einsum("RED,PRSTD->PTERS", router_weight_vectors.float(), moe_out_rmsnorm2), diagonal=-1)
+        token_rmsnorm2 = diff_breakdown_batch(after_res1, token_components, model, mode="default") # NOTE: decomposition based on difference
+        attn_out_rmsnorm2 = diff_breakdown_batch(after_res1, attn_output, model, mode="default") # NOTE: decomposition based on difference
+        moe_out_rmsnorm2 = diff_breakdown_batch(after_res1, mlp_output, model, mode="default") # NOTE: decomposition based on difference
+        # token_score = torch.einsum("RED,PRSTD->PTERS", router_weight_vectors.float(), token_rmsnorm2)
+        # attn_out_score = torch.tril(torch.einsum("RED,PRSTD->PTERS", router_weight_vectors.float(), attn_out_rmsnorm2), diagonal=0)
+        # moe_out_score = torch.tril(torch.einsum("RED,PRSTD->PTERS", router_weight_vectors.float(), moe_out_rmsnorm2), diagonal=-1)
         
         ######
         ## NOTE: additional experiment 2 (remove a high-variance expert and observe)
@@ -878,7 +881,7 @@ def decompose_IOI_map_score(prompt_dict_ls_1, prompt_dict_ls_2, model, tokenizer
                 simplified_decomposed_attn_out = decomposed_attn_out[torch.arange(n_prompts_B), :, cur_q_token_pos_ls[B:B+n_prompts_B], cur_k_token_pos_ls[B:B+n_prompts_B]] # shape: [n_prompts_B, n_layers, n_heads, n_dim]
                 simplified_decomposed_attn_out = simplified_decomposed_attn_out.unsqueeze(2).unsqueeze(2)  # shape: [n_prompts_B, n_layers, 1, 1, n_heads, n_dim]
                 head_rmsnorm = rmsnorm_breakdown_batch(after_res1[torch.arange(n_prompts_B), :, cur_q_token_pos_ls[B:B+n_prompts_B]].unsqueeze(2), [simplified_decomposed_attn_out], model, mode="H")[0]
-                
+                # TODO: head_rmsnorm2 by diff_breakdown_batch
                 original_score = torch.einsum("RED,PRTD->PTER", router_weight_vectors, after_norm2) # shape: [n_prompts_B, max_n_tokens, n_experts, n_layers]
                 top_n_experts = torch.argsort(original_score, dim=2, descending=True)[:, :, :top_n, :]
                 head_score = torch.tril(torch.einsum("RED,PRSQKHD->PQKHERS", router_weight_vectors, head_rmsnorm.to(router_weight_vectors.device)), diagonal=0)
@@ -989,7 +992,7 @@ def decompose_IOI_map_score(prompt_dict_ls_1, prompt_dict_ls_2, model, tokenizer
     
     # score_var_collect_2, score_avg_collect_2, attn_map_collect_2, _ = helper(prompt_dict_ls_2)
     score_var_collect_1, _, attn_map_collect_1, _ = helper(prompt_dict_ls_1)
-    
+
     # drawer(score_avg_collect_1, "avg")
     
     # drawer(score_var_collect_1 - score_var_collect_2, "var_diff")
@@ -1000,3 +1003,117 @@ def decompose_IOI_map_score(prompt_dict_ls_1, prompt_dict_ls_2, model, tokenizer
     drawer3(attn_map_collect_1)
     # drawer4(attn_map_collect_1, attn_map_collect_2)
     # drawer3(attn_map_with_norm_collect_1)
+
+def H_agnostic_matrix_drawer(data, name, output_dir, add_patch=[], title="", xlabel="Head", ylabel="Layer", need_description=False, need_lognorm=False, cbar_label="Variance", data_type="", demo_now=False):
+    data = data.detach().cpu().numpy()
+    
+    vmin, vmax = data.min(), data.max()
+    if data_type == "Variance":
+        normalize = mcolors.LogNorm(vmin=data[data>0].min(), vmax=vmax) # vmin=1e-4 (for plotting)
+        cmap_type = "Greens"
+    elif need_lognorm: # vmin >= 0
+        normalize = mcolors.LogNorm(vmin=data[data>0].min(), vmax=vmax)
+        cmap_type = "Greens"
+    elif vmin < 0 and vmax > 0:
+        normalize = mcolors.TwoSlopeNorm(vcenter=0, vmin=vmin, vmax=vmax)
+        cmap_type = "RdBu"
+    elif vmax <= 0:
+        normalize = mcolors.Normalize(vmin=vmin, vmax=0)
+        cmap_type = "Reds_r"
+    else: # vmin >= 0
+        normalize = mcolors.Normalize(vmin=0, vmax=vmax)
+        cmap_type = "Blues"
+
+    plt.figure(figsize=(13, 13))
+    with sns.axes_style("white"):
+        if need_lognorm or data_type == "Variance":
+            fmt_setting = ".1e"
+        else:
+            fmt_setting = ".2f"
+        ax = sns.heatmap(data, square=True, annot=True, fmt=fmt_setting, cmap=cmap_type, norm=normalize, cbar_kws={"shrink": 0.5}, linewidth=.5) # annot=False
+        for grid in add_patch:
+            ax.add_patch(Rectangle((grid[0], grid[1]), 1, 1, fill=False, edgecolor="blue", lw=3))
+        cbar = ax.collections[0].colorbar
+        # cbar_min, cbar_max = cbar.mappable.get_clim()
+        # cbar.set_ticks([vmin, vmax])
+        cbar.ax.tick_params(labelsize=40)
+        cbar.set_label(cbar_label, fontsize=40)
+
+    plt.xticks([k + 0.5 for k in range(0, data.shape[1], 5)], [str(k) for k in range(0, data.shape[1], 5)])
+    plt.yticks([k + 0.5 for k in range(0, data.shape[0], 5)], [str(k) for k in range(0, data.shape[0], 5)], rotation=0)
+    plt.xticks(fontsize=30)
+    plt.yticks(fontsize=30)
+    if need_description:
+        plt.title(title)
+        plt.xlabel(xlabel, fontsize=30)
+        plt.ylabel(ylabel, fontsize=30)
+    np.save(output_dir + name + ".npy", data)
+    plt.savefig(output_dir + name + ".png", bbox_inches="tight", pad_inches=0.01)
+    plt.savefig(output_dir + name + ".pdf", bbox_inches="tight", pad_inches=0.01)
+    plt.close("all")
+    if demo_now:
+        fig = px.imshow(data, color_continuous_scale=cmap_type, title=name, labels=dict(x=xlabel, y=ylabel))
+        fig.update_xaxes(side="top")
+        fig.show()
+
+def decompose_H_agnostic(prompt_ls, model, tokenizer, router_weight_ls, output_dir, n_heads, top_n, bsz, max_token_per_prompt, demo_now=False):
+    """ Figures 3 """ 
+    batch_token = tokenizer(prompt_ls, return_tensors="pt", max_length=max_token_per_prompt, padding=False, truncation=True) # should not use padding in principle
+    n_prompts, max_n_tokens = batch_token["attention_mask"].shape
+
+    router_weight_vectors = torch.stack(router_weight_ls, dim=0) # shape: [n_layers, n_experts, n_dim]
+    n_layers, _, _ = router_weight_vectors.shape
+
+    device = "cuda:0"
+    head_var_collect = torch.zeros((max_n_tokens, n_layers, n_heads, n_layers), device=device) # first n_layers -> recv_layer , second n_layers -> send_layer
+    head_topn_sum_collect = torch.zeros((max_n_tokens, n_layers, n_heads, n_layers), device=device) # first n_layers -> recv_layer , second n_layers -> send_layer
+    head_topn_abs_sum_collect = torch.zeros((max_n_tokens, n_layers, n_heads, n_layers), device=device) # first n_layers -> recv_layer , second n_layers -> send_layer
+    head_norm = torch.zeros((max_n_tokens, n_layers, n_heads)) # n_layers -> send_layer
+
+    for B in tqdm(range(0, n_prompts, bsz)):
+        _, hook_dict = model(input_ids=batch_token["input_ids"][B:B+bsz], attention_mask=batch_token["attention_mask"][B:B+bsz])
+        after_res1 = hook_dict["hook_after_res1"] # shape: [n_prompts_B, n_layers, max_n_tokens, n_dim]
+        after_norm2 = hook_dict["hook_after_norm2"] # shape: [n_prompts_B, n_layers, max_n_tokens, n_dim]
+        before_matmul_wo = hook_dict["hook_before_matmul_wo"] # shape: [n_prompts_B, n_layers, n_heads, max_n_tokens, n_head_dim]
+        
+        ## simplified: Ax->Mx (only attend the MoE layer in the same block)
+        W_O = torch.stack([model.model.layers[layer_id].self_attn.o_proj.weight for layer_id in range(n_layers)])
+        W_O = einops.rearrange(W_O, "n_layers d_model (index d_head)->n_layers index d_head d_model", index=16) # index = n_dim // n_head_dim = n_heads = 16
+        decomposed_attn_out = torch.einsum("PSHQA,SHAD->PSQHD", before_matmul_wo, W_O)
+        head_rmsnorm = rmsnorm_breakdown_batch(after_res1, [decomposed_attn_out], model, mode="H_agnostic", device=device)[0]
+        
+        # head_rmsnorm2 = diff_breakdown_batch(after_res1, decomposed_attn_out, model, mode="H_agnostic", variance_epsilon=1e-05, device=device)  # NOTE: decomposition based on difference
+        
+        ## NOTE: head_rmsnorm shape: [n_prompts_B, n_layers, n_layers, max_n_tokens, n_heads, n_dim] # first n_layers -> recv_layer , second n_layers -> send_layer
+        original_score = torch.einsum("RED,PRTD->PTER", router_weight_vectors, after_norm2) # [n_prompts_B, max_n_tokens, n_experts, n_layers]
+        top_n_experts = torch.argsort(original_score, dim=2, descending=True)[:, :, :top_n, :].to(device)
+        head_score = torch.tril(torch.einsum("RED,PRSTHD->PTEHRS", router_weight_vectors.to(device), head_rmsnorm), diagonal=0)
+        head_score = head_score.permute(0,1,2,4,3,5) # PTERHS
+        head_var_collect += head_score.var(dim=2).sum(dim=0)
+        head_topn_sum_collect += torch.gather(head_score, dim=2, index=top_n_experts.long().unsqueeze(-1).unsqueeze(-1).repeat(1, 1, 1, 1, n_heads, n_layers)).sum(dim=(0, 2))
+        head_topn_abs_sum_collect += torch.gather(head_score, dim=2, index=top_n_experts.long().unsqueeze(-1).unsqueeze(-1).repeat(1, 1, 1, 1, n_heads, n_layers)).abs().sum(dim=(0, 2))
+        head_norm += torch.norm(decomposed_attn_out, p=2, dim=-1).sum(0).permute(1,0,2) # QSH
+        ## Code for check if implemented correctly
+        # print(head_score.shape, top_n_experts.shape, top_n_experts.long().unsqueeze(-1).unsqueeze(-1).repeat(1, 1, 1, 1, n_heads, n_layers).shape)
+        # check_head_score = torch.einsum("RED,PRSTHD->PTEHRS", router_weight_vectors.to(device), head_rmsnorm)
+        # print("CHECK: score:", check_head_score[0,1,2,3,5,4], torch.dot(router_weight_vectors[5,2].to(device), head_rmsnorm[0,5,4,1,3]))
+    
+    ## variance
+    H_agnostic_matrix_drawer(head_var_collect[1:].mean(0).div(n_prompts)[torch.arange(n_layers, device=head_var_collect.device), :, torch.arange(n_layers, device=head_var_collect.device)], name="H_agnostic_var_without_T0", output_dir=output_dir, need_lognorm=False, cbar_label="Variance", data_type="Variance", demo_now=demo_now, need_description=True)
+    H_agnostic_matrix_drawer(head_var_collect[0, torch.arange(n_layers, device=head_var_collect.device), :, torch.arange(n_layers, device=head_var_collect.device)].div(n_prompts), name="H_agnostic_var_T0", output_dir=output_dir, need_lognorm=False, cbar_label="Variance", data_type="Variance", demo_now=False, need_description=True)
+    
+    ## avg positive, avg negative of top n, and norm
+    H_agnostic_matrix_drawer((head_topn_sum_collect[1:] + head_topn_abs_sum_collect[1:]).mean(0).div(2 * n_prompts * top_n)[torch.arange(n_layers,device=head_var_collect.device),:, torch.arange(n_layers,device=head_var_collect.device)], name="H_agnostic_positive_without_T0", output_dir=output_dir, cbar_label="APS", demo_now=demo_now, need_description=True)
+    H_agnostic_matrix_drawer((head_topn_sum_collect[1:] - head_topn_abs_sum_collect[1:]).mean(0).div(2 * n_prompts * top_n)[torch.arange(n_layers,device=head_var_collect.device),:, torch.arange(n_layers,device=head_var_collect.device)], name="H_agnostic_negative_without_T0", output_dir=output_dir, cbar_label="ANS", demo_now=demo_now, need_description=True)
+    H_agnostic_matrix_drawer(head_norm[1:].mean(0).div(n_prompts), name="H_agnostic_norm", output_dir=output_dir, demo_now=False, need_description=True, cbar_label="L2-norm")
+    
+    ## compare avg positive and avg negative
+    avg_pos = (head_topn_sum_collect[1:] + head_topn_abs_sum_collect[1:]).mean(0).div(2 * n_prompts * top_n)[torch.arange(n_layers,device=head_var_collect.device),:, torch.arange(n_layers,device=head_var_collect.device)]
+    avg_neg = (head_topn_sum_collect[1:] - head_topn_abs_sum_collect[1:]).mean(0).div(2 * n_prompts * top_n)[torch.arange(n_layers,device=head_var_collect.device),:, torch.arange(n_layers,device=head_var_collect.device)]
+    compare_pos_neg = avg_pos - avg_neg.abs()
+    compare_pos_neg = compare_pos_neg.detach().cpu().numpy()
+    if demo_now:
+        fig = px.imshow(compare_pos_neg, color_continuous_scale="RdBu", color_continuous_midpoint=0, title="pos-abs(neg)", labels=dict(x="Head", y="Layer"))
+        fig.update_xaxes(side="top")
+        fig.show()    
+    return
