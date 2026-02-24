@@ -229,15 +229,15 @@ def diff_breakdown_batch(vector, components, model, mode="default", variance_eps
         diff_breakdown_rmsnorm = original_rmsnorm.unsqueeze(2) - new_rmsnorm # shape: [n_prompts_B, n_layers, n_sending_layers, n_tokens, n_dim]
         
     elif mode == "E": # TODO: check this
-        n_experts = components.shape[3]
-        rigor_breakdown_rmsnorm = torch.empty((n_prompts_B, n_layers, n_layers, n_tokens, n_experts, n_dim))
+        cur_n_experts = components.shape[3]
+        diff_breakdown_rmsnorm = torch.zeros((n_prompts_B, n_layers, n_layers, n_tokens, cur_n_experts, n_dim)) # PRSTED
         for L in range(n_layers):
-            # print(vector[:, L, :, :].unsqueeze(2).unsqueeze(1).shape, components.shape)
-            tmp_vector = vector[:, L, :, :].unsqueeze(2).unsqueeze(1).expand(n_prompts_B, n_layers, n_tokens, n_experts, n_dim) - components
+            tmp_vector = vector[:, L, :, :].unsqueeze(2).unsqueeze(1).expand(n_prompts_B, L + 1, n_tokens, cur_n_experts, n_dim) - components[:, :(L+1), ...]
             tmp_variance = tmp_vector.to(device).pow(2).mean(-1, keepdim=True)
             tmp_rsqrt = torch.rsqrt(tmp_variance + variance_epsilon)
-            tmp_rmsnorm = torch.einsum("PRTED,PRTED->PRTED", tmp_rsqrt*(weight[:,L,:,:].unsqueeze(2).unsqueeze(1)), tmp_vector)
-            rigor_breakdown_rmsnorm[:,L,...]= original_rmsnorm[:,L,...].unsqueeze(2).unsqueeze(1).expand(n_prompts_B, n_layers, n_tokens, n_experts, n_dim) - tmp_rmsnorm
+            tmp_rmsnorm = torch.einsum("PRTED,PRTED->PRTED", tmp_rsqrt * (weight[:, L, :, :].unsqueeze(2).unsqueeze(1).expand(n_prompts_B, L + 1, n_tokens, cur_n_experts, n_dim)), tmp_vector)
+            diff_breakdown_rmsnorm[:, L, :(L+1)]= original_rmsnorm[:, L, ...].unsqueeze(2).unsqueeze(1).expand(n_prompts_B, L + 1, n_tokens, cur_n_experts, n_dim) - tmp_rmsnorm
+
     elif mode == "H_agnostic": # TODO: check this
         # vector shape: [n_prompts_B, n_layers, n_tokens, n_dim] (PRTD)
         # components shape: [n_prompts_B, n_layers, n_tokens, n_heads, n_dim] (output of heads) (PSTHD)
@@ -1085,7 +1085,7 @@ def decompose_H_agnostic(prompt_ls, model, tokenizer, router_weight_ls, output_d
         # head_rmsnorm2 = diff_breakdown_batch(after_res1, decomposed_attn_out, model, mode="H_agnostic", variance_epsilon=1e-05, device=device)  # NOTE: decomposition based on difference
         
         ## NOTE: head_rmsnorm shape: [n_prompts_B, n_layers, n_layers, max_n_tokens, n_heads, n_dim] # first n_layers -> recv_layer , second n_layers -> send_layer
-        original_score = torch.einsum("RED,PRTD->PTER", router_weight_vectors, after_norm2) # [n_prompts_B, max_n_tokens, n_experts, n_layers]
+        original_score = torch.einsum("RED,PRTD->PTER", router_weight_vectors, after_norm2) # shape: [n_prompts_B, max_n_tokens, n_experts, n_layers]
         top_n_experts = torch.argsort(original_score, dim=2, descending=True)[:, :, :top_n, :].to(device)
         head_score = torch.tril(torch.einsum("RED,PRSTHD->PTEHRS", router_weight_vectors.to(device), head_rmsnorm), diagonal=0)
         head_score = head_score.permute(0,1,2,4,3,5) # PTERHS
@@ -1116,4 +1116,367 @@ def decompose_H_agnostic(prompt_ls, model, tokenizer, router_weight_ls, output_d
         fig = px.imshow(compare_pos_neg, color_continuous_scale="RdBu", color_continuous_midpoint=0, title="pos-abs(neg)", labels=dict(x="Head", y="Layer"))
         fig.update_xaxes(side="top")
         fig.show()    
+    return
+
+def decompose_E(prompt_ls, model, tokenizer, router_weight_ls, output_dir, top_k, bsz, max_token_per_prompt, model_id, demo_now=False):
+    """ Figures 5 """
+    batch_token = tokenizer(prompt_ls, return_tensors="pt", max_length=max_token_per_prompt, padding=False, truncation=True) # should not use padding in principle
+    n_prompts, _ = batch_token["attention_mask"].shape
+
+    router_weight_vectors = torch.stack(router_weight_ls, dim=0) # shape: [n_layers, n_experts, n_dim]
+    n_layers, n_experts, _ = router_weight_vectors.shape
+
+    occur_counter = torch.zeros((n_layers, n_experts)) # count how many times the experts are selected
+    score_variance = torch.zeros((n_layers, n_experts, n_layers)) # first n_layers -> send_layer, second n_experts -> recv_layer
+    norm_recorder = torch.zeros((n_layers, n_experts)) # norm of weighted expert output
+    norm_projected_recorder = torch.zeros((n_experts)) # only for experiment: M1->M2
+    projected_variance_recorder = torch.zeros((n_experts)) # only for experiment: M1->M2
+    norm_projected_recorder_counter = torch.zeros((n_experts)) # only for experiment: M1->M2
+    top_k_change = torch.zeros((n_layers, n_experts, n_layers)) # first n_layers -> send_layer, second n_experts -> recv_layer
+    top_k_change_counter =  torch.zeros((n_layers, n_experts, n_layers)) # first n_layers -> send_layer, second n_experts -> recv_layer
+    top_64_change = torch.zeros((n_layers, n_experts, n_layers)) # OLMoE has 64 experts each layer, first n_layers -> send_layer, second n_experts -> recv_layer
+
+    def expert_counter(mat):
+        mat_tmp = mat.permute(1,0) + n_experts * torch.arange(n_layers).unsqueeze(1) # give each expert a temporary id: cur_layer * n_experts + old_expert_id
+        counter = torch.bincount(mat_tmp.flatten(), minlength=(n_experts * n_layers)).reshape(n_layers, n_experts)
+        # check, take OLMoE as an example
+        # print("CHECK:", mat.permute(1,0)[3,:3])
+        # print("CHECK:", (mat.permute(1,0) + n_experts * torch.arange(n_layers).unsqueeze(1))[3, :3])
+        # print("CHECK:", (mat_tmp == 128).sum(), counter[2,0]) # should be equal
+        return counter
+
+    def add_by_index_map(send_expert_id, vars, score_variance_mat):
+        """ sum up the variance """
+        n_all_tokens, n_send_layers, n_recv_layers = vars.shape
+        
+        i_idx = torch.arange(n_send_layers, device=send_expert_id.device).unsqueeze(0).expand(n_all_tokens, n_send_layers) # shape: [n_all_tokens, n_send_layers]
+        j_idx = send_expert_id  # shape: [n_all_tokens, n_send_layers]
+
+        i_idx = i_idx.reshape(-1).to(score_variance_mat.device) # sending layer id
+        j_idx = j_idx.reshape(-1).to(score_variance_mat.device) # sending expert id
+        vars_mat = vars.reshape(-1, n_recv_layers).to(score_variance_mat.device)
+
+        score_variance_mat.index_put_((i_idx, j_idx), vars_mat, accumulate=True)
+        # return score_variance_mat
+
+    def norm_add_by_index_map(send_expert_id, norms, norm_mat):
+        # shape: send_expert_id: [P * T * K, S]; norms: [P, S, T, K]; norm_mat [S, E]
+        norm_mat.scatter_add_(1, send_expert_id.permute(1,0), norms.permute(0,2,3,1).reshape(-1, n_layers).permute(1,0))
+
+        ## for check
+        # print(send_expert_id.permute(1,0).shape, norms.permute(0,2,3,1).reshape(-1, n_layers).permute(1,0).shape, norm_mat.shape)
+        # print(send_expert_id.shape, norms.shape)
+        # tmp_ids = torch.where(send_expert_id[:,0] == 63)[0]
+        # print(norms.permute(0,2,3,1).reshape(-1, n_layers)[tmp_ids,0].sum())
+        # print(norm_mat[0, 63])
+        
+    for B in tqdm(range(0, n_prompts, bsz)):
+        _, hook_dict = model(input_ids=batch_token["input_ids"][B:B+bsz], attention_mask=batch_token["attention_mask"][B:B+bsz])
+        after_res1 = hook_dict["hook_after_res1"] # shape: [n_prompts_B, n_layers, max_n_tokens, n_dim]
+        after_norm2 = hook_dict["hook_after_norm2"] # shape: [n_prompts_B, n_layers, max_n_tokens, n_dim]
+        expert_weighted_outputs = hook_dict["hook_expert_weighted_outputs"] # shape: [n_prompts_B, n_layers, max_n_tokens, original_top_k, n_dim]
+        
+        ffn_out_rmsnorm = rmsnorm_breakdown_batch(after_res1, [expert_weighted_outputs], model, mode="E")[0]
+        ffn_out_rmsnorm2 = diff_breakdown_batch(after_res1, expert_weighted_outputs, model, mode="E")
+        ## check if rmsnorm_breakdown_batch(mode="E") is implemented correctly
+        # mlp_output = hook_dict["hook_mlp_output"] # shape: [n_prompts_B, n_layers, max_n_tokens, n_dim]
+        # print(mlp_output[0,1,2,:3], expert_weighted_outputs.sum(3)[0,1,2,:3]) # should be equal
+        # tmp_rmsnorm = rmsnorm_breakdown_batch(after_res1, [mlp_output], model, mode="TAM")[0] # PRSTD
+        # print(ffn_out_rmsnorm[0,2,1,2,:].sum(0)[:3], tmp_rmsnorm[0,2,1,2,:3]) # should be equal; ffn_out_rmsnorm: PRSTED
+        # exit()
+
+        ## NOTE: ffn_out_rmsnorm shape: [n_prompts_B, n_layers, n_layers, max_n_tokens, original_top_k, n_dim] # first n_layers -> recv_layer , second n_layers -> send_layer
+        original_score = torch.einsum("RED,PRTD->PTER", router_weight_vectors.float(), after_norm2.float()) # shape: [n_prompts_B, max_n_tokens, n_experts, n_layers] # .float() for qwen
+        original_top_k_experts = torch.argsort(original_score, dim=2, descending=True)[:, :, :top_k, :]
+        # NOTE: diagonal=-1; we now use K instead of E to denote the dimension in PRSTED.
+        ffn_out_score = torch.tril(torch.einsum("RED,PRSTKD->PTEKRS", router_weight_vectors.to(ffn_out_rmsnorm.device).float(), ffn_out_rmsnorm.float()), diagonal=-1) # K = original_top_k, i.e., selected experts of send_L # .float() for qwen
+        send_expert_id = original_top_k_experts.reshape(-1, n_layers)
+        # print(len(torch.nonzero(send_expert_id[:,1]==2)) + occur_counter[1,2]) ## for check
+        occur_counter += expert_counter(send_expert_id) # assume that no padding tokens
+        # print(occur_counter[1,2]) ## for check
+        
+        tmp_vars = ffn_out_score.reshape(-1, n_experts, top_k, n_layers, n_layers).var(dim=1).reshape(-1, n_layers, n_layers).permute(0, 2, 1) # after permutation: -1, send_layers, recv_layers
+        add_by_index_map(send_expert_id, tmp_vars, score_variance) # this is an in-place operation
+
+        ## NOTE: check if add_by_index_map implemented correctly
+        # inds = torch.nonzero(original_top_k_experts[:,:,:,1]==2)
+        # tmp1 = ffn_out_score[inds[:,0],inds[:,1],:,inds[:,2], 3, 1] # recv=3, send=1E2
+        # print(tmp1.var(dim=1).sum(0)) # recv=3, send=M1E2
+        # print(score_variance[1,2,3])
+        # exit()
+        
+        ## NOTE: checking the norm of high-influence
+        tmp_norm = torch.norm(expert_weighted_outputs, p=2, dim=-1)
+        norm_add_by_index_map(send_expert_id, tmp_norm, norm_recorder)
+        n_prompts_B = expert_weighted_outputs.shape[0]
+        ## FIXME: (1) may remove this (just for check the tokens), only for OLMoE
+        # for i in range(n_prompts_B):
+        #     for k in range(max_token_per_prompt):
+        #         ## check the tokens related to the specific experts (as long as the experts are selected)
+        #         # if 9 in original_top_k_experts[i, k, :, 1]:
+        #         #     print(tokenizer.decode(batch_token["input_ids"][B + i, k]))
+        #         # if 30 in original_top_k_experts[i, k, :, 2]:
+        #         #     print(tokenizer.decode(batch_token["input_ids"][B + i, k]))
+        #         # if 18 in original_top_k_experts[i, k, :, 1]:
+        #         #     print(tokenizer.decode(batch_token["input_ids"][B + i, k]))
+        #         for m in range(top_k):
+        #             if 9 == original_top_k_experts[i,k,m,1]:
+        #                 print(9, m, tokenizer.decode(batch_token["input_ids"][B+i,k]), torch.norm(expert_weighted_outputs[i,1,k,:],dim=-1), original_top_k_experts[i,k,:,1])
+        #             # if 27 == original_top_k_experts[i,k,m,1]:
+        #             #     print(27, m, tokenizer.decode(batch_token["input_ids"][B+i,k]), torch.norm(expert_weighted_outputs[i,1,:,m]))
+        #             # elif 9 == original_top_k_experts[i,k,m,1]:
+        #             #     print(9, m, tokenizer.decode(batch_token["input_ids"][B+i,k]), torch.norm(expert_weighted_outputs[i,1,k,m]))
+        #             # elif 18 == original_top_k_experts[i,k,m,1]:
+        #             #     print(18, m, tokenizer.decode(batch_token["input_ids"][B+i,k]), torch.norm(expert_weighted_outputs[i,1,k,m]))
+        
+        ## FIXME: (2) temporary addition, only for OLMoE
+        top_64_experts = torch.argsort(original_score, dim=2, descending=True)[:, :, :64, :]
+        for s in [1]:#range(16): # sending layer
+            for r in [2]:#range(s+1, 16): # receiving layer
+                for s_e in range(64): # experts in sending layer
+                    cur_send_expert_indices = torch.nonzero(top_64_experts[:, :, :8, s] == s_e)
+                    if len(cur_send_expert_indices) == 0: # this expert is not selected in the sending layer
+                        continue
+                    tmp_score = original_score.clone() # shape: PTER
+
+                    for p, t, s_e_pos in cur_send_expert_indices:
+                        tmp_score[p, t, :, r] -= ffn_out_score[p, t, :, s_e_pos, r, s] # 对接收层中的所有专家移去send_expert的贡献
+                        norm_projected_recorder[s_e] += torch.norm(ffn_out_rmsnorm[p, r, s, t, s_e_pos], p=2, dim=-1)
+                        projected_variance_recorder[s_e] += torch.matmul(router_weight_vectors[r, :], ffn_out_rmsnorm[p, r, s, t, s_e_pos]).var()
+                        norm_projected_recorder_counter[s_e] += 1
+                        tmp_score_top = torch.argsort(tmp_score[p, t, :, r], descending=True)
+                        original_score_top = top_64_experts[p, t, :, r]
+                        pos_in_b = torch.empty(64, dtype=torch.long)
+                        pos_in_b[tmp_score_top] = torch.arange(64) # pos_in_b[x] denotes the rank of Expert x after the perturbation
+                        pos_in_a = torch.arange(64)
+                        diff = torch.abs(pos_in_a - pos_in_b[original_score_top]) # the rank shift caused by the perturbations
+                        top_k_change[s, s_e, r] += diff[:8].sum()
+                        top_64_change[s, s_e, r] += diff.sum()
+                        # print(tmp_score_top)
+                        # print(original_score_top)
+                        # print(diff)
+                        # print("\n\n")
+
+        ## CHECK
+        # print(torch.nonzero(send_expert_id[:, 0] == 0))
+        # tmp_ind = torch.nonzero(send_expert_id[:, 0] == 0)
+        # print(tmp_vars[tmp_ind, 0, 1].sum())
+        # print(score_variance[0, 0, 1])
+        
+    ## CHECK    
+    # print(score_variance[1, 3, 2], projected_variance_recorder[3]) # for check, M1E3->M2, should be equal
+    # print(occur_counter[1, 3], score_variance[1, 3, 2] / occur_counter[1, 3])
+    
+    norm_recorder /= occur_counter
+    score_variance /= occur_counter.reshape(n_layers, n_experts, 1).repeat(1,1,n_layers)
+    
+    ## CHECK
+    # print(occur_counter[1, 3], norm_projected_recorder_counter[3]) # for check, should be equal 
+    # print(top_k_change[1, :, 3], norm_projected_recorder_counter)
+    
+    def scatter_drawer(data, name):
+        n_following_layers = data.shape[1]
+        data = data.detach().cpu().numpy()
+        plt.figure(figsize=(13, 13))
+        for i in range(n_experts):
+            for j in range(n_following_layers):
+                plt.text(j, data[i, j], str(i), fontdict={"weight":"bold", "size":9})
+        plt.xlim(0, n_layers)
+        plt.ylim(-0.05, 2)
+        plt.ylabel("Score variance")
+        plt.grid()
+        plt.title("decompose_E_" + name)
+        plt.savefig(output_dir + "decompose_E_" + name + ".png")
+        plt.close("all")
+
+    ## just for finding experts with high variance
+    # print(torch.sort(score_variance[0, :, 1]))
+    # print(torch.sort(score_variance[1, :, 2]))
+    # print(torch.sort(score_variance[2, :, 3]))
+    # print(torch.sort(score_variance[3, :, 4]))
+    # print(torch.sort(score_variance[2, :, 4]))
+    # for i in range(n_experts):
+    #     print(i,score_variance[1, i, :])
+
+    # print(score_variance[1,9,2:])
+    # print(score_variance[2,30,3:])
+    # print(score_variance[4,14,5:])
+    # print(score_variance[1,68,2:])
+
+    ## plot the distribution of score variances
+    for k in range(n_layers - 1):
+        scatter_drawer(score_variance[k, :, k+1:], "score_variance_send_layer" + str(k))
+    
+    def olmoe_scatter_drawer(): # TODO: check this function
+        data = score_variance.detach().cpu().numpy()
+        plt.figure(figsize=(13, 13))
+        others_x =[]
+        others_y =[]
+        for send_L in range(n_layers):
+            for E in range(n_experts):
+                if [send_L, E] not in [[1, 9], [2, 30], [4, 14]]:
+                    others_x.extend([L for L in range(send_L+1, n_layers)])
+                    others_y.extend(data[send_L,E,send_L+1:])
+                elif [send_L, E] == [1, 9]:
+                    plt.scatter([L for L in range(send_L+1, n_layers)], data[send_L, E, send_L+1:], s=150, c="r", marker="^", label="M1E9")
+                elif [send_L, E] == [2, 30]:
+                    plt.scatter([L for L in range(send_L+1, n_layers)], data[send_L, E, send_L+1:], s=150, c="g", marker="s", label="M2E30")
+                elif [send_L, E] == [4, 14]:
+                    plt.scatter([L for L in range(send_L+1, n_layers)], data[send_L, E, send_L+1:], s=150, c="b", marker="p", label="M4E14")
+        plt.scatter(others_x, others_y, s=100, alpha=0.5, c="black", label="Other Experts")
+
+        plt.grid()
+        plt.legend(markerscale=2, fontsize=30, loc="upper left", bbox_to_anchor=(1.05, 1))
+        plt.xticks(fontsize=30)
+        plt.yticks(fontsize=30)
+        # plt.title("decompose_E_" + name)
+        print('CHECK M1->M5 score variance\n', data[1,:,5])
+        np.save(output_dir  + "olmoe_scatter" + ".npy", data)
+        plt.savefig(output_dir + "olmoe_scatter" + ".png", bbox_inches="tight", pad_inches=0.01)
+        plt.savefig(output_dir + "olmoe_scatter" + ".pdf", bbox_inches="tight", pad_inches=0.01)
+        plt.close("all")
+        if demo_now:
+            x = [k for i in range(0, n_layers) for j in range(0, n_experts) for k in range(i + 1, n_layers)]
+            y = [data[i,j,k] for i in range(0, n_layers) for j in range(0, n_experts) for k in range(i + 1, n_layers)]
+            color = ["M{}E{}".format(i, j) for i in range(0, n_layers) for j in range(0, n_experts) for _ in range(i + 1, n_layers)]
+            fig = px.scatter(x=x, y=y, color=color, title="varaince of scores (MxEy->Mz), OLMoE", labels=dict(x="Layers", y="Score Variance"))
+            fig.show()
+
+    def qwen_scatter_drawer(): # TODO: check this function
+        data = score_variance.detach().cpu().numpy()
+        plt.figure(figsize=(13,13))
+        special_experts = [[1,68],[2,92],[3,82],[21,69],[24,111],[31,56],[33,69]]
+        others_x =[]
+        others_y =[]
+        for send_L in range(n_layers):
+            # if send_L not in [1, 2, 4]:
+            #     others_x.extend([L for e in range(n_experts) for L in range(send_L+1, n_layers)])
+            #     others_y.extend(data[send_L,:,send_L+1:].reshape(-1))
+            # else:
+            for E in range(n_experts):
+                if [send_L, E] not in [[1,68],[2,92],[3,82],[21,69],[22,92], [24,111],[31,56],[33,69]]:
+                    others_x.extend([L for L in range(send_L+1, n_layers)])
+                    others_y.extend(data[send_L,E,send_L+1:])
+                elif [send_L, E] == [1, 68]:
+                    plt.scatter([L for L in range(send_L+1, n_layers)], data[send_L, E, send_L+1:], s=150, c="y", marker="^", label="M1E68")
+                elif [send_L, E] == [2, 92]:
+                    plt.scatter([L for L in range(send_L+1, n_layers)], data[send_L, E, send_L+1:], s=150, c="m", marker="s", label="M2E92")
+                elif [send_L, E] == [3, 82]:
+                    plt.scatter([L for L in range(send_L+1, n_layers)], data[send_L, E, send_L+1:], s=150, c="c", marker="p", label="M3E82")
+                elif [send_L, E] == [21, 69]:
+                    plt.scatter([L for L in range(send_L+1, n_layers)], data[send_L, E, send_L+1:], s=150, c="orange", marker="H", label="M21E69")
+                elif [send_L, E] == [22, 92]:
+                    plt.scatter([L for L in range(send_L+1, n_layers)], data[send_L, E, send_L+1:], s=150, c="yellowgreen", marker="8", label="M22E92")
+                elif [send_L, E] == [24, 111]:
+                    plt.scatter([L for L in range(send_L+1, n_layers)], data[send_L, E, send_L+1:], s=150, c="indigo", marker="*", label="M24E111")
+                elif [send_L, E] == [31, 56]:
+                    plt.scatter([L for L in range(send_L+1, n_layers)], data[send_L, E, send_L+1:], s=150, c="lightcoral", marker="P", label="M31E56")
+                elif [send_L, E] == [33, 69]:
+                    plt.scatter([L for L in range(send_L+1, n_layers)], data[send_L, E, send_L+1:], s=150, c="peru", marker="X", label="M33E69")
+        plt.scatter(others_x, others_y, s=100, alpha=0.5, c="black", label="Other Experts")
+
+        plt.grid()
+        # ax = plt.gca()
+        # circle = plt.Circle((2, 0.2652), 0.05, color="r", fill=False, linewidth=2)
+        # ax.add_patch(circle)
+        plt.scatter(2, data[1, 68, 2], s=1000, facecolors="none", edgecolors="r", linewidths=4)
+        plt.legend(markerscale=2, fontsize=30, loc="upper left", bbox_to_anchor=(1.05, 1))
+        plt.xticks(fontsize=30)
+        plt.yticks(fontsize=30)
+        # plt.title("decompose_E_" + name)
+        np.save(output_dir + "qwen_scatter" + ".npy", data)
+        plt.savefig(output_dir + "qwen_scatter" + ".png", bbox_inches="tight", pad_inches=0.01)
+        plt.savefig(output_dir + "qwen_scatter" + ".pdf", bbox_inches="tight", pad_inches=0.01)
+        plt.close("all")
+
+    def mixtral_scatter_drawer(): # TODO: check this function
+        data = score_variance.detach().cpu().numpy()
+        others_x =[]
+        others_y =[]
+        plt.figure(figsize=(13,13))
+        for send_L in range(n_layers):
+            for E in range(n_experts):
+                if [send_L, E] not in [[1,3]]:
+                    others_x.extend([L for L in range(send_L+1, n_layers)])
+                    others_y.extend(data[send_L,E,send_L+1:])
+                # elif [send_L, E] == [1, 3]:
+                #     plt.scatter([L for L in range(send_L+1, n_layers)], data[send_L, E, send_L+1:], s=250, c="y", marker="^", label="M1E3")
+        plt.scatter(others_x, others_y, s=100, alpha=0.5, c="black", label="Other Experts")
+        plt.scatter([L for L in range(2, n_layers)], data[1, 3, 2:], s=250, c="y", marker="^", label="M1E3")
+        plt.scatter(n_layers - 1, data[1, 3, n_layers - 1], s=1000, facecolors="none", edgecolors="r", linewidths=4)
+        plt.grid()
+        plt.legend(markerscale=2, fontsize=30, loc="upper left", bbox_to_anchor=(1.05, 1))
+        plt.xticks(fontsize=30)
+        plt.yticks(fontsize=30)
+        plt.xlabel("Receiving Layer", fontsize=30)
+        plt.ylabel("Variance", fontsize=30)
+        # plt.title("decompose_E_" + name)
+        np.save(output_dir + "mixtral_scatter" + ".npy", data) # score variance
+        plt.savefig(output_dir + "mixtral_scatter" + ".png", bbox_inches="tight", pad_inches=0.01)
+        plt.savefig(output_dir + "mixtral_scatter" + ".pdf", bbox_inches="tight", pad_inches=0.01)
+        plt.close("all")
+
+    def plot_var_and_topK(norm, norm_proj, topk, topn, var, time, var_proj): # TODO: check this function
+        norm_proj = norm_proj.detach().cpu().numpy()
+        topk = topk.detach().cpu().numpy()
+        topn = topn.detach().cpu().numpy()
+        var = var.detach().cpu().numpy()
+        time = time.detach().cpu().numpy()
+        var_proj = var_proj.detach().cpu().numpy()
+        print(norm_proj)
+        norm_proj /= time
+        topk /= time
+        topn /= time
+        for i in range(64):
+            print(i, norm[i].round(2), norm_proj[i].round(2), topk[i].round(2), topn[i].round(2), var[i].round(2))
+        print(norm.shape, topk.shape, topn.shape, var.shape)
+        norm_proj_sortarg = np.argsort(norm_proj)
+        xs = [i for i in range(64)]
+        plt.scatter(xs, norm[norm_proj_sortarg]*5, color='r', label='norm(×5)')
+        plt.scatter(xs, norm_proj[norm_proj_sortarg], color='yellow', label='norm_proj')
+        plt.scatter(xs, topk[norm_proj_sortarg], color='g', label='topk experts change rate')
+        plt.scatter(xs, topn[norm_proj_sortarg]/100, color='b', label='all experts change rate (×1/100)')
+        plt.scatter(xs, var[norm_proj_sortarg]*100, color='k', label='var(×100)')
+        plt.legend()
+        plt.savefig(output_dir + 'var_and_top_k_.png', dpi=300, bbox_inches='tight')
+        # plt.savefig(output_dir + 'var_and_top_k_.pdf', dpi=300, bbox_inches='tight')
+        var_proj /= time
+        print(var)
+        print(var_proj)
+        print("norm", "norm_proj", "topk", " all", "var_proj", " freq")
+        print(np.corrcoef(np.array([norm, norm_proj, topk, topn, var, time]), rowvar=True).round(3))
+        exit()
+        print(np.corrcoef(np.array([norm, norm_proj, topk, topn, var, var_proj, time]), rowvar=True).round(2))
+    
+    if "OLMoE" in model_id:
+        olmoe_scatter_drawer()
+        norm_recorder = norm_recorder.detach().cpu().numpy()
+        x = [i for i in range(0, n_layers) for j in range(0, n_experts)]
+        y = [norm_recorder[i, j] for i in range(0, n_layers) for j in range(0, n_experts)]
+
+        print('CHECK score variance M1->M2 \n', score_variance[1, :, 2][:3], (projected_variance_recorder/norm_projected_recorder_counter)[:3]) # should be the same as above, otherwise please check the code!
+        
+        np.save(output_dir + "olmoe_norm" + ".npy", norm_recorder)
+        np.save(output_dir + "top_k_change_M1_to_M2" + ".npy", top_k_change[1, :, 5].detach().cpu().numpy())
+        np.save(output_dir + "top_64_change_M1_to_M2" + ".npy", top_64_change[1, :, 5].detach().cpu().numpy())
+        np.save(output_dir + "norm_projected_recorder" + ".npy", norm_projected_recorder.detach().cpu().numpy())
+        np.save(output_dir + "norm_projected_recorder_counter" + ".npy", norm_projected_recorder_counter.detach().cpu().numpy())
+        np.save(output_dir + "projected_variance_recorder" + ".npy", projected_variance_recorder.detach().cpu().numpy())
+        
+        plot_var_and_topK(norm_recorder[1], norm_projected_recorder, top_k_change[1, :, 10], top_64_change[1, :, 10], score_variance[1, :, 10], norm_projected_recorder_counter, projected_variance_recorder)
+        plt.scatter(x, y, s=5)
+        plt.title("L2-norm, OLMoE")
+        plt.xlabel("Receiving Layer", fontsize=30)
+        plt.ylabel("L2-Norm", fontsize=30)
+        if demo_now:
+            x = [i for i in range(0, n_layers) for j in range(0, n_experts)]
+            y = [norm_recorder[i,j] for i in range(0, n_layers) for j in range(0, n_experts)]
+            color = ["x{}y{}".format(i, j) for i in range(0, n_layers) for j in range(0, n_experts)]
+            fig = px.scatter(x=x, y=y, color=color, title="L2-norm, OLMoE", labels=dict(x="Layers", y="L2-norm"))
+            fig.show()
+    elif "Mixtral" in model_id:
+        mixtral_scatter_drawer()
+    elif "Qwen" in model_id:
+        qwen_scatter_drawer()
+    
     return
