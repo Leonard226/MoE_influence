@@ -1133,13 +1133,12 @@ def decompose_E(prompt_ls, model, tokenizer, router_weight_ls, output_dir, top_k
     projected_variance_recorder = torch.zeros((n_experts)) # only for experiment: M1->M2
     norm_projected_recorder_counter = torch.zeros((n_experts)) # only for experiment: M1->M2
     top_k_change = torch.zeros((n_layers, n_experts, n_layers)) # first n_layers -> send_layer, second n_experts -> recv_layer
-    top_k_change_counter =  torch.zeros((n_layers, n_experts, n_layers)) # first n_layers -> send_layer, second n_experts -> recv_layer
     top_64_change = torch.zeros((n_layers, n_experts, n_layers)) # OLMoE has 64 experts each layer, first n_layers -> send_layer, second n_experts -> recv_layer
 
     def expert_counter(mat):
         mat_tmp = mat.permute(1,0) + n_experts * torch.arange(n_layers).unsqueeze(1) # give each expert a temporary id: cur_layer * n_experts + old_expert_id
         counter = torch.bincount(mat_tmp.flatten(), minlength=(n_experts * n_layers)).reshape(n_layers, n_experts)
-        # check, take OLMoE as an example
+        ## check, take OLMoE as an example
         # print("CHECK:", mat.permute(1,0)[3,:3])
         # print("CHECK:", (mat.permute(1,0) + n_experts * torch.arange(n_layers).unsqueeze(1))[3, :3])
         # print("CHECK:", (mat_tmp == 128).sum(), counter[2,0]) # should be equal
@@ -1191,9 +1190,9 @@ def decompose_E(prompt_ls, model, tokenizer, router_weight_ls, output_dir, top_k
         # NOTE: diagonal=-1; we now use K instead of E to denote the dimension in PRSTED.
         ffn_out_score = torch.tril(torch.einsum("RED,PRSTKD->PTEKRS", router_weight_vectors.to(ffn_out_rmsnorm.device).float(), ffn_out_rmsnorm.float()), diagonal=-1) # K = original_top_k, i.e., selected experts of send_L # .float() for qwen
         send_expert_id = original_top_k_experts.reshape(-1, n_layers)
-        # print(len(torch.nonzero(send_expert_id[:,1]==2)) + occur_counter[1,2]) ## for check
+        # print(len(torch.nonzero(send_expert_id[:, 1] == 2)) + occur_counter[1,2]) # for check
         occur_counter += expert_counter(send_expert_id) # assume that no padding tokens
-        # print(occur_counter[1,2]) ## for check
+        # print(occur_counter[1, 2]) # for check
         
         tmp_vars = ffn_out_score.reshape(-1, n_experts, top_k, n_layers, n_layers).var(dim=1).reshape(-1, n_layers, n_layers).permute(0, 2, 1) # after permutation: -1, send_layers, recv_layers
         add_by_index_map(send_expert_id, tmp_vars, score_variance) # this is an in-place operation
@@ -1235,20 +1234,20 @@ def decompose_E(prompt_ls, model, tokenizer, router_weight_ls, output_dir, top_k
             for r in [2]:#range(s+1, 16): # receiving layer
                 for s_e in range(64): # experts in sending layer
                     cur_send_expert_indices = torch.nonzero(top_64_experts[:, :, :8, s] == s_e)
-                    if len(cur_send_expert_indices) == 0: # this expert is not selected in the sending layer
+                    if len(cur_send_expert_indices) == 0: # indicating this expert is not selected in the sending layer
                         continue
                     tmp_score = original_score.clone() # shape: PTER
 
                     for p, t, s_e_pos in cur_send_expert_indices:
                         tmp_score[p, t, :, r] -= ffn_out_score[p, t, :, s_e_pos, r, s] # 对接收层中的所有专家移去send_expert的贡献
-                        norm_projected_recorder[s_e] += torch.norm(ffn_out_rmsnorm[p, r, s, t, s_e_pos], p=2, dim=-1)
-                        projected_variance_recorder[s_e] += torch.matmul(router_weight_vectors[r, :], ffn_out_rmsnorm[p, r, s, t, s_e_pos]).var()
-                        norm_projected_recorder_counter[s_e] += 1
-                        tmp_score_top = torch.argsort(tmp_score[p, t, :, r], descending=True)
-                        original_score_top = top_64_experts[p, t, :, r]
+                        norm_projected_recorder[s_e] += torch.norm(ffn_out_rmsnorm[p, r, s, t, s_e_pos], p=2, dim=-1) # 投影过的norm的收集器
+                        projected_variance_recorder[s_e] += torch.matmul(router_weight_vectors[r, :], ffn_out_rmsnorm[p, r, s, t, s_e_pos]).var() # 分数方差计数器
+                        norm_projected_recorder_counter[s_e] += 1 # 计数器
+                        tmp_score_top = torch.argsort(tmp_score[p, t, :, r], descending=True) # 扰动后的排位
+                        original_score_top = top_64_experts[p, t, :, r] # 原始的排位
                         pos_in_b = torch.empty(64, dtype=torch.long)
                         pos_in_b[tmp_score_top] = torch.arange(64) # pos_in_b[x] denotes the rank of Expert x after the perturbation
-                        pos_in_a = torch.arange(64)
+                        pos_in_a = torch.arange(64) # rank 0, 1, ... , 63
                         diff = torch.abs(pos_in_a - pos_in_b[original_score_top]) # the rank shift caused by the perturbations
                         top_k_change[s, s_e, r] += diff[:8].sum()
                         top_64_change[s, s_e, r] += diff.sum()
@@ -1264,16 +1263,16 @@ def decompose_E(prompt_ls, model, tokenizer, router_weight_ls, output_dir, top_k
         # print(score_variance[0, 0, 1])
         
     ## CHECK    
-    # print(score_variance[1, 3, 2], projected_variance_recorder[3]) # for check, M1E3->M2, should be equal
-    # print(occur_counter[1, 3], score_variance[1, 3, 2] / occur_counter[1, 3])
+    print(score_variance[1, 3, 2], projected_variance_recorder[3]) # for check, M1E3->M2, should be equal
+    print(occur_counter[1, 3], score_variance[1, 3, 2] / occur_counter[1, 3])
     
     norm_recorder /= occur_counter
     score_variance /= occur_counter.reshape(n_layers, n_experts, 1).repeat(1,1,n_layers)
     
     ## CHECK
-    # print(occur_counter[1, 3], norm_projected_recorder_counter[3]) # for check, should be equal 
-    # print(top_k_change[1, :, 3], norm_projected_recorder_counter)
-    
+    print(occur_counter[1, 3], norm_projected_recorder_counter[3]) # for check, should be equal 
+    print(top_k_change[1, :, 3], norm_projected_recorder_counter)
+    exit()
     def scatter_drawer(data, name):
         n_following_layers = data.shape[1]
         data = data.detach().cpu().numpy()
@@ -1479,4 +1478,186 @@ def decompose_E(prompt_ls, model, tokenizer, router_weight_ls, output_dir, top_k
     elif "Qwen" in model_id:
         qwen_scatter_drawer()
     
+    return
+
+def AARV_expert_olmoe(prompt_ls, model, tokenizer, router_weight_ls, output_dir, top_k, bsz, max_token_per_prompt, model_id, demo_now=False):
+    """ Figures 6 
+        Similar to "decompose_E"
+    """
+    batch_token = tokenizer(prompt_ls, return_tensors="pt", max_length=max_token_per_prompt, padding=False, truncation=True) # should not use padding in principle
+    n_prompts, _ = batch_token["attention_mask"].shape
+
+    router_weight_vectors = torch.stack(router_weight_ls, dim=0) # shape: [n_layers, n_experts, n_dim]
+    n_layers, n_experts, _ = router_weight_vectors.shape
+
+    occur_counter = torch.zeros((n_layers, n_experts)) # count how many times the experts are selected
+    score_variance = torch.zeros((n_layers, n_experts, n_layers)) # first n_layers -> send_layer, second n_experts -> recv_layer
+    norm_recorder = torch.zeros((n_layers, n_experts)) # norm of weighted expert output
+    norm_projected_recorder = torch.zeros((n_layers, n_experts)) 
+    projected_variance_recorder = torch.zeros((n_layers, n_experts))
+    norm_projected_recorder_counter = torch.zeros((n_layers, n_experts))
+    top_k_change = torch.zeros((n_layers, n_experts, n_layers)) # first n_layers -> send_layer, second n_experts -> recv_layer
+    top_64_change = torch.zeros((n_layers, n_experts, n_layers)) # OLMoE has 64 experts each layer, first n_layers -> send_layer, second n_experts -> recv_layer
+
+    def expert_counter(mat):
+        mat_tmp = mat.permute(1,0) + n_experts * torch.arange(n_layers).unsqueeze(1) # give each expert a temporary id: cur_layer * n_experts + old_expert_id
+        counter = torch.bincount(mat_tmp.flatten(), minlength=(n_experts * n_layers)).reshape(n_layers, n_experts)
+        ## check, take OLMoE as an example
+        # print("CHECK:", mat.permute(1,0)[3,:3])
+        # print("CHECK:", (mat.permute(1,0) + n_experts * torch.arange(n_layers).unsqueeze(1))[3, :3])
+        # print("CHECK:", (mat_tmp == 128).sum(), counter[2,0]) # should be equal
+        return counter
+
+    def add_by_index_map(send_expert_id, vars, score_variance_mat):
+        """ sum up the variance """
+        n_all_tokens, n_send_layers, n_recv_layers = vars.shape
+        
+        i_idx = torch.arange(n_send_layers, device=send_expert_id.device).unsqueeze(0).expand(n_all_tokens, n_send_layers) # shape: [n_all_tokens, n_send_layers]
+        j_idx = send_expert_id  # shape: [n_all_tokens, n_send_layers]
+
+        i_idx = i_idx.reshape(-1).to(score_variance_mat.device) # sending layer id
+        j_idx = j_idx.reshape(-1).to(score_variance_mat.device) # sending expert id
+        vars_mat = vars.reshape(-1, n_recv_layers).to(score_variance_mat.device)
+
+        score_variance_mat.index_put_((i_idx, j_idx), vars_mat, accumulate=True)
+        # return score_variance_mat
+
+    def norm_add_by_index_map(send_expert_id, norms, norm_mat):
+        # shape: send_expert_id: [P * T * K, S]; norms: [P, S, T, K]; norm_mat [S, E]
+        norm_mat.scatter_add_(1, send_expert_id.permute(1,0), norms.permute(0,2,3,1).reshape(-1, n_layers).permute(1,0))
+
+    for B in tqdm(range(0, n_prompts, bsz)):
+        _, hook_dict = model(input_ids=batch_token["input_ids"][B:B+bsz], attention_mask=batch_token["attention_mask"][B:B+bsz])
+        after_res1 = hook_dict["hook_after_res1"] # shape: [n_prompts_B, n_layers, max_n_tokens, n_dim]
+        after_norm2 = hook_dict["hook_after_norm2"] # shape: [n_prompts_B, n_layers, max_n_tokens, n_dim]
+        expert_weighted_outputs = hook_dict["hook_expert_weighted_outputs"] # shape: [n_prompts_B, n_layers, max_n_tokens, original_top_k, n_dim]
+        
+        ffn_out_rmsnorm = rmsnorm_breakdown_batch(after_res1, [expert_weighted_outputs], model, mode="E")[0]
+        ffn_out_rmsnorm2 = diff_breakdown_batch(after_res1, expert_weighted_outputs, model, mode="E")
+
+        ## NOTE: ffn_out_rmsnorm shape: [n_prompts_B, n_layers, n_layers, max_n_tokens, original_top_k, n_dim] # first n_layers -> recv_layer , second n_layers -> send_layer
+        original_score = torch.einsum("RED,PRTD->PTER", router_weight_vectors.float(), after_norm2.float()) # shape: [n_prompts_B, max_n_tokens, n_experts, n_layers] # .float() for qwen
+        original_top_k_experts = torch.argsort(original_score, dim=2, descending=True)[:, :, :top_k, :]
+        # NOTE: diagonal=-1; we now use K instead of E to denote the dimension in PRSTED.
+        ffn_out_score = torch.tril(torch.einsum("RED,PRSTKD->PTEKRS", router_weight_vectors.to(ffn_out_rmsnorm.device).float(), ffn_out_rmsnorm.float()), diagonal=-1) # K = original_top_k, i.e., selected experts of send_L # .float() for qwen
+        send_expert_id = original_top_k_experts.reshape(-1, n_layers)
+        # print(len(torch.nonzero(send_expert_id[:, 1] == 2)) + occur_counter[1,2]) # for check
+        occur_counter += expert_counter(send_expert_id) # assume that no padding tokens
+        # print(occur_counter[1, 2]) # for check
+        
+        tmp_vars = ffn_out_score.reshape(-1, n_experts, top_k, n_layers, n_layers).var(dim=1).reshape(-1, n_layers, n_layers).permute(0, 2, 1) # after permutation: -1, send_layers, recv_layers
+        add_by_index_map(send_expert_id, tmp_vars, score_variance) # this is an in-place operation
+
+        ## NOTE: check if add_by_index_map implemented correctly
+        # inds = torch.nonzero(original_top_k_experts[:,:,:,1]==2)
+        # tmp1 = ffn_out_score[inds[:,0],inds[:,1],:,inds[:,2], 3, 1] # recv=3, send=1E2
+        # print(tmp1.var(dim=1).sum(0)) # recv=3, send=M1E2
+        # print(score_variance[1,2,3])
+        # exit()
+
+        ## NOTE: checking the norm of high-influence
+        tmp_norm = torch.norm(expert_weighted_outputs, p=2, dim=-1)
+        norm_add_by_index_map(send_expert_id, tmp_norm, norm_recorder)
+        # M1E9 relates to Token "the", "a" and space token
+        n_prompts_B = expert_weighted_outputs.shape[0]
+        ## FIXME: (1) may remove this (just for check the tokens), only for OLMoE
+        # for i in range(n_prompts_B):
+        #     for k in range(max_token_per_prompt):
+        #         ## check the tokens related to the specific experts (as long as the experts are selected)
+        #         # if 9 in original_top_k_experts[i,k,:,1]:
+        #         #     print(tokenizer.decode(batch_token["input_ids"][B+i,k]))
+        #         # if 30 in original_top_k_experts[i,k,:,2]:
+        #         #     print(tokenizer.decode(batch_token["input_ids"][B+i,k]))
+        #         # if 18 in original_top_k_experts[i,k,:,1]:
+        #         #     print(tokenizer.decode(batch_token["input_ids"][B+i,k]))
+        #         for m in range(top_k):
+        #             if 9 == original_top_k_experts[i,k,m,1]:
+        #                 print(9, m, tokenizer.decode(batch_token["input_ids"][B+i,k]), torch.norm(expert_weighted_outputs[i,1,k,:],dim=-1), original_top_k_experts[i,k,:,1])
+        #             # if 27 == original_top_k_experts[i,k,m,1]:
+        #             #     print(27, m, tokenizer.decode(batch_token["input_ids"][B+i,k]), torch.norm(expert_weighted_outputs[i,1,:,m]))
+        #             # elif 9 == original_top_k_experts[i,k,m,1]:
+        #             #     print(9, m, tokenizer.decode(batch_token["input_ids"][B+i,k]), torch.norm(expert_weighted_outputs[i,1,k,m]))
+        #             # elif 18 == original_top_k_experts[i,k,m,1]:
+        #             #     print(18, m, tokenizer.decode(batch_token["input_ids"][B+i,k]), torch.norm(expert_weighted_outputs[i,1,k,m]))
+        # input()
+
+        ## FIXME: (2) temporary addition, only for OLMoE
+        top_64_experts = torch.argsort(original_score, dim=2, descending=True)[:, :, :64, :]
+        for s in range(16): # sending layer
+            for r in range(s+1, 16): # receiving layer
+                for s_e in range(64): # experts in sending layer
+                    cur_send_expert_indices = torch.nonzero(top_64_experts[:, :, :8, s] == s_e)
+                    if len(cur_send_expert_indices) == 0: # indicating this expert is not selected in the sending layer
+                        continue
+                    tmp_score = original_score.clone() # shape: PTER
+                    #### 旧方法
+                    # print(ffn_out_score[cur_send_expert_indices[:,0], cur_send_expert_indices[:,1],:, cur_send_expert_indices[:,2], r,s].shape)
+                    # for p, t, s_e_pos in cur_send_expert_indices:
+                    #     tmp_score[p, t, :, r] -= ffn_out_score[p, t, :, s_e_pos, r, s] # 对接收层中的所有专家移去send_expert的贡献
+                    #     norm_projected_recorder[s, s_e] += torch.norm(ffn_out_rmsnorm[p, r, s, t, s_e_pos], p=2, dim=-1) # 投影过的norm的收集器
+                    #     projected_variance_recorder[s, s_e] += torch.matmul(router_weight_vectors[r, :], ffn_out_rmsnorm[p, r, s, t, s_e_pos]).var() # 分数方差计数器
+                    #     norm_projected_recorder_counter[s, s_e] += 1 # 计数器
+                    #     tmp_score_top = torch.argsort(tmp_score[p, t, :, r], descending=True) # 扰动后的排位
+                    #     original_score_top = top_64_experts[p, t, :, r] # 原始的排位
+                    #     pos_in_b = torch.empty(64, dtype=torch.long)
+                    #     pos_in_b[tmp_score_top] = torch.arange(64) # pos_in_b[x] denotes the rank of Expert x after the perturbation 每个位置代表专家号，位置上的数值是专家的rank，pas_in_b是变动后的排位
+                    #     pos_in_a = torch.arange(64)
+                    #     diff = torch.abs(pos_in_a - pos_in_b[original_score_top]) # the rank shift caused by the perturbations
+                    #     top_k_change[s, s_e, r] += diff[:8].sum()
+                    #     top_64_change[s, s_e, r] += diff.sum()
+                    # print("top K", s, r, s_e, top_k_change[s, s_e, r])
+                    # print("top 64", s, r, s_e, top_64_change[s, s_e, r])
+                    #### 新方法，更快
+                    p, t, s_e_pos = cur_send_expert_indices[:, 0], cur_send_expert_indices[:, 1], cur_send_expert_indices[:, 2]
+                    cur_len = len(cur_send_expert_indices)
+                    norm_projected_recorder[s, s_e] += torch.norm(ffn_out_rmsnorm[p, r, s, t, s_e_pos], p=2, dim=-1).sum() # 投影过的norm的收集器
+                    # NOTE: Warning: "norm_projected_recorder_counter" may count experts repeatedly (because there are multiple recv layers). If they are not counted repeatedly, then the result should be the same as "occur_counter".
+                    norm_projected_recorder_counter[s, s_e] += cur_len # 计数器 
+                    # print(tmp_score[cur_send_expert_indices[:, 0], cur_send_expert_indices[:, 1], :, torch.ones(cur_len, dtype=torch.long) * r].shape)
+                    # print(ffn_out_score[p, t, :, s_e_pos, r, s].shape)
+                    focus_score = tmp_score[p, t, :, torch.ones(cur_len, dtype=torch.long) * r]
+                    focus_score -= ffn_out_score[p, t, :, s_e_pos, r, s]
+                    focus_score_score_top = torch.argsort(focus_score, dim=1, descending=True) # 扰动后的排位
+                    original_score_top = top_64_experts[p, t, :, r] # 原始的排位
+                    pos_in_b = torch.empty((cur_len, 64), dtype=torch.long)
+                    # print(focus_score_score_top.shape, pos_in_b.shape, torch.arange(64).unsqueeze(0).repeat(cur_len, 1).shape)
+                    pos_in_b.scatter_(1, focus_score_score_top, torch.arange(64).unsqueeze(0).repeat(cur_len, 1))
+                    pos_in_a = torch.arange(64).unsqueeze(0).repeat(cur_len, 1)
+                    diff = torch.abs(pos_in_a - torch.gather(pos_in_b, 1, original_score_top))
+                    top_k_change[s, s_e, r] += diff[:, :8].sum()
+                    top_64_change[s, s_e, r] += diff.sum()
+                    # print("top K", s, r, s_e, top_k_change[s, s_e, r])
+                    # print("top 64", s, r, s_e, top_64_change[s, s_e, r])
+                    
+        ## CHECK
+        # print(torch.nonzero(send_expert_id[:,0] == 0))
+        # tmp_ind = torch.nonzero(send_expert_id[:,0] == 0)
+        # print(tmp_vars[tmp_ind, 0, 1].sum())
+        # print(score_variance[0, 0, 1])
+
+    ## CHECK
+    # print(score_variance[1, 3, 2], projected_variance_recorder[1, 3]) # NOTE: projected_variance_recorder is used in the old version
+    # print(occur_counter[1, 3], score_variance[1, 3, 2] / occur_counter[1, 3])
+
+    norm_recorder /= occur_counter
+    score_variance /= occur_counter.reshape(n_layers, n_experts, 1).repeat(1,1,n_layers)
+
+    ## CHECK
+    ## NOTE: norm_projected_recorder_counter may repeatedly count an expert. Here is an example, if r = 2, 3, ..., 15, then norm_projected_recorder_counter is 14 times.
+    # print(occur_counter[1, 3], norm_projected_recorder_counter[1, 3])
+    # print(top_k_change[1, :, 3])
+    
+    norm_recorder = norm_recorder.detach().cpu().numpy()
+    
+    # print('bbb\n', score_variance[2,:,5][:3])
+    # print('ccc\n', (projected_variance_recorder/norm_projected_recorder_counter)[:3])
+
+    np.save(output_dir + "var" + ".npy", score_variance.detach().cpu().numpy())
+    np.save(output_dir +  "norm_recorder" + ".npy", norm_recorder)
+    np.save(output_dir +  "top_k_change" + ".npy", top_k_change.detach().cpu().numpy())
+    np.save(output_dir +  "top_64_change" + ".npy", top_64_change.detach().cpu().numpy())
+    np.save(output_dir +  "norm_projected_recorder" + ".npy", norm_projected_recorder.detach().cpu().numpy())
+    np.save(output_dir +  "norm_projected_recorder_counter" + ".npy", norm_projected_recorder_counter.detach().cpu().numpy())
+    np.save(output_dir +  "projected_variance_recorder" + ".npy", projected_variance_recorder.detach().cpu().numpy())
+
     return
