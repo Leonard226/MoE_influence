@@ -6,10 +6,12 @@ import matplotlib.colors as mcolors
 import seaborn as sns
 from matplotlib.patches import Rectangle
 import plotly.express as px
+import plotly.graph_objects as go
 from tqdm import tqdm
 import nltk
 from sklearn.manifold import TSNE
 import matplotlib.patches as mpatches
+from scipy import stats
 
 np.random.seed(42) # if you want reproducibility for tsne figures
 
@@ -228,7 +230,7 @@ def diff_breakdown_batch(vector, components, model, mode="default", variance_eps
         new_rmsnorm = new_rsqrt * weight.unsqueeze(2) * new_vector
         diff_breakdown_rmsnorm = original_rmsnorm.unsqueeze(2) - new_rmsnorm # shape: [n_prompts_B, n_layers, n_sending_layers, n_tokens, n_dim]
         
-    elif mode == "E": # TODO: check this
+    elif mode == "E":
         cur_n_experts = components.shape[3]
         diff_breakdown_rmsnorm = torch.zeros((n_prompts_B, n_layers, n_layers, n_tokens, cur_n_experts, n_dim)) # PRSTED
         for L in range(n_layers):
@@ -238,7 +240,7 @@ def diff_breakdown_batch(vector, components, model, mode="default", variance_eps
             tmp_rmsnorm = torch.einsum("PRTED,PRTED->PRTED", tmp_rsqrt * (weight[:, L, :, :].unsqueeze(2).unsqueeze(1).expand(n_prompts_B, L + 1, n_tokens, cur_n_experts, n_dim)), tmp_vector)
             diff_breakdown_rmsnorm[:, L, :(L+1)]= original_rmsnorm[:, L, ...].unsqueeze(2).unsqueeze(1).expand(n_prompts_B, L + 1, n_tokens, cur_n_experts, n_dim) - tmp_rmsnorm
 
-    elif mode == "H_agnostic": # TODO: check this
+    elif mode == "H_agnostic":
         # vector shape: [n_prompts_B, n_layers, n_tokens, n_dim] (PRTD)
         # components shape: [n_prompts_B, n_layers, n_tokens, n_heads, n_dim] (output of heads) (PSTHD)
         n_heads = components.shape[3]
@@ -839,6 +841,7 @@ def decompose_TAM_tril(prompt_ls, model, tokenizer, router_weight_ls, output_dir
     plt.close("all")
 
     print("hit counters", m1e9_count, m1e18_count)
+    # return moe_out_score_var_collect[1:].mean(0).div(n_prompts), attn_out_score_var_collect[1:].mean(0).div(n_prompts) # temporary modification
     return
 
 def decompose_IOI_map_score(prompt_dict_ls_1, prompt_dict_ls_2, model, tokenizer, router_weight_ls, output_dir, n_heads, top_n, bsz, demo_now=False):
@@ -1660,4 +1663,71 @@ def AARV_expert_olmoe(prompt_ls, model, tokenizer, router_weight_ls, output_dir,
     np.save(output_dir +  "norm_projected_recorder_counter" + ".npy", norm_projected_recorder_counter.detach().cpu().numpy())
     np.save(output_dir +  "projected_variance_recorder" + ".npy", projected_variance_recorder.detach().cpu().numpy())
 
+    # def hash_to_color(indices):
+    #     hovertexts = []
+    #     colors = []
+    #     for i in range(7680):
+    #         s = "M{}_E{}".format(indices[0, i], indices[2, i])
+    #         hovertexts.append(s)
+    #         hashed = hash(s)
+    #         r = hashed & 0xFF
+    #         g = (hashed >> 8) & 0xFF
+    #         b = (hashed >> 16) & 0xFF
+    #         colors.append("rgb({}, {}, {})".format(r, g, b))
+    #     return hovertexts, colors
+
+    if demo_now: # for OLMoE
+
+        x = [i for i in range(n_experts) for j in range(3)]
+        y = [score_variance[1, i, j] for i in range(n_experts) for j in [5, 10, 15]]
+        color = ["M1->M5", "M1->M10", "M1->M15"] * 64
+        fig = px.scatter(x=x, y=y, color=color, title="score_variance", labels=dict(x="Experts in M1", y="score_variance"))
+        fig.show()
+
+        # top_k_change /= occur_counter[:,:,None]
+        top_k_change /= (top_k * occur_counter[:,:,None])
+        # print(stats.spearmanr(var[1,:,15], topk[1,:,15]/time[1,:]))
+        score_variance_np = score_variance.detach().cpu().numpy()
+        top_k_change_np = top_k_change.detach().cpu().numpy()
+        
+        x = [i for i in range(n_experts) for j in range(3)]
+        y = [top_k_change_np[1, i, j] for i in range(n_experts) for j in [5, 10, 15]]
+        color = ["M1->M5", "M1->M10", "M1->M15"] * 64
+        fig = px.scatter(x=x, y=y, color=color, title="AARV (average absolute rank variation of top-k)", labels=dict(x="Experts in M1", y="AARV"))
+        fig.show()
+
+        spearman = np.zeros((16,16))
+        p_value = np.zeros((16,16))
+        for i in range(16): #sending
+            for j in range(i+1, 16): #receiving
+                spearman[i,j], p_value[i,j] = stats.spearmanr(score_variance_np[i,:,j], top_k_change_np[i,:,j])
+
+        mask = np.tril(np.ones_like(spearman, dtype=bool), k=0)
+        spearman = np.where(mask, np.nan, spearman)
+
+        fig = px.imshow(spearman.T, color_continuous_scale="Blues", title="Spearman (score variance and AARV)")
+        fig.update_xaxes(side="top", title_text="sending layer")
+        fig.update_yaxes(side="top", title_text="receiving layer")
+        fig.show()
+        # fig = px.imshow(p_value.T, color_continuous_scale="Blues")
+        # fig.show()
+        
+        fig = px.scatter(y=top_k_change_np.reshape(-1), x=score_variance_np.reshape(-1), color=["M{}_E{}".format(i,j) for i in range(16) for j in range(64) for k in range(16)])
+        fig.update_xaxes(type="log", title_text="var")
+        fig.update_yaxes(type="log", title_text="average absolute rank variation of top-k")
+        fig.show()
+
+        # send_recv_indices = torch.triu_indices(16, 16, 1).repeat(1, 64)
+        # expert_indices = torch.arange(64).repeat_interleave(120) # 15 * (15 + 1) / 2 = 120
+        # SRE_indices = torch.cat((send_recv_indices, expert_indices.unsqueeze(0)), dim=0)
+
+        # hovertexts, colors = hash_to_color(SRE_indices.detach().cpu().numpy())
+        # fig = go.Figure(data=go.Scatter(y=top_k_change[SRE_indices[0,:], SRE_indices[2, :], SRE_indices[1, :]].detach().cpu().numpy(), 
+        #                                 x=score_variance[SRE_indices[0,:], SRE_indices[2, :], SRE_indices[1, :]].detach().cpu().numpy(), 
+        #                                 mode="markers", 
+        #                                 marker=dict(color=colors, size=5),
+        #                                 hovertext=hovertexts))
+        # fig.update_xaxes(type="log", title_text="var")
+        # fig.update_yaxes(type="log", title_text="average absolute rank variation of top-k")
+        # fig.show()
     return
