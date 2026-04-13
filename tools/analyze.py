@@ -1275,7 +1275,7 @@ def decompose_E(prompt_ls, model, tokenizer, router_weight_ls, output_dir, top_k
     ## CHECK
     print(occur_counter[1, 3], norm_projected_recorder_counter[3]) # for check, should be equal 
     print(top_k_change[1, :, 3], norm_projected_recorder_counter)
-    exit()
+    # exit()
     def scatter_drawer(data, name):
         n_following_layers = data.shape[1]
         data = data.detach().cpu().numpy()
@@ -1447,7 +1447,7 @@ def decompose_E(prompt_ls, model, tokenizer, router_weight_ls, output_dir, top_k
         print(var_proj)
         print("norm", "norm_proj", "topk", " all", "var_proj", " freq")
         print(np.corrcoef(np.array([norm, norm_proj, topk, topn, var, time]), rowvar=True).round(3))
-        exit()
+        # exit()
         print(np.corrcoef(np.array([norm, norm_proj, topk, topn, var, var_proj, time]), rowvar=True).round(2))
     
     if "OLMoE" in model_id:
