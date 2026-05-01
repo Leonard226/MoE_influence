@@ -229,8 +229,9 @@ class OlmoeMLP(nn.Module):
         self.act_fn = ACT2FN[config.hidden_act]
 
     def forward(self, x):
-        down_proj = self.down_proj(self.act_fn(self.gate_proj(x)) * self.up_proj(x))
-        return down_proj
+        intermediate = self.act_fn(self.gate_proj(x)) * self.up_proj(x)
+        self.hook_alpha = intermediate  #### added: SwiGLU intermediate alpha^{c,j}_z, shape [n_tokens_routed, d_ffn]
+        return self.down_proj(intermediate)
 
 
 # Copied from transformers.models.llama.modeling_llama.repeat_kv
@@ -655,6 +656,8 @@ class OlmoeSparseMoeBlock(nn.Module):
         expert_mask = torch.nn.functional.one_hot(selected_experts, num_classes=self.num_experts).permute(2, 1, 0)
         hook_expert_weighted_outputs = torch.empty((batch_size * sequence_length, self.top_k, hidden_dim), dtype=hidden_states.dtype, device=hidden_states.device) #### added
         hook_routing_weights = routing_weights #### added
+        intermediate_size = self.experts[0].intermediate_size #### added
+        hook_alpha = torch.empty((batch_size * sequence_length, self.top_k, intermediate_size), dtype=hidden_states.dtype, device=hidden_states.device) #### added: per-token, per-top-k SwiGLU alpha
 
         # Loop over all available experts in the model and perform the computation on each expert
 
@@ -672,11 +675,12 @@ class OlmoeSparseMoeBlock(nn.Module):
             ########
             current_hidden_states = expert_layer(current_state) * routing_weights[top_x, idx, None]
             hook_expert_weighted_outputs[top_x, idx] = current_hidden_states.to(hook_expert_weighted_outputs.device) #### added?? idx, top_x or top_x, idx
+            hook_alpha[top_x, idx] = expert_layer.hook_alpha.to(hook_alpha.dtype) #### added
             # However `index_add_` only support torch tensors for indexing so we'll use
             # the `top_x` tensor here.
             final_hidden_states.index_add_(0, top_x, current_hidden_states.to(hidden_states.dtype))
         final_hidden_states = final_hidden_states.reshape(batch_size, sequence_length, hidden_dim)
-        mlp_hooks = (router_logits, hook_selected_experts, hook_expert_weighted_outputs, hook_routing_weights) #### added
+        mlp_hooks = (router_logits, hook_selected_experts, hook_expert_weighted_outputs, hook_routing_weights, hook_alpha) #### added (hook_alpha appended)
         return final_hidden_states, router_logits, mlp_hooks #### added
         # return final_hidden_states, router_logits #### commented
 
@@ -919,6 +923,7 @@ class OlmoeModel(OlmoePreTrainedModel):
         n_head_dim = n_dim // n_heads
         n_experts = self.config.num_experts
         top_k = self.config.num_experts_per_tok
+        intermediate_size = self.config.intermediate_size #### added
         hook_layer_input = torch.empty((n_layers, batch_size, n_tokens, n_dim))
         hook_attn_output = torch.empty((n_layers, batch_size, n_tokens, n_dim))
         hook_after_res1 = torch.empty((n_layers, batch_size, n_tokens, n_dim))
@@ -937,6 +942,7 @@ class OlmoeModel(OlmoePreTrainedModel):
         hook_selected_experts = torch.empty((n_layers, batch_size * n_tokens, top_k))
         hook_expert_weighted_outputs = torch.empty((n_layers, batch_size * n_tokens, top_k, n_dim))
         hook_routing_weights = torch.empty((n_layers, batch_size * n_tokens, top_k))
+        hook_alpha = torch.empty((n_layers, batch_size * n_tokens, top_k, intermediate_size)) #### added
         ########
 
         for decoder_layer in self.layers[: self.config.num_hidden_layers]:
@@ -1011,6 +1017,7 @@ class OlmoeModel(OlmoePreTrainedModel):
             hook_selected_experts[layer_counter] = layer_outputs[dict_pos][15]
             hook_expert_weighted_outputs[layer_counter] = layer_outputs[dict_pos][16]
             hook_routing_weights[layer_counter] = layer_outputs[dict_pos][17]
+            hook_alpha[layer_counter] = layer_outputs[dict_pos][18] #### added
             layer_counter += 1
             ########
         #### added
@@ -1032,6 +1039,7 @@ class OlmoeModel(OlmoePreTrainedModel):
         hook_selected_experts = hook_selected_experts.reshape(n_layers, batch_size, n_tokens, top_k).transpose(0,1)
         hook_expert_weighted_outputs = hook_expert_weighted_outputs.reshape(n_layers, batch_size, n_tokens, top_k, n_dim).transpose(0,1)
         hook_routing_weights = hook_routing_weights.transpose(0,1)
+        hook_alpha = hook_alpha.reshape(n_layers, batch_size, n_tokens, top_k, intermediate_size).transpose(0,1) #### added
         hook_dict = {"hook_layer_input" : hook_layer_input, "hook_attn_output" : hook_attn_output,
                     "hook_after_res1" : hook_after_res1, "hook_after_norm2" : hook_after_norm2,
                     "hook_mlp_output" : hook_mlp_output, "hook_layer_output" : hook_layer_output,
@@ -1041,7 +1049,8 @@ class OlmoeModel(OlmoePreTrainedModel):
                     "hook_attn_weights" : hook_attn_weights,
                     "hook_before_matmul_wo" : hook_before_matmul_wo,"router_logits" : router_logits,
                     "hook_selected_experts" : hook_selected_experts, "hook_expert_weighted_outputs" : hook_expert_weighted_outputs,
-                    "hook_routing_weights" : hook_routing_weights,}
+                    "hook_routing_weights" : hook_routing_weights,
+                    "hook_alpha" : hook_alpha,} #### added
         ########
         hidden_states = self.norm(hidden_states)
 
