@@ -56,6 +56,17 @@ NAMED_EXPERTS = {
     "M14E60": (14, 60, C_M14E60, "D"),  # purple diamond
 }
 
+# All four named experts are high-variance; M14E60 is the only one whose variance
+# is distributed across many neurons rather than concentrated in a small set.
+EXPERT_KIND = {
+    "M1E9":   "concentrated",
+    "M2E30":  "concentrated",
+    "M4E14":  "concentrated",
+    "M14E60": "distributed",
+}
+def expert_label(name):
+    return f"{name} ({EXPERT_KIND[name]})"
+
 # Three blue shades for M4E14's three top neurons (dark → light by descending rank).
 M4E14_SHADES = ["#1f77b4", "#5e9bcf", "#9bbedb"]
 
@@ -99,7 +110,7 @@ for name, (c, j, col, marker) in NAMED_EXPERTS.items():
     ls = list(range(c + 1, N_LAYERS))
     vals = [score_variance[c, j, l] for l in ls]
     axA.scatter(ls, vals, color=col, marker=marker,
-                s=42, label=name, zorder=3, edgecolor=col, linewidth=0)
+                s=42, label=expert_label(name), zorder=3, edgecolor=col, linewidth=0)
 
 axA.scatter([], [], color=C_RAND, alpha=0.35, s=6, label="Other Experts")
 axA.set_xlabel("Receiving Layer")
@@ -133,7 +144,7 @@ for name, (c, j, _, _) in NAMED_EXPERTS.items():
 for name, (c, j, col, marker) in NAMED_EXPERTS.items():
     k, frac = cum_frac(c, j)
     axB.plot(k, frac, marker="o", color=col, lw=2.0, ms=4.5,
-             label=name, zorder=3)
+             label=expert_label(name), zorder=3)
 
 # Random expert baseline (mean of 4).
 rng = np.random.default_rng(42)

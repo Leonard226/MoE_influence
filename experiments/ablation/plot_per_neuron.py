@@ -116,7 +116,13 @@ for name, ax, expert_color, recv_layers in PANEL_LAYOUT:
 
     ax.set_xlabel(f"Neurons in {name}")
     ax.set_ylabel("AARV")
-    ax.set_title(name)
+    # All four named experts are high-variance experts; the first three concentrate the
+    # variance in a small set of neurons, M14E60 distributes it across many.
+    if name == "M14E60":
+        suffix = " (high-variance, distributed)"
+    else:
+        suffix = " (high-variance, concentrated)"
+    ax.set_title(f"{name}{suffix}")
     ax.set_xlim(-10, D_FFN + 10)
     ax.set_ylim(bottom=-0.05 * global_max, top=1.05 * global_max)
     ax.grid(True, alpha=0.3, lw=0.4, zorder=0)
