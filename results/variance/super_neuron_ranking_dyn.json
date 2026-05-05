@@ -1,0 +1,706 @@
+{
+  "n_total_neurons": 1048576,
+  "n_top100_inside_super_experts": 10,
+  "top100": [
+    {
+      "c": 1,
+      "j": 9,
+      "z": 915,
+      "score": 15.276413917541504,
+      "in_super_expert": "M1E9"
+    },
+    {
+      "c": 4,
+      "j": 14,
+      "z": 391,
+      "score": 4.654109001159668,
+      "in_super_expert": "M4E14"
+    },
+    {
+      "c": 2,
+      "j": 30,
+      "z": 742,
+      "score": 2.9166102409362793,
+      "in_super_expert": null
+    },
+    {
+      "c": 4,
+      "j": 14,
+      "z": 336,
+      "score": 2.016557216644287,
+      "in_super_expert": "M4E14"
+    },
+    {
+      "c": 4,
+      "j": 14,
+      "z": 956,
+      "score": 0.33386659622192383,
+      "in_super_expert": "M4E14"
+    },
+    {
+      "c": 14,
+      "j": 60,
+      "z": 357,
+      "score": 0.2417154461145401,
+      "in_super_expert": null
+    },
+    {
+      "c": 1,
+      "j": 9,
+      "z": 107,
+      "score": 0.1957123577594757,
+      "in_super_expert": "M1E9"
+    },
+    {
+      "c": 14,
+      "j": 60,
+      "z": 776,
+      "score": 0.15531983971595764,
+      "in_super_expert": null
+    },
+    {
+      "c": 6,
+      "j": 59,
+      "z": 750,
+      "score": 0.1309826672077179,
+      "in_super_expert": null
+    },
+    {
+      "c": 9,
+      "j": 8,
+      "z": 3,
+      "score": 0.13036510348320007,
+      "in_super_expert": null
+    },
+    {
+      "c": 14,
+      "j": 60,
+      "z": 694,
+      "score": 0.12984363734722137,
+      "in_super_expert": null
+    },
+    {
+      "c": 4,
+      "j": 14,
+      "z": 440,
+      "score": 0.11731183528900146,
+      "in_super_expert": "M4E14"
+    },
+    {
+      "c": 1,
+      "j": 18,
+      "z": 627,
+      "score": 0.11166642606258392,
+      "in_super_expert": null
+    },
+    {
+      "c": 14,
+      "j": 60,
+      "z": 713,
+      "score": 0.08578452467918396,
+      "in_super_expert": null
+    },
+    {
+      "c": 14,
+      "j": 9,
+      "z": 72,
+      "score": 0.07860969007015228,
+      "in_super_expert": null
+    },
+    {
+      "c": 14,
+      "j": 60,
+      "z": 269,
+      "score": 0.07692186534404755,
+      "in_super_expert": null
+    },
+    {
+      "c": 3,
+      "j": 39,
+      "z": 438,
+      "score": 0.0736316591501236,
+      "in_super_expert": null
+    },
+    {
+      "c": 14,
+      "j": 60,
+      "z": 511,
+      "score": 0.06022360175848007,
+      "in_super_expert": null
+    },
+    {
+      "c": 5,
+      "j": 57,
+      "z": 866,
+      "score": 0.058682311326265335,
+      "in_super_expert": null
+    },
+    {
+      "c": 14,
+      "j": 60,
+      "z": 293,
+      "score": 0.053775280714035034,
+      "in_super_expert": null
+    },
+    {
+      "c": 8,
+      "j": 22,
+      "z": 142,
+      "score": 0.04217037558555603,
+      "in_super_expert": null
+    },
+    {
+      "c": 1,
+      "j": 9,
+      "z": 661,
+      "score": 0.039834555238485336,
+      "in_super_expert": "M1E9"
+    },
+    {
+      "c": 6,
+      "j": 9,
+      "z": 439,
+      "score": 0.039757438004016876,
+      "in_super_expert": null
+    },
+    {
+      "c": 14,
+      "j": 60,
+      "z": 833,
+      "score": 0.038329001516103745,
+      "in_super_expert": null
+    },
+    {
+      "c": 6,
+      "j": 9,
+      "z": 110,
+      "score": 0.027570631355047226,
+      "in_super_expert": null
+    },
+    {
+      "c": 14,
+      "j": 60,
+      "z": 673,
+      "score": 0.02333657070994377,
+      "in_super_expert": null
+    },
+    {
+      "c": 14,
+      "j": 60,
+      "z": 653,
+      "score": 0.020499212667346,
+      "in_super_expert": null
+    },
+    {
+      "c": 14,
+      "j": 60,
+      "z": 419,
+      "score": 0.018856095150113106,
+      "in_super_expert": null
+    },
+    {
+      "c": 3,
+      "j": 39,
+      "z": 480,
+      "score": 0.01708158291876316,
+      "in_super_expert": null
+    },
+    {
+      "c": 14,
+      "j": 9,
+      "z": 870,
+      "score": 0.016107236966490746,
+      "in_super_expert": null
+    },
+    {
+      "c": 11,
+      "j": 56,
+      "z": 162,
+      "score": 0.01592274010181427,
+      "in_super_expert": null
+    },
+    {
+      "c": 10,
+      "j": 4,
+      "z": 303,
+      "score": 0.014359683729708195,
+      "in_super_expert": null
+    },
+    {
+      "c": 11,
+      "j": 56,
+      "z": 120,
+      "score": 0.013762662187218666,
+      "in_super_expert": null
+    },
+    {
+      "c": 11,
+      "j": 0,
+      "z": 863,
+      "score": 0.01369471289217472,
+      "in_super_expert": null
+    },
+    {
+      "c": 9,
+      "j": 7,
+      "z": 533,
+      "score": 0.013151966035366058,
+      "in_super_expert": null
+    },
+    {
+      "c": 13,
+      "j": 2,
+      "z": 125,
+      "score": 0.012845818884670734,
+      "in_super_expert": null
+    },
+    {
+      "c": 14,
+      "j": 9,
+      "z": 173,
+      "score": 0.012633119709789753,
+      "in_super_expert": null
+    },
+    {
+      "c": 2,
+      "j": 30,
+      "z": 35,
+      "score": 0.01191869005560875,
+      "in_super_expert": null
+    },
+    {
+      "c": 10,
+      "j": 4,
+      "z": 931,
+      "score": 0.010457952506840229,
+      "in_super_expert": null
+    },
+    {
+      "c": 12,
+      "j": 59,
+      "z": 1014,
+      "score": 0.01043502613902092,
+      "in_super_expert": null
+    },
+    {
+      "c": 10,
+      "j": 43,
+      "z": 530,
+      "score": 0.009942293167114258,
+      "in_super_expert": null
+    },
+    {
+      "c": 5,
+      "j": 57,
+      "z": 353,
+      "score": 0.009856515564024448,
+      "in_super_expert": null
+    },
+    {
+      "c": 12,
+      "j": 7,
+      "z": 282,
+      "score": 0.00976573396474123,
+      "in_super_expert": null
+    },
+    {
+      "c": 11,
+      "j": 5,
+      "z": 767,
+      "score": 0.00965704582631588,
+      "in_super_expert": null
+    },
+    {
+      "c": 10,
+      "j": 60,
+      "z": 557,
+      "score": 0.009468748234212399,
+      "in_super_expert": null
+    },
+    {
+      "c": 14,
+      "j": 60,
+      "z": 332,
+      "score": 0.009457787498831749,
+      "in_super_expert": null
+    },
+    {
+      "c": 4,
+      "j": 27,
+      "z": 1004,
+      "score": 0.009408766403794289,
+      "in_super_expert": null
+    },
+    {
+      "c": 10,
+      "j": 60,
+      "z": 426,
+      "score": 0.009290354326367378,
+      "in_super_expert": null
+    },
+    {
+      "c": 10,
+      "j": 26,
+      "z": 499,
+      "score": 0.009229278191924095,
+      "in_super_expert": null
+    },
+    {
+      "c": 11,
+      "j": 0,
+      "z": 922,
+      "score": 0.008984013460576534,
+      "in_super_expert": null
+    },
+    {
+      "c": 4,
+      "j": 14,
+      "z": 754,
+      "score": 0.008973494172096252,
+      "in_super_expert": "M4E14"
+    },
+    {
+      "c": 9,
+      "j": 43,
+      "z": 685,
+      "score": 0.00882287323474884,
+      "in_super_expert": null
+    },
+    {
+      "c": 6,
+      "j": 17,
+      "z": 42,
+      "score": 0.008785143494606018,
+      "in_super_expert": null
+    },
+    {
+      "c": 14,
+      "j": 60,
+      "z": 189,
+      "score": 0.008649718016386032,
+      "in_super_expert": null
+    },
+    {
+      "c": 12,
+      "j": 47,
+      "z": 762,
+      "score": 0.008507562801241875,
+      "in_super_expert": null
+    },
+    {
+      "c": 10,
+      "j": 21,
+      "z": 86,
+      "score": 0.008423547260463238,
+      "in_super_expert": null
+    },
+    {
+      "c": 14,
+      "j": 60,
+      "z": 946,
+      "score": 0.008308799006044865,
+      "in_super_expert": null
+    },
+    {
+      "c": 0,
+      "j": 6,
+      "z": 304,
+      "score": 0.007981104776263237,
+      "in_super_expert": null
+    },
+    {
+      "c": 14,
+      "j": 9,
+      "z": 441,
+      "score": 0.007932535372674465,
+      "in_super_expert": null
+    },
+    {
+      "c": 14,
+      "j": 60,
+      "z": 960,
+      "score": 0.007823693566024303,
+      "in_super_expert": null
+    },
+    {
+      "c": 12,
+      "j": 39,
+      "z": 916,
+      "score": 0.007497231476008892,
+      "in_super_expert": null
+    },
+    {
+      "c": 14,
+      "j": 9,
+      "z": 889,
+      "score": 0.0072831339202821255,
+      "in_super_expert": null
+    },
+    {
+      "c": 6,
+      "j": 49,
+      "z": 1017,
+      "score": 0.007026513572782278,
+      "in_super_expert": null
+    },
+    {
+      "c": 8,
+      "j": 22,
+      "z": 456,
+      "score": 0.00693691149353981,
+      "in_super_expert": null
+    },
+    {
+      "c": 14,
+      "j": 9,
+      "z": 161,
+      "score": 0.006935419514775276,
+      "in_super_expert": null
+    },
+    {
+      "c": 0,
+      "j": 38,
+      "z": 790,
+      "score": 0.00681947311386466,
+      "in_super_expert": null
+    },
+    {
+      "c": 4,
+      "j": 27,
+      "z": 139,
+      "score": 0.00673717213794589,
+      "in_super_expert": null
+    },
+    {
+      "c": 10,
+      "j": 58,
+      "z": 88,
+      "score": 0.006602706387639046,
+      "in_super_expert": null
+    },
+    {
+      "c": 11,
+      "j": 24,
+      "z": 491,
+      "score": 0.006196949165314436,
+      "in_super_expert": null
+    },
+    {
+      "c": 11,
+      "j": 8,
+      "z": 475,
+      "score": 0.006181510165333748,
+      "in_super_expert": null
+    },
+    {
+      "c": 14,
+      "j": 60,
+      "z": 682,
+      "score": 0.006126847583800554,
+      "in_super_expert": null
+    },
+    {
+      "c": 6,
+      "j": 9,
+      "z": 540,
+      "score": 0.0060479482635855675,
+      "in_super_expert": null
+    },
+    {
+      "c": 7,
+      "j": 12,
+      "z": 51,
+      "score": 0.005939585156738758,
+      "in_super_expert": null
+    },
+    {
+      "c": 12,
+      "j": 39,
+      "z": 361,
+      "score": 0.00592677341774106,
+      "in_super_expert": null
+    },
+    {
+      "c": 13,
+      "j": 2,
+      "z": 481,
+      "score": 0.005740562919527292,
+      "in_super_expert": null
+    },
+    {
+      "c": 6,
+      "j": 4,
+      "z": 396,
+      "score": 0.005705361254513264,
+      "in_super_expert": null
+    },
+    {
+      "c": 14,
+      "j": 7,
+      "z": 92,
+      "score": 0.005692189559340477,
+      "in_super_expert": null
+    },
+    {
+      "c": 13,
+      "j": 18,
+      "z": 881,
+      "score": 0.0056642284616827965,
+      "in_super_expert": null
+    },
+    {
+      "c": 0,
+      "j": 38,
+      "z": 547,
+      "score": 0.005558036733418703,
+      "in_super_expert": null
+    },
+    {
+      "c": 10,
+      "j": 7,
+      "z": 754,
+      "score": 0.0053412895649671555,
+      "in_super_expert": null
+    },
+    {
+      "c": 6,
+      "j": 4,
+      "z": 579,
+      "score": 0.005324138328433037,
+      "in_super_expert": null
+    },
+    {
+      "c": 10,
+      "j": 50,
+      "z": 253,
+      "score": 0.005232243798673153,
+      "in_super_expert": null
+    },
+    {
+      "c": 14,
+      "j": 60,
+      "z": 320,
+      "score": 0.005206405185163021,
+      "in_super_expert": null
+    },
+    {
+      "c": 13,
+      "j": 18,
+      "z": 576,
+      "score": 0.005187001544982195,
+      "in_super_expert": null
+    },
+    {
+      "c": 14,
+      "j": 9,
+      "z": 507,
+      "score": 0.005148360971361399,
+      "in_super_expert": null
+    },
+    {
+      "c": 14,
+      "j": 9,
+      "z": 768,
+      "score": 0.0050514996983110905,
+      "in_super_expert": null
+    },
+    {
+      "c": 13,
+      "j": 35,
+      "z": 827,
+      "score": 0.004945945926010609,
+      "in_super_expert": null
+    },
+    {
+      "c": 1,
+      "j": 11,
+      "z": 808,
+      "score": 0.004835725296288729,
+      "in_super_expert": null
+    },
+    {
+      "c": 9,
+      "j": 22,
+      "z": 849,
+      "score": 0.004699691664427519,
+      "in_super_expert": null
+    },
+    {
+      "c": 9,
+      "j": 62,
+      "z": 714,
+      "score": 0.004699522163718939,
+      "in_super_expert": null
+    },
+    {
+      "c": 12,
+      "j": 59,
+      "z": 183,
+      "score": 0.00465403450652957,
+      "in_super_expert": null
+    },
+    {
+      "c": 13,
+      "j": 41,
+      "z": 818,
+      "score": 0.004317221697419882,
+      "in_super_expert": null
+    },
+    {
+      "c": 14,
+      "j": 9,
+      "z": 947,
+      "score": 0.004257852211594582,
+      "in_super_expert": null
+    },
+    {
+      "c": 14,
+      "j": 60,
+      "z": 344,
+      "score": 0.0041687265038490295,
+      "in_super_expert": null
+    },
+    {
+      "c": 14,
+      "j": 9,
+      "z": 360,
+      "score": 0.004158226307481527,
+      "in_super_expert": null
+    },
+    {
+      "c": 14,
+      "j": 60,
+      "z": 874,
+      "score": 0.0041428906843066216,
+      "in_super_expert": null
+    },
+    {
+      "c": 12,
+      "j": 22,
+      "z": 727,
+      "score": 0.004139570984989405,
+      "in_super_expert": null
+    },
+    {
+      "c": 10,
+      "j": 34,
+      "z": 721,
+      "score": 0.004016210790723562,
+      "in_super_expert": null
+    },
+    {
+      "c": 1,
+      "j": 9,
+      "z": 128,
+      "score": 0.0038570628967136145,
+      "in_super_expert": "M1E9"
+    },
+    {
+      "c": 4,
+      "j": 14,
+      "z": 220,
+      "score": 0.003806784749031067,
+      "in_super_expert": "M4E14"
+    }
+  ]
+}

@@ -1,0 +1,1415 @@
+{
+  "n_total_neurons": 1048576,
+  "raw_sum": {
+    "definition": "sum_{l > c} V[c, j, z, l]",
+    "top100": [
+      {
+        "c": 12,
+        "j": 38,
+        "z": 620,
+        "score": 0.02214689552783966,
+        "in_super_expert": null
+      },
+      {
+        "c": 14,
+        "j": 7,
+        "z": 92,
+        "score": 0.016696225851774216,
+        "in_super_expert": null
+      },
+      {
+        "c": 7,
+        "j": 48,
+        "z": 634,
+        "score": 0.014538080431520939,
+        "in_super_expert": null
+      },
+      {
+        "c": 1,
+        "j": 9,
+        "z": 915,
+        "score": 0.013743466697633266,
+        "in_super_expert": "M1E9"
+      },
+      {
+        "c": 1,
+        "j": 9,
+        "z": 107,
+        "score": 0.01351456344127655,
+        "in_super_expert": "M1E9"
+      },
+      {
+        "c": 6,
+        "j": 18,
+        "z": 589,
+        "score": 0.013170610181987286,
+        "in_super_expert": null
+      },
+      {
+        "c": 6,
+        "j": 36,
+        "z": 36,
+        "score": 0.010335689410567284,
+        "in_super_expert": null
+      },
+      {
+        "c": 10,
+        "j": 60,
+        "z": 557,
+        "score": 0.00969982985407114,
+        "in_super_expert": null
+      },
+      {
+        "c": 9,
+        "j": 30,
+        "z": 685,
+        "score": 0.009276345372200012,
+        "in_super_expert": null
+      },
+      {
+        "c": 2,
+        "j": 30,
+        "z": 742,
+        "score": 0.00898423045873642,
+        "in_super_expert": null
+      },
+      {
+        "c": 11,
+        "j": 29,
+        "z": 201,
+        "score": 0.008930335752665997,
+        "in_super_expert": null
+      },
+      {
+        "c": 4,
+        "j": 14,
+        "z": 754,
+        "score": 0.008720837533473969,
+        "in_super_expert": "M4E14"
+      },
+      {
+        "c": 3,
+        "j": 39,
+        "z": 480,
+        "score": 0.00871745403856039,
+        "in_super_expert": null
+      },
+      {
+        "c": 9,
+        "j": 8,
+        "z": 3,
+        "score": 0.008568868041038513,
+        "in_super_expert": null
+      },
+      {
+        "c": 5,
+        "j": 35,
+        "z": 795,
+        "score": 0.008488716557621956,
+        "in_super_expert": null
+      },
+      {
+        "c": 3,
+        "j": 39,
+        "z": 438,
+        "score": 0.0084265461191535,
+        "in_super_expert": null
+      },
+      {
+        "c": 7,
+        "j": 58,
+        "z": 591,
+        "score": 0.0082623902708292,
+        "in_super_expert": null
+      },
+      {
+        "c": 8,
+        "j": 34,
+        "z": 204,
+        "score": 0.00813346542418003,
+        "in_super_expert": null
+      },
+      {
+        "c": 8,
+        "j": 27,
+        "z": 286,
+        "score": 0.008101426064968109,
+        "in_super_expert": null
+      },
+      {
+        "c": 8,
+        "j": 23,
+        "z": 277,
+        "score": 0.007887973450124264,
+        "in_super_expert": null
+      },
+      {
+        "c": 11,
+        "j": 56,
+        "z": 120,
+        "score": 0.007880394347012043,
+        "in_super_expert": null
+      },
+      {
+        "c": 3,
+        "j": 49,
+        "z": 765,
+        "score": 0.007744980044662952,
+        "in_super_expert": null
+      },
+      {
+        "c": 10,
+        "j": 46,
+        "z": 168,
+        "score": 0.007729413919150829,
+        "in_super_expert": null
+      },
+      {
+        "c": 10,
+        "j": 1,
+        "z": 366,
+        "score": 0.007644839119166136,
+        "in_super_expert": null
+      },
+      {
+        "c": 6,
+        "j": 4,
+        "z": 433,
+        "score": 0.007612600922584534,
+        "in_super_expert": null
+      },
+      {
+        "c": 11,
+        "j": 8,
+        "z": 763,
+        "score": 0.007603864651173353,
+        "in_super_expert": null
+      },
+      {
+        "c": 6,
+        "j": 6,
+        "z": 997,
+        "score": 0.007587480824440718,
+        "in_super_expert": null
+      },
+      {
+        "c": 5,
+        "j": 54,
+        "z": 628,
+        "score": 0.007378080859780312,
+        "in_super_expert": null
+      },
+      {
+        "c": 11,
+        "j": 59,
+        "z": 861,
+        "score": 0.007345170713961124,
+        "in_super_expert": null
+      },
+      {
+        "c": 6,
+        "j": 62,
+        "z": 1014,
+        "score": 0.007329256273806095,
+        "in_super_expert": null
+      },
+      {
+        "c": 10,
+        "j": 4,
+        "z": 303,
+        "score": 0.007271819282323122,
+        "in_super_expert": null
+      },
+      {
+        "c": 12,
+        "j": 39,
+        "z": 542,
+        "score": 0.007267136592417955,
+        "in_super_expert": null
+      },
+      {
+        "c": 8,
+        "j": 52,
+        "z": 280,
+        "score": 0.00715474970638752,
+        "in_super_expert": null
+      },
+      {
+        "c": 9,
+        "j": 59,
+        "z": 463,
+        "score": 0.007120118942111731,
+        "in_super_expert": null
+      },
+      {
+        "c": 5,
+        "j": 8,
+        "z": 799,
+        "score": 0.007017830852419138,
+        "in_super_expert": null
+      },
+      {
+        "c": 10,
+        "j": 34,
+        "z": 747,
+        "score": 0.007003935985267162,
+        "in_super_expert": null
+      },
+      {
+        "c": 7,
+        "j": 45,
+        "z": 1,
+        "score": 0.006987411063164473,
+        "in_super_expert": null
+      },
+      {
+        "c": 10,
+        "j": 44,
+        "z": 52,
+        "score": 0.006983389612287283,
+        "in_super_expert": null
+      },
+      {
+        "c": 6,
+        "j": 63,
+        "z": 990,
+        "score": 0.006877535488456488,
+        "in_super_expert": null
+      },
+      {
+        "c": 9,
+        "j": 44,
+        "z": 21,
+        "score": 0.006840848363935947,
+        "in_super_expert": null
+      },
+      {
+        "c": 9,
+        "j": 25,
+        "z": 1009,
+        "score": 0.006800386123359203,
+        "in_super_expert": null
+      },
+      {
+        "c": 5,
+        "j": 57,
+        "z": 429,
+        "score": 0.006796157453209162,
+        "in_super_expert": null
+      },
+      {
+        "c": 11,
+        "j": 47,
+        "z": 309,
+        "score": 0.006708761211484671,
+        "in_super_expert": null
+      },
+      {
+        "c": 6,
+        "j": 18,
+        "z": 77,
+        "score": 0.006680641323328018,
+        "in_super_expert": null
+      },
+      {
+        "c": 6,
+        "j": 4,
+        "z": 579,
+        "score": 0.006669368129223585,
+        "in_super_expert": null
+      },
+      {
+        "c": 6,
+        "j": 63,
+        "z": 240,
+        "score": 0.006663925014436245,
+        "in_super_expert": null
+      },
+      {
+        "c": 14,
+        "j": 36,
+        "z": 19,
+        "score": 0.0066597675904631615,
+        "in_super_expert": null
+      },
+      {
+        "c": 9,
+        "j": 20,
+        "z": 769,
+        "score": 0.006575019098818302,
+        "in_super_expert": null
+      },
+      {
+        "c": 9,
+        "j": 62,
+        "z": 234,
+        "score": 0.006552060134708881,
+        "in_super_expert": null
+      },
+      {
+        "c": 0,
+        "j": 6,
+        "z": 317,
+        "score": 0.006509800441563129,
+        "in_super_expert": null
+      },
+      {
+        "c": 3,
+        "j": 41,
+        "z": 63,
+        "score": 0.006462722551077604,
+        "in_super_expert": null
+      },
+      {
+        "c": 9,
+        "j": 13,
+        "z": 351,
+        "score": 0.006436587776988745,
+        "in_super_expert": null
+      },
+      {
+        "c": 10,
+        "j": 58,
+        "z": 88,
+        "score": 0.006429208442568779,
+        "in_super_expert": null
+      },
+      {
+        "c": 11,
+        "j": 17,
+        "z": 508,
+        "score": 0.006427376065403223,
+        "in_super_expert": null
+      },
+      {
+        "c": 9,
+        "j": 20,
+        "z": 259,
+        "score": 0.006369685288518667,
+        "in_super_expert": null
+      },
+      {
+        "c": 1,
+        "j": 18,
+        "z": 627,
+        "score": 0.006367423105984926,
+        "in_super_expert": null
+      },
+      {
+        "c": 7,
+        "j": 21,
+        "z": 87,
+        "score": 0.006364317610859871,
+        "in_super_expert": null
+      },
+      {
+        "c": 6,
+        "j": 23,
+        "z": 1001,
+        "score": 0.00634778430685401,
+        "in_super_expert": null
+      },
+      {
+        "c": 6,
+        "j": 56,
+        "z": 915,
+        "score": 0.006345419678837061,
+        "in_super_expert": null
+      },
+      {
+        "c": 6,
+        "j": 1,
+        "z": 379,
+        "score": 0.006332506891340017,
+        "in_super_expert": null
+      },
+      {
+        "c": 12,
+        "j": 15,
+        "z": 268,
+        "score": 0.006264659110456705,
+        "in_super_expert": null
+      },
+      {
+        "c": 10,
+        "j": 22,
+        "z": 367,
+        "score": 0.006253777537494898,
+        "in_super_expert": null
+      },
+      {
+        "c": 10,
+        "j": 31,
+        "z": 937,
+        "score": 0.006249822210520506,
+        "in_super_expert": null
+      },
+      {
+        "c": 10,
+        "j": 50,
+        "z": 253,
+        "score": 0.006234352011233568,
+        "in_super_expert": null
+      },
+      {
+        "c": 3,
+        "j": 40,
+        "z": 756,
+        "score": 0.006212430540472269,
+        "in_super_expert": null
+      },
+      {
+        "c": 8,
+        "j": 36,
+        "z": 941,
+        "score": 0.006189194042235613,
+        "in_super_expert": null
+      },
+      {
+        "c": 3,
+        "j": 59,
+        "z": 993,
+        "score": 0.00615862850099802,
+        "in_super_expert": null
+      },
+      {
+        "c": 9,
+        "j": 62,
+        "z": 387,
+        "score": 0.006145104765892029,
+        "in_super_expert": null
+      },
+      {
+        "c": 6,
+        "j": 1,
+        "z": 698,
+        "score": 0.006060154642909765,
+        "in_super_expert": null
+      },
+      {
+        "c": 10,
+        "j": 17,
+        "z": 447,
+        "score": 0.005994236096739769,
+        "in_super_expert": null
+      },
+      {
+        "c": 5,
+        "j": 52,
+        "z": 578,
+        "score": 0.005876057781279087,
+        "in_super_expert": null
+      },
+      {
+        "c": 2,
+        "j": 30,
+        "z": 494,
+        "score": 0.00583060784265399,
+        "in_super_expert": null
+      },
+      {
+        "c": 9,
+        "j": 38,
+        "z": 296,
+        "score": 0.005799399688839912,
+        "in_super_expert": null
+      },
+      {
+        "c": 14,
+        "j": 11,
+        "z": 911,
+        "score": 0.005797607358545065,
+        "in_super_expert": null
+      },
+      {
+        "c": 3,
+        "j": 5,
+        "z": 377,
+        "score": 0.005793113727122545,
+        "in_super_expert": null
+      },
+      {
+        "c": 9,
+        "j": 51,
+        "z": 214,
+        "score": 0.005722450092434883,
+        "in_super_expert": null
+      },
+      {
+        "c": 6,
+        "j": 50,
+        "z": 184,
+        "score": 0.0056939502246677876,
+        "in_super_expert": null
+      },
+      {
+        "c": 7,
+        "j": 61,
+        "z": 909,
+        "score": 0.005647980608046055,
+        "in_super_expert": null
+      },
+      {
+        "c": 12,
+        "j": 59,
+        "z": 908,
+        "score": 0.005641784518957138,
+        "in_super_expert": null
+      },
+      {
+        "c": 9,
+        "j": 20,
+        "z": 38,
+        "score": 0.00561304809525609,
+        "in_super_expert": null
+      },
+      {
+        "c": 4,
+        "j": 14,
+        "z": 391,
+        "score": 0.005611557979136705,
+        "in_super_expert": "M4E14"
+      },
+      {
+        "c": 5,
+        "j": 6,
+        "z": 401,
+        "score": 0.00561058335006237,
+        "in_super_expert": null
+      },
+      {
+        "c": 8,
+        "j": 23,
+        "z": 307,
+        "score": 0.005608085077255964,
+        "in_super_expert": null
+      },
+      {
+        "c": 1,
+        "j": 11,
+        "z": 808,
+        "score": 0.005595677997916937,
+        "in_super_expert": null
+      },
+      {
+        "c": 0,
+        "j": 6,
+        "z": 304,
+        "score": 0.005576419644057751,
+        "in_super_expert": null
+      },
+      {
+        "c": 11,
+        "j": 38,
+        "z": 263,
+        "score": 0.005573722533881664,
+        "in_super_expert": null
+      },
+      {
+        "c": 10,
+        "j": 47,
+        "z": 22,
+        "score": 0.0055137332528829575,
+        "in_super_expert": null
+      },
+      {
+        "c": 9,
+        "j": 22,
+        "z": 271,
+        "score": 0.005502559710294008,
+        "in_super_expert": null
+      },
+      {
+        "c": 8,
+        "j": 41,
+        "z": 434,
+        "score": 0.005465884692966938,
+        "in_super_expert": null
+      },
+      {
+        "c": 8,
+        "j": 31,
+        "z": 547,
+        "score": 0.0054434421472251415,
+        "in_super_expert": null
+      },
+      {
+        "c": 7,
+        "j": 32,
+        "z": 215,
+        "score": 0.005430668592453003,
+        "in_super_expert": null
+      },
+      {
+        "c": 1,
+        "j": 45,
+        "z": 387,
+        "score": 0.005400615744292736,
+        "in_super_expert": null
+      },
+      {
+        "c": 10,
+        "j": 45,
+        "z": 9,
+        "score": 0.005390698090195656,
+        "in_super_expert": null
+      },
+      {
+        "c": 13,
+        "j": 18,
+        "z": 881,
+        "score": 0.005381970666348934,
+        "in_super_expert": null
+      },
+      {
+        "c": 5,
+        "j": 57,
+        "z": 376,
+        "score": 0.0053471652790904045,
+        "in_super_expert": null
+      },
+      {
+        "c": 10,
+        "j": 42,
+        "z": 141,
+        "score": 0.005335040390491486,
+        "in_super_expert": null
+      },
+      {
+        "c": 8,
+        "j": 27,
+        "z": 701,
+        "score": 0.0053336950950324535,
+        "in_super_expert": null
+      },
+      {
+        "c": 10,
+        "j": 27,
+        "z": 605,
+        "score": 0.005327616352587938,
+        "in_super_expert": null
+      },
+      {
+        "c": 7,
+        "j": 24,
+        "z": 398,
+        "score": 0.0052675483748316765,
+        "in_super_expert": null
+      },
+      {
+        "c": 13,
+        "j": 1,
+        "z": 1017,
+        "score": 0.0052472795359790325,
+        "in_super_expert": null
+      }
+    ],
+    "n_top100_inside_super_experts": 4
+  },
+  "count_normalized": {
+    "definition": "(1/(L-c-1)) * sum_{l > c} V[c, j, z, l]",
+    "top100": [
+      {
+        "c": 14,
+        "j": 7,
+        "z": 92,
+        "score": 0.016696225851774216,
+        "in_super_expert": null
+      },
+      {
+        "c": 12,
+        "j": 38,
+        "z": 620,
+        "score": 0.007382298354059458,
+        "in_super_expert": null
+      },
+      {
+        "c": 14,
+        "j": 36,
+        "z": 19,
+        "score": 0.0066597675904631615,
+        "in_super_expert": null
+      },
+      {
+        "c": 14,
+        "j": 11,
+        "z": 911,
+        "score": 0.005797607358545065,
+        "in_super_expert": null
+      },
+      {
+        "c": 14,
+        "j": 24,
+        "z": 83,
+        "score": 0.004980277270078659,
+        "in_super_expert": null
+      },
+      {
+        "c": 14,
+        "j": 47,
+        "z": 40,
+        "score": 0.004381412174552679,
+        "in_super_expert": null
+      },
+      {
+        "c": 14,
+        "j": 39,
+        "z": 655,
+        "score": 0.0038879159837961197,
+        "in_super_expert": null
+      },
+      {
+        "c": 14,
+        "j": 60,
+        "z": 946,
+        "score": 0.003733591642230749,
+        "in_super_expert": null
+      },
+      {
+        "c": 14,
+        "j": 10,
+        "z": 604,
+        "score": 0.0027996571734547615,
+        "in_super_expert": null
+      },
+      {
+        "c": 13,
+        "j": 18,
+        "z": 881,
+        "score": 0.002690985333174467,
+        "in_super_expert": null
+      },
+      {
+        "c": 14,
+        "j": 24,
+        "z": 806,
+        "score": 0.002624647691845894,
+        "in_super_expert": null
+      },
+      {
+        "c": 13,
+        "j": 1,
+        "z": 1017,
+        "score": 0.0026236397679895163,
+        "in_super_expert": null
+      },
+      {
+        "c": 14,
+        "j": 5,
+        "z": 557,
+        "score": 0.0024421485140919685,
+        "in_super_expert": null
+      },
+      {
+        "c": 12,
+        "j": 39,
+        "z": 542,
+        "score": 0.0024223788641393185,
+        "in_super_expert": null
+      },
+      {
+        "c": 14,
+        "j": 60,
+        "z": 682,
+        "score": 0.002413383685052395,
+        "in_super_expert": null
+      },
+      {
+        "c": 14,
+        "j": 35,
+        "z": 311,
+        "score": 0.0022897731978446245,
+        "in_super_expert": null
+      },
+      {
+        "c": 13,
+        "j": 1,
+        "z": 585,
+        "score": 0.002243122085928917,
+        "in_super_expert": null
+      },
+      {
+        "c": 11,
+        "j": 29,
+        "z": 201,
+        "score": 0.002232583938166499,
+        "in_super_expert": null
+      },
+      {
+        "c": 14,
+        "j": 22,
+        "z": 713,
+        "score": 0.0022080608177930117,
+        "in_super_expert": null
+      },
+      {
+        "c": 14,
+        "j": 6,
+        "z": 251,
+        "score": 0.002193839056417346,
+        "in_super_expert": null
+      },
+      {
+        "c": 14,
+        "j": 4,
+        "z": 332,
+        "score": 0.0021359899546951056,
+        "in_super_expert": null
+      },
+      {
+        "c": 14,
+        "j": 42,
+        "z": 289,
+        "score": 0.0021296669729053974,
+        "in_super_expert": null
+      },
+      {
+        "c": 12,
+        "j": 15,
+        "z": 268,
+        "score": 0.002088219625875354,
+        "in_super_expert": null
+      },
+      {
+        "c": 14,
+        "j": 27,
+        "z": 693,
+        "score": 0.0020603619050234556,
+        "in_super_expert": null
+      },
+      {
+        "c": 14,
+        "j": 42,
+        "z": 229,
+        "score": 0.001987774856388569,
+        "in_super_expert": null
+      },
+      {
+        "c": 14,
+        "j": 2,
+        "z": 411,
+        "score": 0.0019821436144411564,
+        "in_super_expert": null
+      },
+      {
+        "c": 11,
+        "j": 56,
+        "z": 120,
+        "score": 0.0019700985867530107,
+        "in_super_expert": null
+      },
+      {
+        "c": 13,
+        "j": 41,
+        "z": 818,
+        "score": 0.001953554106876254,
+        "in_super_expert": null
+      },
+      {
+        "c": 10,
+        "j": 60,
+        "z": 557,
+        "score": 0.0019399659940972924,
+        "in_super_expert": null
+      },
+      {
+        "c": 11,
+        "j": 8,
+        "z": 763,
+        "score": 0.0019009661627933383,
+        "in_super_expert": null
+      },
+      {
+        "c": 13,
+        "j": 17,
+        "z": 153,
+        "score": 0.0018931231461465359,
+        "in_super_expert": null
+      },
+      {
+        "c": 12,
+        "j": 59,
+        "z": 908,
+        "score": 0.0018805948784574866,
+        "in_super_expert": null
+      },
+      {
+        "c": 14,
+        "j": 45,
+        "z": 46,
+        "score": 0.0018746053101494908,
+        "in_super_expert": null
+      },
+      {
+        "c": 14,
+        "j": 20,
+        "z": 211,
+        "score": 0.0018677941989153624,
+        "in_super_expert": null
+      },
+      {
+        "c": 11,
+        "j": 59,
+        "z": 861,
+        "score": 0.001836292678490281,
+        "in_super_expert": null
+      },
+      {
+        "c": 14,
+        "j": 8,
+        "z": 161,
+        "score": 0.0018316973000764847,
+        "in_super_expert": null
+      },
+      {
+        "c": 14,
+        "j": 39,
+        "z": 323,
+        "score": 0.0018299699295312166,
+        "in_super_expert": null
+      },
+      {
+        "c": 14,
+        "j": 32,
+        "z": 615,
+        "score": 0.0018212790600955486,
+        "in_super_expert": null
+      },
+      {
+        "c": 7,
+        "j": 48,
+        "z": 634,
+        "score": 0.0018172600539401174,
+        "in_super_expert": null
+      },
+      {
+        "c": 14,
+        "j": 63,
+        "z": 695,
+        "score": 0.0017920505488291383,
+        "in_super_expert": null
+      },
+      {
+        "c": 14,
+        "j": 46,
+        "z": 401,
+        "score": 0.0017876767087727785,
+        "in_super_expert": null
+      },
+      {
+        "c": 14,
+        "j": 11,
+        "z": 767,
+        "score": 0.0017652956303209066,
+        "in_super_expert": null
+      },
+      {
+        "c": 13,
+        "j": 49,
+        "z": 387,
+        "score": 0.0017637397395446897,
+        "in_super_expert": null
+      },
+      {
+        "c": 14,
+        "j": 12,
+        "z": 351,
+        "score": 0.001761924708262086,
+        "in_super_expert": null
+      },
+      {
+        "c": 13,
+        "j": 39,
+        "z": 598,
+        "score": 0.0017433187458664179,
+        "in_super_expert": null
+      },
+      {
+        "c": 14,
+        "j": 59,
+        "z": 252,
+        "score": 0.0017240979941561818,
+        "in_super_expert": null
+      },
+      {
+        "c": 12,
+        "j": 22,
+        "z": 727,
+        "score": 0.0017195673426613212,
+        "in_super_expert": null
+      },
+      {
+        "c": 14,
+        "j": 36,
+        "z": 723,
+        "score": 0.0016829660162329674,
+        "in_super_expert": null
+      },
+      {
+        "c": 11,
+        "j": 47,
+        "z": 309,
+        "score": 0.0016771903028711677,
+        "in_super_expert": null
+      },
+      {
+        "c": 14,
+        "j": 26,
+        "z": 60,
+        "score": 0.001669964287430048,
+        "in_super_expert": null
+      },
+      {
+        "c": 14,
+        "j": 7,
+        "z": 394,
+        "score": 0.001660275156609714,
+        "in_super_expert": null
+      },
+      {
+        "c": 13,
+        "j": 1,
+        "z": 202,
+        "score": 0.0016467638779431581,
+        "in_super_expert": null
+      },
+      {
+        "c": 14,
+        "j": 36,
+        "z": 339,
+        "score": 0.00163460208568722,
+        "in_super_expert": null
+      },
+      {
+        "c": 14,
+        "j": 58,
+        "z": 250,
+        "score": 0.0016101814107969403,
+        "in_super_expert": null
+      },
+      {
+        "c": 14,
+        "j": 20,
+        "z": 533,
+        "score": 0.0016097911866381764,
+        "in_super_expert": null
+      },
+      {
+        "c": 11,
+        "j": 17,
+        "z": 508,
+        "score": 0.0016068440163508058,
+        "in_super_expert": null
+      },
+      {
+        "c": 14,
+        "j": 44,
+        "z": 441,
+        "score": 0.001596916699782014,
+        "in_super_expert": null
+      },
+      {
+        "c": 13,
+        "j": 40,
+        "z": 942,
+        "score": 0.001595761626958847,
+        "in_super_expert": null
+      },
+      {
+        "c": 13,
+        "j": 34,
+        "z": 437,
+        "score": 0.0015922888414934278,
+        "in_super_expert": null
+      },
+      {
+        "c": 14,
+        "j": 1,
+        "z": 148,
+        "score": 0.001583694713190198,
+        "in_super_expert": null
+      },
+      {
+        "c": 14,
+        "j": 7,
+        "z": 779,
+        "score": 0.001556314411573112,
+        "in_super_expert": null
+      },
+      {
+        "c": 9,
+        "j": 30,
+        "z": 685,
+        "score": 0.001546057523228228,
+        "in_super_expert": null
+      },
+      {
+        "c": 10,
+        "j": 46,
+        "z": 168,
+        "score": 0.0015458827838301659,
+        "in_super_expert": null
+      },
+      {
+        "c": 13,
+        "j": 49,
+        "z": 809,
+        "score": 0.0015441442374140024,
+        "in_super_expert": null
+      },
+      {
+        "c": 10,
+        "j": 1,
+        "z": 366,
+        "score": 0.0015289678703993559,
+        "in_super_expert": null
+      },
+      {
+        "c": 14,
+        "j": 31,
+        "z": 44,
+        "score": 0.0015246825059875846,
+        "in_super_expert": null
+      },
+      {
+        "c": 13,
+        "j": 56,
+        "z": 874,
+        "score": 0.0015112177934497595,
+        "in_super_expert": null
+      },
+      {
+        "c": 14,
+        "j": 36,
+        "z": 319,
+        "score": 0.0015106512000784278,
+        "in_super_expert": null
+      },
+      {
+        "c": 14,
+        "j": 9,
+        "z": 161,
+        "score": 0.0014962473651394248,
+        "in_super_expert": null
+      },
+      {
+        "c": 13,
+        "j": 35,
+        "z": 572,
+        "score": 0.0014732570853084326,
+        "in_super_expert": null
+      },
+      {
+        "c": 6,
+        "j": 18,
+        "z": 589,
+        "score": 0.0014634011313319206,
+        "in_super_expert": null
+      },
+      {
+        "c": 14,
+        "j": 4,
+        "z": 663,
+        "score": 0.0014552653301507235,
+        "in_super_expert": null
+      },
+      {
+        "c": 14,
+        "j": 40,
+        "z": 744,
+        "score": 0.0014550765044987202,
+        "in_super_expert": null
+      },
+      {
+        "c": 14,
+        "j": 13,
+        "z": 162,
+        "score": 0.0014544114237651229,
+        "in_super_expert": null
+      },
+      {
+        "c": 10,
+        "j": 4,
+        "z": 303,
+        "score": 0.0014543638098984957,
+        "in_super_expert": null
+      },
+      {
+        "c": 13,
+        "j": 18,
+        "z": 576,
+        "score": 0.001450487645342946,
+        "in_super_expert": null
+      },
+      {
+        "c": 14,
+        "j": 48,
+        "z": 604,
+        "score": 0.0014294260181486607,
+        "in_super_expert": null
+      },
+      {
+        "c": 9,
+        "j": 8,
+        "z": 3,
+        "score": 0.0014281446347013116,
+        "in_super_expert": null
+      },
+      {
+        "c": 14,
+        "j": 38,
+        "z": 718,
+        "score": 0.0014273854903876781,
+        "in_super_expert": null
+      },
+      {
+        "c": 13,
+        "j": 1,
+        "z": 721,
+        "score": 0.0014211115194484591,
+        "in_super_expert": null
+      },
+      {
+        "c": 14,
+        "j": 8,
+        "z": 87,
+        "score": 0.0014132487121969461,
+        "in_super_expert": null
+      },
+      {
+        "c": 14,
+        "j": 0,
+        "z": 906,
+        "score": 0.0014125682646408677,
+        "in_super_expert": null
+      },
+      {
+        "c": 10,
+        "j": 34,
+        "z": 747,
+        "score": 0.0014007871504873037,
+        "in_super_expert": null
+      },
+      {
+        "c": 10,
+        "j": 44,
+        "z": 52,
+        "score": 0.0013966779224574566,
+        "in_super_expert": null
+      },
+      {
+        "c": 14,
+        "j": 39,
+        "z": 496,
+        "score": 0.0013966165715828538,
+        "in_super_expert": null
+      },
+      {
+        "c": 14,
+        "j": 7,
+        "z": 268,
+        "score": 0.0013940802309662104,
+        "in_super_expert": null
+      },
+      {
+        "c": 11,
+        "j": 38,
+        "z": 263,
+        "score": 0.001393430633470416,
+        "in_super_expert": null
+      },
+      {
+        "c": 14,
+        "j": 10,
+        "z": 221,
+        "score": 0.001386126852594316,
+        "in_super_expert": null
+      },
+      {
+        "c": 13,
+        "j": 41,
+        "z": 824,
+        "score": 0.001385139999911189,
+        "in_super_expert": null
+      },
+      {
+        "c": 13,
+        "j": 41,
+        "z": 709,
+        "score": 0.0013782416936010122,
+        "in_super_expert": null
+      },
+      {
+        "c": 13,
+        "j": 18,
+        "z": 159,
+        "score": 0.0013770533259958029,
+        "in_super_expert": null
+      },
+      {
+        "c": 14,
+        "j": 45,
+        "z": 851,
+        "score": 0.0013752528466284275,
+        "in_super_expert": null
+      },
+      {
+        "c": 14,
+        "j": 9,
+        "z": 376,
+        "score": 0.001372462254948914,
+        "in_super_expert": null
+      },
+      {
+        "c": 14,
+        "j": 46,
+        "z": 704,
+        "score": 0.0013620551908388734,
+        "in_super_expert": null
+      },
+      {
+        "c": 14,
+        "j": 2,
+        "z": 296,
+        "score": 0.0013551446609199047,
+        "in_super_expert": null
+      },
+      {
+        "c": 14,
+        "j": 15,
+        "z": 955,
+        "score": 0.0013496375177055597,
+        "in_super_expert": null
+      },
+      {
+        "c": 14,
+        "j": 9,
+        "z": 441,
+        "score": 0.0013441526098176837,
+        "in_super_expert": null
+      },
+      {
+        "c": 13,
+        "j": 43,
+        "z": 879,
+        "score": 0.001340780290775001,
+        "in_super_expert": null
+      },
+      {
+        "c": 14,
+        "j": 45,
+        "z": 155,
+        "score": 0.0013303306186571717,
+        "in_super_expert": null
+      },
+      {
+        "c": 14,
+        "j": 5,
+        "z": 640,
+        "score": 0.001329359132796526,
+        "in_super_expert": null
+      }
+    ],
+    "n_top100_inside_super_experts": 0
+  }
+}

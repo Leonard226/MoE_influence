@@ -1,0 +1,1814 @@
+{
+  "M1E9_z915": [
+    {
+      "tok_id": 247,
+      "decoded": " a",
+      "mean_act": 32.10830555239587,
+      "count": 13721
+    },
+    {
+      "tok_id": 253,
+      "decoded": " the",
+      "mean_act": 23.733548381140505,
+      "count": 23033
+    },
+    {
+      "tok_id": 3003,
+      "decoded": " THE",
+      "mean_act": 1.3562144317420461,
+      "count": 64
+    },
+    {
+      "tok_id": 20083,
+      "decoded": "Watch",
+      "mean_act": 0.6722366357306865,
+      "count": 22
+    },
+    {
+      "tok_id": 5007,
+      "decoded": " send",
+      "mean_act": 0.5150814133891721,
+      "count": 81
+    },
+    {
+      "tok_id": 10867,
+      "decoded": " Gar",
+      "mean_act": 0.43803907099965156,
+      "count": 51
+    },
+    {
+      "tok_id": 46785,
+      "decoded": "Meet",
+      "mean_act": 0.40916913623611134,
+      "count": 21
+    },
+    {
+      "tok_id": 3240,
+      "decoded": " quite",
+      "mean_act": 0.405353434897381,
+      "count": 98
+    },
+    {
+      "tok_id": 1353,
+      "decoded": "'m",
+      "mean_act": 0.40512075908482076,
+      "count": 200
+    },
+    {
+      "tok_id": 1849,
+      "decoded": "'ve",
+      "mean_act": 0.4035045502030037,
+      "count": 198
+    },
+    {
+      "tok_id": 22196,
+      "decoded": "Join",
+      "mean_act": 0.38209635989838525,
+      "count": 57
+    },
+    {
+      "tok_id": 1163,
+      "decoded": " :",
+      "mean_act": 0.37785551783333465,
+      "count": 123
+    },
+    {
+      "tok_id": 2506,
+      "decoded": " doesn",
+      "mean_act": 0.37298567603146165,
+      "count": 95
+    },
+    {
+      "tok_id": 3047,
+      "decoded": " saw",
+      "mean_act": 0.37180940869760204,
+      "count": 77
+    },
+    {
+      "tok_id": 7865,
+      "decoded": "Call",
+      "mean_act": 0.3664871619828045,
+      "count": 25
+    },
+    {
+      "tok_id": 403,
+      "decoded": " are",
+      "mean_act": 0.36377094632586265,
+      "count": 3757
+    },
+    {
+      "tok_id": 2512,
+      "decoded": "There",
+      "mean_act": 0.36214447534564653,
+      "count": 273
+    },
+    {
+      "tok_id": 34,
+      "decoded": "A",
+      "mean_act": 0.3609311078795269,
+      "count": 1284
+    },
+    {
+      "tok_id": 10805,
+      "decoded": " falling",
+      "mean_act": 0.359561450779438,
+      "count": 22
+    },
+    {
+      "tok_id": 10663,
+      "decoded": "WE",
+      "mean_act": 0.3529766108095646,
+      "count": 25
+    },
+    {
+      "tok_id": 510,
+      "decoded": "The",
+      "mean_act": 0.35273762765067695,
+      "count": 3069
+    },
+    {
+      "tok_id": 5583,
+      "decoded": " recommend",
+      "mean_act": 0.3522546382080163,
+      "count": 31
+    },
+    {
+      "tok_id": 11837,
+      "decoded": "Each",
+      "mean_act": 0.3522407952131647,
+      "count": 33
+    },
+    {
+      "tok_id": 4571,
+      "decoded": " couldn",
+      "mean_act": 0.3495781312768276,
+      "count": 26
+    },
+    {
+      "tok_id": 11244,
+      "decoded": "Use",
+      "mean_act": 0.3470476678439549,
+      "count": 35
+    },
+    {
+      "tok_id": 1833,
+      "decoded": "'ll",
+      "mean_act": 0.34674827115876333,
+      "count": 119
+    },
+    {
+      "tok_id": 209,
+      "decoded": " ",
+      "mean_act": 0.3466989205751036,
+      "count": 56
+    },
+    {
+      "tok_id": 6067,
+      "decoded": "Our",
+      "mean_act": 0.3462923689275326,
+      "count": 319
+    },
+    {
+      "tok_id": 310,
+      "decoded": " is",
+      "mean_act": 0.3458555976359048,
+      "count": 9014
+    },
+    {
+      "tok_id": 8267,
+      "decoded": "Every",
+      "mean_act": 0.34326119515402564,
+      "count": 58
+    },
+    {
+      "tok_id": 12238,
+      "decoded": " Have",
+      "mean_act": 0.3426218253042963,
+      "count": 45
+    },
+    {
+      "tok_id": 6912,
+      "decoded": " Bay",
+      "mean_act": 0.3418802796117961,
+      "count": 75
+    },
+    {
+      "tok_id": 6272,
+      "decoded": " Are",
+      "mean_act": 0.341047255870174,
+      "count": 68
+    },
+    {
+      "tok_id": 476,
+      "decoded": " can",
+      "mean_act": 0.3405414581115271,
+      "count": 1961
+    },
+    {
+      "tok_id": 2722,
+      "decoded": " shows",
+      "mean_act": 0.33966871738584353,
+      "count": 99
+    },
+    {
+      "tok_id": 626,
+      "decoded": "'t",
+      "mean_act": 0.33637567848766087,
+      "count": 401
+    },
+    {
+      "tok_id": 306,
+      "decoded": "ve",
+      "mean_act": 0.33467362512510307,
+      "count": 319
+    },
+    {
+      "tok_id": 4261,
+      "decoded": "iring",
+      "mean_act": 0.333301894865664,
+      "count": 28
+    },
+    {
+      "tok_id": 4483,
+      "decoded": " allows",
+      "mean_act": 0.3332023409347297,
+      "count": 98
+    },
+    {
+      "tok_id": 3534,
+      "decoded": " gave",
+      "mean_act": 0.3310521444859537,
+      "count": 37
+    },
+    {
+      "tok_id": 11778,
+      "decoded": "Have",
+      "mean_act": 0.33081334084272385,
+      "count": 71
+    },
+    {
+      "tok_id": 452,
+      "decoded": " have",
+      "mean_act": 0.33047489416040926,
+      "count": 2514
+    },
+    {
+      "tok_id": 556,
+      "decoded": " has",
+      "mean_act": 0.3291001928615273,
+      "count": 2288
+    },
+    {
+      "tok_id": 7161,
+      "decoded": "Where",
+      "mean_act": 0.32778995409607886,
+      "count": 40
+    },
+    {
+      "tok_id": 19651,
+      "decoded": " celebrated",
+      "mean_act": 0.3268465619872917,
+      "count": 22
+    },
+    {
+      "tok_id": 627,
+      "decoded": " there",
+      "mean_act": 0.3266712543148914,
+      "count": 528
+    },
+    {
+      "tok_id": 3091,
+      "decoded": " shall",
+      "mean_act": 0.3254398042779593,
+      "count": 21
+    },
+    {
+      "tok_id": 3597,
+      "decoded": " tried",
+      "mean_act": 0.3253679915386088,
+      "count": 34
+    },
+    {
+      "tok_id": 928,
+      "decoded": "iel",
+      "mean_act": 0.3244694977660071,
+      "count": 22
+    },
+    {
+      "tok_id": 8686,
+      "decoded": " bought",
+      "mean_act": 0.3239737828927381,
+      "count": 42
+    }
+  ],
+  "M2E30_z742": [
+    {
+      "tok_id": 32963,
+      "decoded": "Published",
+      "mean_act": 41.49154227930639,
+      "count": 27
+    },
+    {
+      "tok_id": 41497,
+      "decoded": "﻿",
+      "mean_act": 41.28763198852539,
+      "count": 20
+    },
+    {
+      "tok_id": 6586,
+      "decoded": "Image",
+      "mean_act": 41.02154383204678,
+      "count": 28
+    },
+    {
+      "tok_id": 11185,
+      "decoded": "Description",
+      "mean_act": 40.71310681232163,
+      "count": 42
+    },
+    {
+      "tok_id": 17441,
+      "decoded": "Abstract",
+      "mean_act": 40.35436129904437,
+      "count": 22
+    },
+    {
+      "tok_id": 7910,
+      "decoded": "Two",
+      "mean_act": 39.646602033353524,
+      "count": 41
+    },
+    {
+      "tok_id": 23631,
+      "decoded": "Everyone",
+      "mean_act": 39.605030231347136,
+      "count": 22
+    },
+    {
+      "tok_id": 21096,
+      "decoded": "Welcome",
+      "mean_act": 39.013948725702164,
+      "count": 150
+    },
+    {
+      "tok_id": 33298,
+      "decoded": "Happy",
+      "mean_act": 38.86301365315914,
+      "count": 25
+    },
+    {
+      "tok_id": 10195,
+      "decoded": "Many",
+      "mean_act": 38.57304777237798,
+      "count": 44
+    },
+    {
+      "tok_id": 25989,
+      "decoded": "Apple",
+      "mean_act": 38.42857863387093,
+      "count": 25
+    },
+    {
+      "tok_id": 9867,
+      "decoded": "Find",
+      "mean_act": 38.404873697439,
+      "count": 45
+    },
+    {
+      "tok_id": 32783,
+      "decoded": "Need",
+      "mean_act": 37.7538018399906,
+      "count": 33
+    },
+    {
+      "tok_id": 8267,
+      "decoded": "Every",
+      "mean_act": 37.6358132828027,
+      "count": 58
+    },
+    {
+      "tok_id": 24650,
+      "decoded": "NEW",
+      "mean_act": 37.42631696509974,
+      "count": 24
+    },
+    {
+      "tok_id": 45772,
+      "decoded": "Enjoy",
+      "mean_act": 36.974422354150605,
+      "count": 22
+    },
+    {
+      "tok_id": 37517,
+      "decoded": "Buy",
+      "mean_act": 36.878512825639476,
+      "count": 21
+    },
+    {
+      "tok_id": 14569,
+      "decoded": "Today",
+      "mean_act": 36.81978443061853,
+      "count": 94
+    },
+    {
+      "tok_id": 17588,
+      "decoded": "Following",
+      "mean_act": 36.801326896702115,
+      "count": 27
+    },
+    {
+      "tok_id": 14422,
+      "decoded": "Show",
+      "mean_act": 36.78350727561684,
+      "count": 21
+    },
+    {
+      "tok_id": 20865,
+      "decoded": "Download",
+      "mean_act": 36.14865364688071,
+      "count": 37
+    },
+    {
+      "tok_id": 10457,
+      "decoded": "During",
+      "mean_act": 36.13393787000524,
+      "count": 57
+    },
+    {
+      "tok_id": 11831,
+      "decoded": "Three",
+      "mean_act": 36.099269920416795,
+      "count": 24
+    },
+    {
+      "tok_id": 25698,
+      "decoded": "Posted",
+      "mean_act": 35.655209703267445,
+      "count": 27
+    },
+    {
+      "tok_id": 4943,
+      "decoded": "Here",
+      "mean_act": 35.63860902698315,
+      "count": 137
+    },
+    {
+      "tok_id": 22960,
+      "decoded": "Cong",
+      "mean_act": 35.40717950481921,
+      "count": 20
+    },
+    {
+      "tok_id": 9707,
+      "decoded": "THE",
+      "mean_act": 35.35365269217817,
+      "count": 21
+    },
+    {
+      "tok_id": 2374,
+      "decoded": "On",
+      "mean_act": 35.33972764973529,
+      "count": 200
+    },
+    {
+      "tok_id": 6872,
+      "decoded": "These",
+      "mean_act": 35.328109062736424,
+      "count": 116
+    },
+    {
+      "tok_id": 46785,
+      "decoded": "Meet",
+      "mean_act": 35.237291873233126,
+      "count": 21
+    },
+    {
+      "tok_id": 13422,
+      "decoded": "Search",
+      "mean_act": 35.00541333878573,
+      "count": 32
+    },
+    {
+      "tok_id": 14067,
+      "decoded": "Despite",
+      "mean_act": 34.949326464906335,
+      "count": 20
+    },
+    {
+      "tok_id": 9034,
+      "decoded": "Dr",
+      "mean_act": 34.73294805640583,
+      "count": 57
+    },
+    {
+      "tok_id": 12092,
+      "decoded": "Hello",
+      "mean_act": 34.521147252097236,
+      "count": 76
+    },
+    {
+      "tok_id": 22196,
+      "decoded": "Join",
+      "mean_act": 34.511177872585364,
+      "count": 57
+    },
+    {
+      "tok_id": 2765,
+      "decoded": "List",
+      "mean_act": 34.37808273378759,
+      "count": 20
+    },
+    {
+      "tok_id": 2906,
+      "decoded": "Ar",
+      "mean_act": 34.36607132549398,
+      "count": 24
+    },
+    {
+      "tok_id": 3039,
+      "decoded": "When",
+      "mean_act": 34.23034947853713,
+      "count": 278
+    },
+    {
+      "tok_id": 4476,
+      "decoded": "Des",
+      "mean_act": 34.123263105350944,
+      "count": 28
+    },
+    {
+      "tok_id": 14146,
+      "decoded": "Discussion",
+      "mean_act": 34.00839114618121,
+      "count": 33
+    },
+    {
+      "tok_id": 8380,
+      "decoded": "Come",
+      "mean_act": 33.8817209597677,
+      "count": 20
+    },
+    {
+      "tok_id": 17967,
+      "decoded": "South",
+      "mean_act": 33.829977987778626,
+      "count": 22
+    },
+    {
+      "tok_id": 16395,
+      "decoded": "Loc",
+      "mean_act": 33.81654019323291,
+      "count": 41
+    },
+    {
+      "tok_id": 8262,
+      "decoded": "Hey",
+      "mean_act": 33.804427170559116,
+      "count": 23
+    },
+    {
+      "tok_id": 1552,
+      "decoded": "This",
+      "mean_act": 33.75469185616886,
+      "count": 1122
+    },
+    {
+      "tok_id": 8430,
+      "decoded": "Although",
+      "mean_act": 33.60348217316517,
+      "count": 41
+    },
+    {
+      "tok_id": 3378,
+      "decoded": "With",
+      "mean_act": 33.561749019789275,
+      "count": 200
+    },
+    {
+      "tok_id": 12412,
+      "decoded": "High",
+      "mean_act": 33.395172470910175,
+      "count": 31
+    },
+    {
+      "tok_id": 8639,
+      "decoded": "Before",
+      "mean_act": 33.27617177320644,
+      "count": 28
+    },
+    {
+      "tok_id": 20083,
+      "decoded": "Watch",
+      "mean_act": 33.1622172262181,
+      "count": 22
+    }
+  ],
+  "M4E14_z391": [
+    {
+      "tok_id": 253,
+      "decoded": " the",
+      "mean_act": 2.641751226947072,
+      "count": 23033
+    },
+    {
+      "tok_id": 247,
+      "decoded": " a",
+      "mean_act": 2.607386563664508,
+      "count": 13721
+    },
+    {
+      "tok_id": 3003,
+      "decoded": " THE",
+      "mean_act": 0.36640270420275556,
+      "count": 64
+    },
+    {
+      "tok_id": 41497,
+      "decoded": "﻿",
+      "mean_act": 0.36458737403154373,
+      "count": 20
+    },
+    {
+      "tok_id": 3589,
+      "decoded": " wasn",
+      "mean_act": 0.33521267422348383,
+      "count": 46
+    },
+    {
+      "tok_id": 6586,
+      "decoded": "Image",
+      "mean_act": 0.31608366861889536,
+      "count": 28
+    },
+    {
+      "tok_id": 32963,
+      "decoded": "Published",
+      "mean_act": 0.3123533404949639,
+      "count": 27
+    },
+    {
+      "tok_id": 9707,
+      "decoded": "THE",
+      "mean_act": 0.31084121023083017,
+      "count": 21
+    },
+    {
+      "tok_id": 17441,
+      "decoded": "Abstract",
+      "mean_act": 0.309695281553352,
+      "count": 22
+    },
+    {
+      "tok_id": 7910,
+      "decoded": "Two",
+      "mean_act": 0.30816443671086213,
+      "count": 41
+    },
+    {
+      "tok_id": 11185,
+      "decoded": "Description",
+      "mean_act": 0.30690123280510306,
+      "count": 42
+    },
+    {
+      "tok_id": 23631,
+      "decoded": "Everyone",
+      "mean_act": 0.3066658819602294,
+      "count": 22
+    },
+    {
+      "tok_id": 21096,
+      "decoded": "Welcome",
+      "mean_act": 0.2995260527750846,
+      "count": 150
+    },
+    {
+      "tok_id": 8267,
+      "decoded": "Every",
+      "mean_act": 0.2986509659536311,
+      "count": 58
+    },
+    {
+      "tok_id": 33298,
+      "decoded": "Happy",
+      "mean_act": 0.29839411783963443,
+      "count": 25
+    },
+    {
+      "tok_id": 9867,
+      "decoded": "Find",
+      "mean_act": 0.2978571112992035,
+      "count": 45
+    },
+    {
+      "tok_id": 32783,
+      "decoded": "Need",
+      "mean_act": 0.2963420341186451,
+      "count": 33
+    },
+    {
+      "tok_id": 17588,
+      "decoded": "Following",
+      "mean_act": 0.29588086806513647,
+      "count": 27
+    },
+    {
+      "tok_id": 37517,
+      "decoded": "Buy",
+      "mean_act": 0.2942443545907736,
+      "count": 21
+    },
+    {
+      "tok_id": 46785,
+      "decoded": "Meet",
+      "mean_act": 0.29420183315163567,
+      "count": 21
+    },
+    {
+      "tok_id": 10195,
+      "decoded": "Many",
+      "mean_act": 0.29379577838963916,
+      "count": 44
+    },
+    {
+      "tok_id": 45772,
+      "decoded": "Enjoy",
+      "mean_act": 0.29347490874881094,
+      "count": 22
+    },
+    {
+      "tok_id": 22960,
+      "decoded": "Cong",
+      "mean_act": 0.2931388488970697,
+      "count": 20
+    },
+    {
+      "tok_id": 24650,
+      "decoded": "NEW",
+      "mean_act": 0.29300440292960656,
+      "count": 24
+    },
+    {
+      "tok_id": 14422,
+      "decoded": "Show",
+      "mean_act": 0.2899530391164479,
+      "count": 21
+    },
+    {
+      "tok_id": 2374,
+      "decoded": "On",
+      "mean_act": 0.2875900042550347,
+      "count": 200
+    },
+    {
+      "tok_id": 2906,
+      "decoded": "Ar",
+      "mean_act": 0.28620474408671726,
+      "count": 24
+    },
+    {
+      "tok_id": 4476,
+      "decoded": "Des",
+      "mean_act": 0.28517930881519404,
+      "count": 28
+    },
+    {
+      "tok_id": 6872,
+      "decoded": "These",
+      "mean_act": 0.28313017751347147,
+      "count": 116
+    },
+    {
+      "tok_id": 4943,
+      "decoded": "Here",
+      "mean_act": 0.28275023402185623,
+      "count": 137
+    },
+    {
+      "tok_id": 6067,
+      "decoded": "Our",
+      "mean_act": 0.28192118416174655,
+      "count": 319
+    },
+    {
+      "tok_id": 10457,
+      "decoded": "During",
+      "mean_act": 0.28190995160318716,
+      "count": 57
+    },
+    {
+      "tok_id": 9034,
+      "decoded": "Dr",
+      "mean_act": 0.2817521816346255,
+      "count": 57
+    },
+    {
+      "tok_id": 14569,
+      "decoded": "Today",
+      "mean_act": 0.2815649920685633,
+      "count": 94
+    },
+    {
+      "tok_id": 11831,
+      "decoded": "Three",
+      "mean_act": 0.2801072077345452,
+      "count": 24
+    },
+    {
+      "tok_id": 25989,
+      "decoded": "Apple",
+      "mean_act": 0.27890665758866817,
+      "count": 25
+    },
+    {
+      "tok_id": 8380,
+      "decoded": "Come",
+      "mean_act": 0.2780979884788394,
+      "count": 20
+    },
+    {
+      "tok_id": 3594,
+      "decoded": "Gr",
+      "mean_act": 0.27800876673203534,
+      "count": 26
+    },
+    {
+      "tok_id": 20865,
+      "decoded": "Download",
+      "mean_act": 0.27674359560006523,
+      "count": 37
+    },
+    {
+      "tok_id": 1552,
+      "decoded": "This",
+      "mean_act": 0.276688824902134,
+      "count": 1122
+    },
+    {
+      "tok_id": 6723,
+      "decoded": "Are",
+      "mean_act": 0.27410709365999064,
+      "count": 134
+    },
+    {
+      "tok_id": 7093,
+      "decoded": "Your",
+      "mean_act": 0.2735765553689835,
+      "count": 98
+    },
+    {
+      "tok_id": 3378,
+      "decoded": "With",
+      "mean_act": 0.2733113679900998,
+      "count": 200
+    },
+    {
+      "tok_id": 25698,
+      "decoded": "Posted",
+      "mean_act": 0.27245044989373396,
+      "count": 27
+    },
+    {
+      "tok_id": 2765,
+      "decoded": "List",
+      "mean_act": 0.27217882298864426,
+      "count": 20
+    },
+    {
+      "tok_id": 3404,
+      "decoded": "At",
+      "mean_act": 0.27165104482261937,
+      "count": 196
+    },
+    {
+      "tok_id": 16395,
+      "decoded": "Loc",
+      "mean_act": 0.2701457118524647,
+      "count": 41
+    },
+    {
+      "tok_id": 2422,
+      "decoded": "Al",
+      "mean_act": 0.269703498080816,
+      "count": 57
+    },
+    {
+      "tok_id": 3039,
+      "decoded": "When",
+      "mean_act": 0.26966661884583004,
+      "count": 278
+    },
+    {
+      "tok_id": 4571,
+      "decoded": " couldn",
+      "mean_act": 0.2694284812762187,
+      "count": 26
+    }
+  ],
+  "M4E14_z336": [
+    {
+      "tok_id": 247,
+      "decoded": " a",
+      "mean_act": 1.9190017026514776,
+      "count": 13721
+    },
+    {
+      "tok_id": 253,
+      "decoded": " the",
+      "mean_act": 1.7054940682730249,
+      "count": 23033
+    },
+    {
+      "tok_id": 41497,
+      "decoded": "﻿",
+      "mean_act": 0.17505939677357674,
+      "count": 20
+    },
+    {
+      "tok_id": 32963,
+      "decoded": "Published",
+      "mean_act": 0.17420390620827675,
+      "count": 27
+    },
+    {
+      "tok_id": 6586,
+      "decoded": "Image",
+      "mean_act": 0.1678532929425793,
+      "count": 28
+    },
+    {
+      "tok_id": 32783,
+      "decoded": "Need",
+      "mean_act": 0.16692067558566728,
+      "count": 33
+    },
+    {
+      "tok_id": 21096,
+      "decoded": "Welcome",
+      "mean_act": 0.1646468513381357,
+      "count": 150
+    },
+    {
+      "tok_id": 33298,
+      "decoded": "Happy",
+      "mean_act": 0.16450057812035085,
+      "count": 25
+    },
+    {
+      "tok_id": 22196,
+      "decoded": "Join",
+      "mean_act": 0.1638972150782744,
+      "count": 57
+    },
+    {
+      "tok_id": 7910,
+      "decoded": "Two",
+      "mean_act": 0.16330860880708958,
+      "count": 41
+    },
+    {
+      "tok_id": 23631,
+      "decoded": "Everyone",
+      "mean_act": 0.16111925707876004,
+      "count": 22
+    },
+    {
+      "tok_id": 8267,
+      "decoded": "Every",
+      "mean_act": 0.1610619309508836,
+      "count": 58
+    },
+    {
+      "tok_id": 11185,
+      "decoded": "Description",
+      "mean_act": 0.16028634419975182,
+      "count": 42
+    },
+    {
+      "tok_id": 10195,
+      "decoded": "Many",
+      "mean_act": 0.15950656321894546,
+      "count": 44
+    },
+    {
+      "tok_id": 9867,
+      "decoded": "Find",
+      "mean_act": 0.159356932543839,
+      "count": 45
+    },
+    {
+      "tok_id": 17441,
+      "decoded": "Abstract",
+      "mean_act": 0.1588007646840362,
+      "count": 22
+    },
+    {
+      "tok_id": 14422,
+      "decoded": "Show",
+      "mean_act": 0.15848006127912195,
+      "count": 21
+    },
+    {
+      "tok_id": 37517,
+      "decoded": "Buy",
+      "mean_act": 0.15756366534956864,
+      "count": 21
+    },
+    {
+      "tok_id": 8380,
+      "decoded": "Come",
+      "mean_act": 0.15723617188632488,
+      "count": 20
+    },
+    {
+      "tok_id": 9034,
+      "decoded": "Dr",
+      "mean_act": 0.15723265914998033,
+      "count": 57
+    },
+    {
+      "tok_id": 24650,
+      "decoded": "NEW",
+      "mean_act": 0.15698584894804904,
+      "count": 24
+    },
+    {
+      "tok_id": 2374,
+      "decoded": "On",
+      "mean_act": 0.15638334849703825,
+      "count": 200
+    },
+    {
+      "tok_id": 8262,
+      "decoded": "Hey",
+      "mean_act": 0.1561047327907189,
+      "count": 23
+    },
+    {
+      "tok_id": 17277,
+      "decoded": "Best",
+      "mean_act": 0.1551861863764417,
+      "count": 36
+    },
+    {
+      "tok_id": 25698,
+      "decoded": "Posted",
+      "mean_act": 0.15497091967682974,
+      "count": 27
+    },
+    {
+      "tok_id": 17588,
+      "decoded": "Following",
+      "mean_act": 0.15380227905525654,
+      "count": 27
+    },
+    {
+      "tok_id": 3378,
+      "decoded": "With",
+      "mean_act": 0.15318961931930972,
+      "count": 200
+    },
+    {
+      "tok_id": 6723,
+      "decoded": "Are",
+      "mean_act": 0.15218412033073717,
+      "count": 134
+    },
+    {
+      "tok_id": 510,
+      "decoded": "The",
+      "mean_act": 0.15212948827413889,
+      "count": 3069
+    },
+    {
+      "tok_id": 45772,
+      "decoded": "Enjoy",
+      "mean_act": 0.15135111877779392,
+      "count": 22
+    },
+    {
+      "tok_id": 2906,
+      "decoded": "Ar",
+      "mean_act": 0.15085583347051093,
+      "count": 24
+    },
+    {
+      "tok_id": 14569,
+      "decoded": "Today",
+      "mean_act": 0.15065022940905962,
+      "count": 94
+    },
+    {
+      "tok_id": 22960,
+      "decoded": "Cong",
+      "mean_act": 0.15063492862973363,
+      "count": 20
+    },
+    {
+      "tok_id": 12092,
+      "decoded": "Hello",
+      "mean_act": 0.150284970145501,
+      "count": 76
+    },
+    {
+      "tok_id": 11831,
+      "decoded": "Three",
+      "mean_act": 0.14979692358368388,
+      "count": 24
+    },
+    {
+      "tok_id": 9707,
+      "decoded": "THE",
+      "mean_act": 0.14915209029623794,
+      "count": 21
+    },
+    {
+      "tok_id": 20865,
+      "decoded": "Download",
+      "mean_act": 0.1486394698354038,
+      "count": 37
+    },
+    {
+      "tok_id": 4476,
+      "decoded": "Des",
+      "mean_act": 0.14842006695523327,
+      "count": 28
+    },
+    {
+      "tok_id": 6872,
+      "decoded": "These",
+      "mean_act": 0.14831635730030845,
+      "count": 116
+    },
+    {
+      "tok_id": 10795,
+      "decoded": "Does",
+      "mean_act": 0.1478364490903914,
+      "count": 40
+    },
+    {
+      "tok_id": 3039,
+      "decoded": "When",
+      "mean_act": 0.14729124588272413,
+      "count": 278
+    },
+    {
+      "tok_id": 25989,
+      "decoded": "Apple",
+      "mean_act": 0.14727442150004208,
+      "count": 25
+    },
+    {
+      "tok_id": 10457,
+      "decoded": "During",
+      "mean_act": 0.14725270406077534,
+      "count": 57
+    },
+    {
+      "tok_id": 46785,
+      "decoded": "Meet",
+      "mean_act": 0.14647603187976138,
+      "count": 21
+    },
+    {
+      "tok_id": 32841,
+      "decoded": "Want",
+      "mean_act": 0.14619414932255087,
+      "count": 29
+    },
+    {
+      "tok_id": 13422,
+      "decoded": "Search",
+      "mean_act": 0.1455846040189499,
+      "count": 32
+    },
+    {
+      "tok_id": 1552,
+      "decoded": "This",
+      "mean_act": 0.14515020487044056,
+      "count": 1122
+    },
+    {
+      "tok_id": 4553,
+      "decoded": "After",
+      "mean_act": 0.1450948193780191,
+      "count": 126
+    },
+    {
+      "tok_id": 11778,
+      "decoded": "Have",
+      "mean_act": 0.1449225314984649,
+      "count": 71
+    },
+    {
+      "tok_id": 4943,
+      "decoded": "Here",
+      "mean_act": 0.1449029088417794,
+      "count": 137
+    }
+  ],
+  "M4E14_z956": [
+    {
+      "tok_id": 247,
+      "decoded": " a",
+      "mean_act": 1.1627443036959095,
+      "count": 13721
+    },
+    {
+      "tok_id": 253,
+      "decoded": " the",
+      "mean_act": 0.6034045317689252,
+      "count": 23033
+    },
+    {
+      "tok_id": 271,
+      "decoded": " an",
+      "mean_act": 0.531295646318264,
+      "count": 2339
+    },
+    {
+      "tok_id": 329,
+      "decoded": " A",
+      "mean_act": 0.4246387722344406,
+      "count": 932
+    },
+    {
+      "tok_id": 743,
+      "decoded": " An",
+      "mean_act": 0.3039705904891889,
+      "count": 160
+    },
+    {
+      "tok_id": 31480,
+      "decoded": " tagged",
+      "mean_act": 0.23941205960831471,
+      "count": 28
+    },
+    {
+      "tok_id": 380,
+      "decoded": " The",
+      "mean_act": 0.2306394561353465,
+      "count": 2171
+    },
+    {
+      "tok_id": 2710,
+      "decoded": " various",
+      "mean_act": 0.1985273148934796,
+      "count": 106
+    },
+    {
+      "tok_id": 35752,
+      "decoded": "autiful",
+      "mean_act": 0.19527230384173216,
+      "count": 27
+    },
+    {
+      "tok_id": 11117,
+      "decoded": " diverse",
+      "mean_act": 0.1928913695220318,
+      "count": 36
+    },
+    {
+      "tok_id": 6363,
+      "decoded": " pool",
+      "mean_act": 0.19155570690687138,
+      "count": 46
+    },
+    {
+      "tok_id": 10983,
+      "decoded": " •",
+      "mean_act": 0.18820360474861586,
+      "count": 26
+    },
+    {
+      "tok_id": 3003,
+      "decoded": " THE",
+      "mean_act": 0.18543796663288958,
+      "count": 64
+    },
+    {
+      "tok_id": 4722,
+      "decoded": " interesting",
+      "mean_act": 0.18103246960589395,
+      "count": 70
+    },
+    {
+      "tok_id": 6422,
+      "decoded": " powerful",
+      "mean_act": 0.1782895510514768,
+      "count": 65
+    },
+    {
+      "tok_id": 1904,
+      "decoded": " didn",
+      "mean_act": 0.1753458541499663,
+      "count": 79
+    },
+    {
+      "tok_id": 37039,
+      "decoded": " spacious",
+      "mean_act": 0.17431697476841332,
+      "count": 33
+    },
+    {
+      "tok_id": 2709,
+      "decoded": " multiple",
+      "mean_act": 0.17069436448634537,
+      "count": 70
+    },
+    {
+      "tok_id": 1027,
+      "decoded": " different",
+      "mean_act": 0.17031382010642426,
+      "count": 273
+    },
+    {
+      "tok_id": 2862,
+      "decoded": " entire",
+      "mean_act": 0.16953677561733935,
+      "count": 59
+    },
+    {
+      "tok_id": 30939,
+      "decoded": " vintage",
+      "mean_act": 0.1693147740470955,
+      "count": 42
+    },
+    {
+      "tok_id": 2067,
+      "decoded": " several",
+      "mean_act": 0.16563298869090537,
+      "count": 136
+    },
+    {
+      "tok_id": 8687,
+      "decoded": " involves",
+      "mean_act": 0.163960535509082,
+      "count": 26
+    },
+    {
+      "tok_id": 12112,
+      "decoded": " flexible",
+      "mean_act": 0.16327631975022647,
+      "count": 26
+    },
+    {
+      "tok_id": 7000,
+      "decoded": " detailed",
+      "mean_act": 0.16255831323564052,
+      "count": 50
+    },
+    {
+      "tok_id": 3666,
+      "decoded": " Des",
+      "mean_act": 0.16253840636151531,
+      "count": 48
+    },
+    {
+      "tok_id": 17503,
+      "decoded": " ratings",
+      "mean_act": 0.15948358532041312,
+      "count": 25
+    },
+    {
+      "tok_id": 783,
+      "decoded": "the",
+      "mean_act": 0.15786634711187708,
+      "count": 129
+    },
+    {
+      "tok_id": 5421,
+      "decoded": " studied",
+      "mean_act": 0.15786129574884067,
+      "count": 22
+    },
+    {
+      "tok_id": 7640,
+      "decoded": "ums",
+      "mean_act": 0.15764555293272303,
+      "count": 34
+    },
+    {
+      "tok_id": 13927,
+      "decoded": " Title",
+      "mean_act": 0.15632308955111246,
+      "count": 41
+    },
+    {
+      "tok_id": 16633,
+      "decoded": " focuses",
+      "mean_act": 0.15496938990858886,
+      "count": 26
+    },
+    {
+      "tok_id": 25507,
+      "decoded": " charming",
+      "mean_act": 0.15457871911071597,
+      "count": 21
+    },
+    {
+      "tok_id": 13654,
+      "decoded": " focusing",
+      "mean_act": 0.15404709590517957,
+      "count": 23
+    },
+    {
+      "tok_id": 6131,
+      "decoded": " offers",
+      "mean_act": 0.15396567676287187,
+      "count": 263
+    },
+    {
+      "tok_id": 18997,
+      "decoded": " luxury",
+      "mean_act": 0.1533478202664868,
+      "count": 47
+    },
+    {
+      "tok_id": 4571,
+      "decoded": " couldn",
+      "mean_act": 0.15325612675112027,
+      "count": 26
+    },
+    {
+      "tok_id": 2176,
+      "decoded": " certain",
+      "mean_act": 0.15066552452388887,
+      "count": 71
+    },
+    {
+      "tok_id": 18109,
+      "decoded": " romantic",
+      "mean_act": 0.15032220187668616,
+      "count": 26
+    },
+    {
+      "tok_id": 11177,
+      "decoded": "ele",
+      "mean_act": 0.1501689617522061,
+      "count": 20
+    },
+    {
+      "tok_id": 26361,
+      "decoded": " delivers",
+      "mean_act": 0.1469526640497721,
+      "count": 26
+    },
+    {
+      "tok_id": 34,
+      "decoded": "A",
+      "mean_act": 0.14612249016621112,
+      "count": 1284
+    },
+    {
+      "tok_id": 711,
+      "decoded": " des",
+      "mean_act": 0.14507435550066558,
+      "count": 22
+    },
+    {
+      "tok_id": 6459,
+      "decoded": " greatest",
+      "mean_act": 0.14499931373284197,
+      "count": 40
+    },
+    {
+      "tok_id": 3569,
+      "decoded": " political",
+      "mean_act": 0.14368801400996745,
+      "count": 32
+    },
+    {
+      "tok_id": 6408,
+      "decoded": " During",
+      "mean_act": 0.14224539184942842,
+      "count": 20
+    },
+    {
+      "tok_id": 1347,
+      "decoded": " perform",
+      "mean_act": 0.1419999268438135,
+      "count": 35
+    },
+    {
+      "tok_id": 11638,
+      "decoded": " convenient",
+      "mean_act": 0.14094377945044212,
+      "count": 35
+    },
+    {
+      "tok_id": 9129,
+      "decoded": " ancient",
+      "mean_act": 0.1407869519746822,
+      "count": 23
+    },
+    {
+      "tok_id": 1798,
+      "decoded": " particular",
+      "mean_act": 0.14054620510031438,
+      "count": 58
+    }
+  ],
+  "M14E60_z357": [
+    {
+      "tok_id": 6586,
+      "decoded": "Image",
+      "mean_act": 5.687547035049647,
+      "count": 28
+    },
+    {
+      "tok_id": 11185,
+      "decoded": "Description",
+      "mean_act": 5.461568253647004,
+      "count": 42
+    },
+    {
+      "tok_id": 17967,
+      "decoded": "South",
+      "mean_act": 5.372490407851398,
+      "count": 22
+    },
+    {
+      "tok_id": 32963,
+      "decoded": "Published",
+      "mean_act": 5.332411577580152,
+      "count": 27
+    },
+    {
+      "tok_id": 21096,
+      "decoded": "Welcome",
+      "mean_act": 5.054700651758661,
+      "count": 150
+    },
+    {
+      "tok_id": 7910,
+      "decoded": "Two",
+      "mean_act": 5.029688861084784,
+      "count": 41
+    },
+    {
+      "tok_id": 33298,
+      "decoded": "Happy",
+      "mean_act": 5.0104802927700804,
+      "count": 25
+    },
+    {
+      "tok_id": 17441,
+      "decoded": "Abstract",
+      "mean_act": 5.002119588295252,
+      "count": 22
+    },
+    {
+      "tok_id": 25698,
+      "decoded": "Posted",
+      "mean_act": 4.925423541364984,
+      "count": 27
+    },
+    {
+      "tok_id": 8497,
+      "decoded": "Note",
+      "mean_act": 4.92129003573209,
+      "count": 20
+    },
+    {
+      "tok_id": 22960,
+      "decoded": "Cong",
+      "mean_act": 4.909428554913029,
+      "count": 20
+    },
+    {
+      "tok_id": 22196,
+      "decoded": "Join",
+      "mean_act": 4.8199495610437895,
+      "count": 57
+    },
+    {
+      "tok_id": 4476,
+      "decoded": "Des",
+      "mean_act": 4.809275688844666,
+      "count": 28
+    },
+    {
+      "tok_id": 14569,
+      "decoded": "Today",
+      "mean_act": 4.7935733742060815,
+      "count": 94
+    },
+    {
+      "tok_id": 9034,
+      "decoded": "Dr",
+      "mean_act": 4.774955313685432,
+      "count": 57
+    },
+    {
+      "tok_id": 23631,
+      "decoded": "Everyone",
+      "mean_act": 4.760258285328746,
+      "count": 22
+    },
+    {
+      "tok_id": 37517,
+      "decoded": "Buy",
+      "mean_act": 4.7579645324675806,
+      "count": 21
+    },
+    {
+      "tok_id": 11831,
+      "decoded": "Three",
+      "mean_act": 4.7190750259518,
+      "count": 24
+    },
+    {
+      "tok_id": 19846,
+      "decoded": "North",
+      "mean_act": 4.6575335016303665,
+      "count": 28
+    },
+    {
+      "tok_id": 24650,
+      "decoded": "NEW",
+      "mean_act": 4.655394444630171,
+      "count": 24
+    },
+    {
+      "tok_id": 20865,
+      "decoded": "Download",
+      "mean_act": 4.654035609945454,
+      "count": 37
+    },
+    {
+      "tok_id": 7130,
+      "decoded": "According",
+      "mean_act": 4.633589177449443,
+      "count": 49
+    },
+    {
+      "tok_id": 10195,
+      "decoded": "Many",
+      "mean_act": 4.6320791200480675,
+      "count": 44
+    },
+    {
+      "tok_id": 24397,
+      "decoded": "Looking",
+      "mean_act": 4.620511455541978,
+      "count": 78
+    },
+    {
+      "tok_id": 45772,
+      "decoded": "Enjoy",
+      "mean_act": 4.612508258020336,
+      "count": 22
+    },
+    {
+      "tok_id": 2906,
+      "decoded": "Ar",
+      "mean_act": 4.57555986653703,
+      "count": 24
+    },
+    {
+      "tok_id": 9867,
+      "decoded": "Find",
+      "mean_act": 4.556713113147351,
+      "count": 45
+    },
+    {
+      "tok_id": 16395,
+      "decoded": "Loc",
+      "mean_act": 4.542393165197587,
+      "count": 41
+    },
+    {
+      "tok_id": 1044,
+      "decoded": "Th",
+      "mean_act": 4.512902793620015,
+      "count": 54
+    },
+    {
+      "tok_id": 17588,
+      "decoded": "Following",
+      "mean_act": 4.499603076167491,
+      "count": 27
+    },
+    {
+      "tok_id": 14422,
+      "decoded": "Show",
+      "mean_act": 4.477933806821793,
+      "count": 21
+    },
+    {
+      "tok_id": 2374,
+      "decoded": "On",
+      "mean_act": 4.475058870501816,
+      "count": 200
+    },
+    {
+      "tok_id": 12412,
+      "decoded": "High",
+      "mean_act": 4.468670394782338,
+      "count": 31
+    },
+    {
+      "tok_id": 10457,
+      "decoded": "During",
+      "mean_act": 4.460083642696733,
+      "count": 57
+    },
+    {
+      "tok_id": 25989,
+      "decoded": "Apple",
+      "mean_act": 4.453095762431621,
+      "count": 25
+    },
+    {
+      "tok_id": 13238,
+      "decoded": "Christ",
+      "mean_act": 4.441805289678827,
+      "count": 27
+    },
+    {
+      "tok_id": 14067,
+      "decoded": "Despite",
+      "mean_act": 4.390534834936261,
+      "count": 20
+    },
+    {
+      "tok_id": 32783,
+      "decoded": "Need",
+      "mean_act": 4.378930034200576,
+      "count": 33
+    },
+    {
+      "tok_id": 8267,
+      "decoded": "Every",
+      "mean_act": 4.377577693908122,
+      "count": 58
+    },
+    {
+      "tok_id": 41497,
+      "decoded": "﻿",
+      "mean_act": 4.365474104881287,
+      "count": 20
+    },
+    {
+      "tok_id": 8380,
+      "decoded": "Come",
+      "mean_act": 4.346029967535287,
+      "count": 20
+    },
+    {
+      "tok_id": 18686,
+      "decoded": "Home",
+      "mean_act": 4.320427184402034,
+      "count": 123
+    },
+    {
+      "tok_id": 13422,
+      "decoded": "Search",
+      "mean_act": 4.2827801230448586,
+      "count": 32
+    },
+    {
+      "tok_id": 9707,
+      "decoded": "THE",
+      "mean_act": 4.269108881198225,
+      "count": 21
+    },
+    {
+      "tok_id": 2765,
+      "decoded": "List",
+      "mean_act": 4.2599399666069075,
+      "count": 20
+    },
+    {
+      "tok_id": 2422,
+      "decoded": "Al",
+      "mean_act": 4.257646291651518,
+      "count": 57
+    },
+    {
+      "tok_id": 11837,
+      "decoded": "Each",
+      "mean_act": 4.251960892964042,
+      "count": 33
+    },
+    {
+      "tok_id": 6791,
+      "decoded": "May",
+      "mean_act": 4.246076562115922,
+      "count": 30
+    },
+    {
+      "tok_id": 46785,
+      "decoded": "Meet",
+      "mean_act": 4.245496502234822,
+      "count": 21
+    },
+    {
+      "tok_id": 10252,
+      "decoded": "Red",
+      "mean_act": 4.228174912929535,
+      "count": 20
+    }
+  ]
+}
