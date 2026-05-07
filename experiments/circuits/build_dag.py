@@ -40,6 +40,7 @@ os.makedirs(output_dir, exist_ok=True)
 DATASETS = {
     "c4":   ("dataset.c4_dataset",   "c4_dataset_helper"),
     "math": ("dataset.math_dataset", "open_r1_math_dataset_helper"),
+    "code": ("dataset.code_dataset", "code_dataset_helper"),
 }
 
 parser = argparse.ArgumentParser(description=__doc__)
