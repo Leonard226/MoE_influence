@@ -1,22 +1,24 @@
-"""Phase 2, Step 3 — Leiden communities on the C4 DAG.
+"""Leiden communities on a DAG produced by build_dag.py.
 
-Tests the central hypothesis: are there modular, multi-layer expert communities
-in the routing influence DAG?
+Tests whether the routing influence DAG has modular, multi-layer expert
+communities. Builds two directed weighted graphs (APS for promotion, |ANS|
+for inhibition), runs Leiden, compares modularity Q to a degree-preserving
+null, and reports per-community statistics with attention to layer span.
 
-Loads dag_C4.pt (built by build_dag.py), builds two directed weighted graphs
-(APS for promotion, |ANS| for inhibition), runs Leiden community detection on
-each, compares modularity Q to a degree-preserving null, and reports per-
-community statistics with attention to layer span.
+Usage:
+    python experiments/circuits/analyze_communities.py --dataset c4
+    python experiments/circuits/analyze_communities.py --dataset math
 
 Output:
-    {result_path}/circuits/communities.json
-    stdout summary with top-N communities per graph
+    {result_path}/circuits/communities_{dataset}.json
+    stdout summary
 
 CPU-only.
 
 Dependencies: python-igraph, leidenalg
     pip install python-igraph leidenalg
 """
+import argparse
 import json
 import os
 import sys
@@ -44,12 +46,18 @@ with open(os.path.join(ROOT, "config.yaml")) as f:
 art_dir = os.path.join(config["result_path"], "circuits")
 os.makedirs(art_dir, exist_ok=True)
 
+parser = argparse.ArgumentParser(description=__doc__)
+parser.add_argument("--dataset", default="c4",
+                    help="Which DAG to analyze (default: c4). Reads dag_{dataset}.pt.")
+parser.add_argument("--n-null-trials", type=int, default=3,
+                    help="Number of degree-preserving null trials (default: 3).")
+args = parser.parse_args()
+
 N_LAYERS = 16
 N_EXPERTS = 64
 N_NODES = N_LAYERS * N_EXPERTS
 
-# Number of randomized trials for the null modularity comparison.
-N_NULL_TRIALS = 3
+N_NULL_TRIALS = args.n_null_trials
 # Top-N communities to print/save in detail.
 TOP_N_COMMUNITIES = 10
 # Random seed for null reproducibility.
@@ -57,7 +65,7 @@ RNG_SEED = 0
 
 
 # ---- Load DAG ----
-dag_path = os.path.join(art_dir, "dag_C4.pt")
+dag_path = os.path.join(art_dir, f"dag_{args.dataset}.pt")
 print(f"Loading {dag_path} ...", flush=True)
 data = torch.load(dag_path, map_location="cpu")
 APS  = data["APS"].numpy()                              # [c, j, l, n]
@@ -253,7 +261,7 @@ out = {
         "rng_seed": RNG_SEED,
     },
 }
-out_path = os.path.join(art_dir, "communities.json")
+out_path = os.path.join(art_dir, f"communities_{args.dataset}.json")
 with open(out_path, "w") as f:
     json.dump(out, f, indent=2)
 print(f"\nSaved {out_path}")

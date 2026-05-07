@@ -23,6 +23,3 @@ def open_r1_math_dataset_helper(dataset_len, seed=None, min_words=64):
     print("len of my_open_r1_math_dataset", len(my_dataset))
     del original_dataset
     return my_dataset
-
-open_r1_math_dataset_helper(100, min_words=40)
-open_r1_math_dataset_helper(100, seed=20, min_words=40)

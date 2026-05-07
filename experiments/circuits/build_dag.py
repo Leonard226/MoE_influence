@@ -1,23 +1,25 @@
-"""Phase 1, Step 2 — DAG builder for OLMoE on C4 with multiple edge weights.
+"""DAG builder for OLMoE on a chosen dataset, with multiple edge weights.
 
-Computes three edge weights on the full 5000-prompt C4 corpus:
+Computes three signed-score edge weights conditioned on sender selection:
 
-    APS(c, j → l, n) = E_i [ max(S(g^{l,n}, e^{c,j}_{out,i}), 0) | (c,j) selected at i ]
-    ANS(c, j → l, n) = E_i [ min(S(g^{l,n}, e^{c,j}_{out,i}), 0) | (c,j) selected at i ]
-    mean(c, j → l, n) = E_i [ S(g^{l,n}, e^{c,j}_{out,i})           | (c,j) selected at i ]
+    APS(c, j → l, n)  = E_i [ max(S(g^{l,n}, e^{c,j}_{out,i}), 0) | (c,j) selected ]
+    ANS(c, j → l, n)  = E_i [ min(S(g^{l,n}, e^{c,j}_{out,i}), 0) | (c,j) selected ]
+    mean(c, j → l, n) = E_i [     S(g^{l,n}, e^{c,j}_{out,i})     | (c,j) selected ]
 
 where S(g^{l,n}, e^{c,j}_{out,i}) = g^{l,n} · LN_bar^l_i(r^{c,j}(i) · e^{c,j}_{out,i})
 is the per-edge sub-score from the score decomposition (cf. MoEs/main.tex §2).
 
-Output: results/circuits/dag_C4.pt with APS, ANS, mean, count, plus metadata.
+Usage:
+    python experiments/circuits/build_dag.py --dataset c4
+    python experiments/circuits/build_dag.py --dataset math --n-prompts 5000
 
-Variance edge weight (per-(sender, receiver-layer)) is already produced by
-experiments/variance/per_expert.py → results/variance/score_variance_per_expert.pt.
-AARV edge weight is computed in a separate ablation pass on top edges (later).
+Output: {result_path}/circuits/dag_{dataset}.pt
 
 Modeled on experiments/variance/per_expert.py — same forward-pass loop and
 reshapes — but keeps the receiver-expert dimension instead of collapsing via Var_n.
 """
+import argparse
+import importlib
 import os
 import sys
 import time
@@ -33,13 +35,26 @@ with open(os.path.join(ROOT, "config.yaml")) as f:
 output_dir = os.path.join(config["result_path"], "circuits")
 os.makedirs(output_dir, exist_ok=True)
 
+# Dataset registry: name -> (module_path, helper_function_name).
+# All helpers must accept (dataset_len, seed, min_words) and return a list of strings.
+DATASETS = {
+    "c4":   ("dataset.c4_dataset",   "c4_dataset_helper"),
+    "math": ("dataset.math_dataset", "open_r1_math_dataset_helper"),
+}
+
+parser = argparse.ArgumentParser(description=__doc__)
+parser.add_argument("--dataset", choices=list(DATASETS), default="c4",
+                    help="Which dataset to build the DAG on (default: c4).")
+parser.add_argument("--n-prompts", type=int, default=5000,
+                    help="Number of prompts to use (default: 5000).")
+args = parser.parse_args()
+
 device = "cuda:0"
 torch.set_default_device(device)
 torch.set_grad_enabled(False)
 
 from customized_models.modeling_olmoe_customized import OlmoeForCausalLM
 from transformers import AutoTokenizer
-from dataset.c4_dataset import c4_dataset_helper
 
 MODEL_ID = "allenai/OLMoE-1B-7B-0924"
 N_LAYERS = 16
@@ -48,12 +63,11 @@ D_E = 2048
 TOP_K = 8
 EPS = 1e-5
 
-# Step 2: full run on 5000 prompts (matches prior paper's sample size).
-N_PROMPTS = 5000
+N_PROMPTS = args.n_prompts
 BSZ = 50
 MAX_TOKENS = 32
 
-print(f"[Step 2] Building DAG on {N_PROMPTS} prompts.", flush=True)
+print(f"Building DAG on dataset={args.dataset!r}, {N_PROMPTS} prompts.", flush=True)
 
 # ---- Load model + tokenizer ----
 print(f"Loading {MODEL_ID} ...", flush=True)
@@ -74,10 +88,12 @@ gamma_recv = torch.stack([
     for R in range(N_LAYERS)
 ])  # [L, d_e]
 
-# ---- Load C4 ----
-print(f"Loading C4 ({N_PROMPTS} prompts) ...", flush=True)
+# ---- Load dataset ----
+mod_name, fn_name = DATASETS[args.dataset]
+loader = getattr(importlib.import_module(mod_name), fn_name)
+print(f"Loading dataset={args.dataset!r} ({N_PROMPTS} prompts) ...", flush=True)
 t0 = time.time()
-prompts = c4_dataset_helper(dataset_len=N_PROMPTS, seed=None, min_words=MAX_TOKENS)
+prompts = loader(dataset_len=N_PROMPTS, seed=None, min_words=MAX_TOKENS)
 print(f"  loaded in {time.time() - t0:.1f}s", flush=True)
 
 # ---- Accumulators ----
@@ -175,7 +191,7 @@ APS  = (APS_accum  / denom).masked_fill(zero_mask, 0.0)
 ANS  = (ANS_accum  / denom).masked_fill(zero_mask, 0.0)
 mean = (mean_accum / denom).masked_fill(zero_mask, 0.0)
 
-out_path = os.path.join(output_dir, "dag_C4.pt")
+out_path = os.path.join(output_dir, f"dag_{args.dataset}.pt")
 torch.save({
     "APS":  APS.cpu(),                          # [c, j, l, n]
     "ANS":  ANS.cpu(),                          # [c, j, l, n]
@@ -184,7 +200,7 @@ torch.save({
     "n_prompts": N_PROMPTS,
     "max_tokens": MAX_TOKENS,
     "model": MODEL_ID,
-    "step": "2 (full run, APS + ANS + mean signed)",
+    "dataset": args.dataset,
 }, out_path)
 print(f"Saved {out_path}")
 
