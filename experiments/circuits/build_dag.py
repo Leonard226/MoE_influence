@@ -48,6 +48,10 @@ parser.add_argument("--dataset", choices=list(DATASETS), default="c4",
                     help="Which dataset to build the DAG on (default: c4).")
 parser.add_argument("--n-prompts", type=int, default=5000,
                     help="Number of prompts to use (default: 5000).")
+parser.add_argument("--seed", type=int, default=None,
+                    help="Seed for dataset shuffling. None = sequential from "
+                         "start. Different seeds yield (mostly) disjoint subsets, "
+                         "useful for same-dataset baseline runs.")
 args = parser.parse_args()
 
 device = "cuda:0"
@@ -92,9 +96,10 @@ gamma_recv = torch.stack([
 # ---- Load dataset ----
 mod_name, fn_name = DATASETS[args.dataset]
 loader = getattr(importlib.import_module(mod_name), fn_name)
-print(f"Loading dataset={args.dataset!r} ({N_PROMPTS} prompts) ...", flush=True)
+print(f"Loading dataset={args.dataset!r}, seed={args.seed!r} ({N_PROMPTS} prompts) ...",
+      flush=True)
 t0 = time.time()
-prompts = loader(dataset_len=N_PROMPTS, seed=None, min_words=MAX_TOKENS)
+prompts = loader(dataset_len=N_PROMPTS, seed=args.seed, min_words=MAX_TOKENS)
 print(f"  loaded in {time.time() - t0:.1f}s", flush=True)
 
 # ---- Accumulators ----
@@ -192,7 +197,8 @@ APS  = (APS_accum  / denom).masked_fill(zero_mask, 0.0)
 ANS  = (ANS_accum  / denom).masked_fill(zero_mask, 0.0)
 mean = (mean_accum / denom).masked_fill(zero_mask, 0.0)
 
-out_path = os.path.join(output_dir, f"dag_{args.dataset}.pt")
+suffix = f"_s{args.seed}" if args.seed is not None else ""
+out_path = os.path.join(output_dir, f"dag_{args.dataset}{suffix}.pt")
 torch.save({
     "APS":  APS.cpu(),                          # [c, j, l, n]
     "ANS":  ANS.cpu(),                          # [c, j, l, n]
@@ -202,6 +208,7 @@ torch.save({
     "max_tokens": MAX_TOKENS,
     "model": MODEL_ID,
     "dataset": args.dataset,
+    "seed": args.seed,
 }, out_path)
 print(f"Saved {out_path}")
 
