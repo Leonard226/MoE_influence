@@ -1,3 +1,6 @@
 [submodule "MoEs"]
 	path = MoEs
 	url = https://git@git.overleaf.com/69f00410eda46469665d3f0c
+[submodule "circuits"]
+	path = circuits
+	url = https://git@git.overleaf.com/69fbe49b4a894d37792ebe47
