@@ -1,22 +1,22 @@
-"""Phase 1, Step 1 — minimal DAG builder for OLMoE on C4.
+"""Phase 1, Step 2 — DAG builder for OLMoE on C4 with multiple edge weights.
 
-Computes the APS (Average Positive Score) edge weight only, on a small set of
-prompts, as a sanity scan. Output saved to results/circuits/dag_C4_step1.pt.
-
-The DAG has nodes = (layer, expert) pairs and directed cross-layer edges
-(c, j) → (l, n) for c < l. APS on each edge is
+Computes three edge weights on the full 5000-prompt C4 corpus:
 
     APS(c, j → l, n) = E_i [ max(S(g^{l,n}, e^{c,j}_{out,i}), 0) | (c,j) selected at i ]
+    ANS(c, j → l, n) = E_i [ min(S(g^{l,n}, e^{c,j}_{out,i}), 0) | (c,j) selected at i ]
+    mean(c, j → l, n) = E_i [ S(g^{l,n}, e^{c,j}_{out,i})           | (c,j) selected at i ]
 
 where S(g^{l,n}, e^{c,j}_{out,i}) = g^{l,n} · LN_bar^l_i(r^{c,j}(i) · e^{c,j}_{out,i})
 is the per-edge sub-score from the score decomposition (cf. MoEs/main.tex §2).
 
-This script is modeled directly on experiments/variance/per_expert.py — same
-forward-pass loop and reshapes — but instead of collapsing the per-receiver
-score tensor via Var_n, we keep the receiver-expert dimension and accumulate
-the positive part per (sender expert, receiver layer, receiver expert).
+Output: results/circuits/dag_C4.pt with APS, ANS, mean, count, plus metadata.
 
-Step 2 will extend to ANS, mean signed score, and full 5000 prompts.
+Variance edge weight (per-(sender, receiver-layer)) is already produced by
+experiments/variance/per_expert.py → results/variance/score_variance_per_expert.pt.
+AARV edge weight is computed in a separate ablation pass on top edges (later).
+
+Modeled on experiments/variance/per_expert.py — same forward-pass loop and
+reshapes — but keeps the receiver-expert dimension instead of collapsing via Var_n.
 """
 import os
 import sys
@@ -48,12 +48,12 @@ D_E = 2048
 TOP_K = 8
 EPS = 1e-5
 
-# Step 1: sanity scan on 50 prompts. Bump to 5000 in step 2.
-N_PROMPTS = 50
+# Step 2: full run on 5000 prompts (matches prior paper's sample size).
+N_PROMPTS = 5000
 BSZ = 50
 MAX_TOKENS = 32
 
-print(f"[Step 1] Building DAG on {N_PROMPTS} prompts (sanity scan).", flush=True)
+print(f"[Step 2] Building DAG on {N_PROMPTS} prompts.", flush=True)
 
 # ---- Load model + tokenizer ----
 print(f"Loading {MODEL_ID} ...", flush=True)
@@ -81,10 +81,13 @@ prompts = c4_dataset_helper(dataset_len=N_PROMPTS, seed=None, min_words=MAX_TOKE
 print(f"  loaded in {time.time() - t0:.1f}s", flush=True)
 
 # ---- Accumulators ----
-# APS_accum[S, j, R, n] = Σ_{i : j ∈ top-K at S} max(S(g^{R,n}, e^{S,j}_{out,i}), 0)
-APS_accum = torch.zeros(
-    (N_LAYERS, N_EXPERTS, N_LAYERS, N_EXPERTS), dtype=torch.float32, device=device
-)
+# APS_accum[S, j, R, n]  = Σ_{i : j ∈ top-K at S} max(S(g^{R,n}, e^{S,j}_{out,i}), 0)
+# ANS_accum[S, j, R, n]  = Σ_{i : j ∈ top-K at S} min(S(g^{R,n}, e^{S,j}_{out,i}), 0)
+# mean_accum[S, j, R, n] = Σ_{i : j ∈ top-K at S}     S(g^{R,n}, e^{S,j}_{out,i})
+SHAPE = (N_LAYERS, N_EXPERTS, N_LAYERS, N_EXPERTS)
+APS_accum  = torch.zeros(SHAPE, dtype=torch.float32, device=device)
+ANS_accum  = torch.zeros(SHAPE, dtype=torch.float32, device=device)
+mean_accum = torch.zeros(SHAPE, dtype=torch.float32, device=device)
 # count[S, j] = number of (token, top-k slot) events where expert j was selected at layer S.
 count = torch.zeros((N_LAYERS, N_EXPERTS), dtype=torch.long, device=device)
 
@@ -138,68 +141,108 @@ for B in range(0, N_PROMPTS, BSZ):
             #   S(g^{R,n}, e^{S,j_k}_{out,i})  with j_k = sel_S[bt, k].
             scores = torch.einsum("ed,bkd->bke", G_recv[R], ln_bar)  # [bt, k, N_EXPERTS]
 
-            # APS contribution = positive part. Accumulate over (sender expert, receiver expert).
+            # APS = positive part, ANS = negative part, mean = signed.
+            # Accumulate over (sender expert, receiver expert).
             scores_pos = scores.clamp(min=0.0)                  # [bt, k, N_EXPERTS]
-            APS_accum[S, :, R, :].index_add_(
-                0, sel_S.flatten(), scores_pos.flatten(0, 1)
-            )
+            scores_neg = scores.clamp(max=0.0)                  # [bt, k, N_EXPERTS]
+            sel_flat = sel_S.flatten()
+            APS_accum[S, :, R, :].index_add_(0, sel_flat, scores_pos.flatten(0, 1))
+            ANS_accum[S, :, R, :].index_add_(0, sel_flat, scores_neg.flatten(0, 1))
+            mean_accum[S, :, R, :].index_add_(0, sel_flat, scores.flatten(0, 1))
 
-            del ln_bar, scores, scores_pos
+            del ln_bar, scores, scores_pos, scores_neg
 
     del hook_dict, after_res1, selected, weighted_out
     del omega, sel, rms_sq, rms_inv
     torch.cuda.empty_cache()
 
     bnum = B // BSZ + 1
-    elapsed = time.time() - t_start
-    print(f"  batch {bnum}/{n_batches}  elapsed={elapsed:.1f}s", flush=True)
+    if bnum == 1 or bnum % 10 == 0 or bnum == n_batches:
+        elapsed = time.time() - t_start
+        rate = (bnum * BSZ) / elapsed if elapsed > 0 else 0.0
+        eta = (N_PROMPTS - bnum * BSZ) / rate if rate > 0 else 0.0
+        print(f"  batch {bnum:3d}/{n_batches}  elapsed={elapsed:.1f}s  "
+              f"rate={rate:.1f} prompts/s  ETA={eta:.0f}s", flush=True)
 
 print(f"\nDone in {time.time() - t_start:.1f}s.\n", flush=True)
 
-# ---- Normalize: APS[S, j, R, n] = APS_accum / count[S, j] ----
+# ---- Normalize: weight[S, j, R, n] = accum / count[S, j] ----
 count_safe = count.clamp(min=1).to(torch.float32)                      # [L, n_experts]
-APS = APS_accum / count_safe.view(N_LAYERS, N_EXPERTS, 1, 1)
-APS = APS.masked_fill((count == 0).view(N_LAYERS, N_EXPERTS, 1, 1), 0.0)
+denom      = count_safe.view(N_LAYERS, N_EXPERTS, 1, 1)
+zero_mask  = (count == 0).view(N_LAYERS, N_EXPERTS, 1, 1)
 
-out_path = os.path.join(output_dir, "dag_C4_step1.pt")
+APS  = (APS_accum  / denom).masked_fill(zero_mask, 0.0)
+ANS  = (ANS_accum  / denom).masked_fill(zero_mask, 0.0)
+mean = (mean_accum / denom).masked_fill(zero_mask, 0.0)
+
+out_path = os.path.join(output_dir, "dag_C4.pt")
 torch.save({
-    "APS": APS.cpu(),                          # [c, j, l, n]
-    "count": count.cpu(),                      # [c, j]
+    "APS":  APS.cpu(),                          # [c, j, l, n]
+    "ANS":  ANS.cpu(),                          # [c, j, l, n]
+    "mean": mean.cpu(),                         # [c, j, l, n]
+    "count": count.cpu(),                       # [c, j]
     "n_prompts": N_PROMPTS,
     "max_tokens": MAX_TOKENS,
     "model": MODEL_ID,
-    "step": "1 (sanity scan, APS only)",
+    "step": "2 (full run, APS + ANS + mean signed)",
 }, out_path)
 print(f"Saved {out_path}")
 
 # ---- Quick sanity prints ----
-print("\n==================== Step 1 sanity stats ====================\n")
-print(f"APS shape: {tuple(APS.shape)}  (sender_layer × sender_expert × recv_layer × recv_expert)")
-print(f"APS nonzero entries: {(APS != 0).sum().item()} / {APS.numel()}")
-print(f"APS max:  {APS.max().item():.4e}")
-nonzero_mean = APS[APS != 0].mean().item() if (APS != 0).any() else 0.0
-print(f"APS mean (over nonzero): {nonzero_mean:.4e}")
+print("\n==================== Step 2 sanity stats ====================\n")
 
-# Top-10 edges globally.
-print("\nTop-10 APS edges:")
-flat = APS.reshape(-1)
-top_vals, top_idx = torch.topk(flat, 10)
-for v, i in zip(top_vals.tolist(), top_idx.tolist()):
+def decode_flat(i):
     c = i // (N_EXPERTS * N_LAYERS * N_EXPERTS)
     rest = i % (N_EXPERTS * N_LAYERS * N_EXPERTS)
     j = rest // (N_LAYERS * N_EXPERTS)
     rest2 = rest % (N_LAYERS * N_EXPERTS)
     l = rest2 // N_EXPERTS
     n = rest2 % N_EXPERTS
-    print(f"  M{c}E{j} → M{l}E{n}   APS = {v:.4e}")
+    return c, j, l, n
+
+for label, T in [("APS", APS), ("ANS", ANS), ("mean", mean)]:
+    print(f"--- {label} ---")
+    print(f"  shape: {tuple(T.shape)}")
+    print(f"  nonzero entries: {(T != 0).sum().item()} / {T.numel()}")
+    print(f"  max:  {T.max().item():+.4e}    min: {T.min().item():+.4e}")
+    nz = T[T != 0]
+    if nz.numel() > 0:
+        print(f"  mean (over nonzero): {nz.mean().item():+.4e}")
+
+# Top-10 edges by APS, ANS magnitude, mean magnitude.
+def show_top10(T, label, key):
+    print(f"\nTop-10 edges by {label} ({key}):")
+    if key == "max":
+        vals, idx = torch.topk(T.reshape(-1), 10)
+    elif key == "min":
+        vals, idx = torch.topk(-T.reshape(-1), 10)
+        vals = -vals
+    elif key == "abs":
+        vals, idx = torch.topk(T.abs().reshape(-1), 10)
+        vals = T.reshape(-1)[idx]
+    for v, i in zip(vals.tolist(), idx.tolist()):
+        c, j, l, n = decode_flat(i)
+        print(f"  M{c}E{j} → M{l}E{n}   {label} = {v:+.4e}")
+
+show_top10(APS,  "APS",  "max")
+show_top10(ANS,  "ANS",  "min")
+show_top10(mean, "mean", "abs")
 
 # Spot-check the known M1E9 → M4E14 chain from prior paper.
-print(f"\nSpot check  M1E9 → M4E14   APS = {APS[1, 9, 4, 14].item():.4e}")
-print("  (should be among the larger entries if construction is correct)")
+print(f"\nSpot check  M1E9 → M4E14")
+print(f"   APS  = {APS[1, 9, 4, 14].item():+.4e}")
+print(f"   ANS  = {ANS[1, 9, 4, 14].item():+.4e}")
+print(f"   mean = {mean[1, 9, 4, 14].item():+.4e}")
 
 # Aggregate APS by sender layer — should reproduce M1, M4 stripe pattern from Fig 3d.
-sender_layer_sum = APS.sum(dim=(1, 2, 3)).cpu().numpy()                # [L]
 print("\nAPS aggregated by sender layer (should peak at M1 and M4):")
+aps_by_sender = APS.sum(dim=(1, 2, 3)).cpu().numpy()                   # [L]
 for c in range(N_LAYERS):
-    bar = "#" * int(40 * sender_layer_sum[c] / max(sender_layer_sum.max(), 1e-30))
-    print(f"  M{c:2d}  {sender_layer_sum[c]:.4e}  {bar}")
+    bar = "#" * int(40 * aps_by_sender[c] / max(aps_by_sender.max(), 1e-30))
+    print(f"  M{c:2d}  {aps_by_sender[c]:.4e}  {bar}")
+
+print("\nANS aggregated by sender layer (inhibition; expect spread):")
+ans_by_sender = (-ANS).sum(dim=(1, 2, 3)).cpu().numpy()                # [L], magnitude
+for c in range(N_LAYERS):
+    bar = "#" * int(40 * ans_by_sender[c] / max(ans_by_sender.max(), 1e-30))
+    print(f"  M{c:2d}  {ans_by_sender[c]:.4e}  {bar}")
