@@ -9,9 +9,15 @@ Two circuits tested:
     C1 = {M1E9, M4E14}, hypothesized determiner-detection chain.
     C2 = {M2E30},       hypothesized capitalization-inhibition source.
 
-Each circuit defines a trigger predicate over token positions:
-    determiner:    previous token's stripped/lowered text in {"a", "the"}
-    capitalization: previous token (stripped) starts with an uppercase letter
+Each circuit defines a trigger predicate over token positions. The trigger is
+defined on the *current* token, not the preceding one — the analytical score-
+subtraction ablation captures per-position effects (cross-position attention
+contributions are not in the score decomposition), so the relevant trigger is
+the position where the circuit's detector neurons fire, which is the position
+of the trigger token itself.
+
+    determiner:    current token's stripped/lowered text in {"a", "the"}
+    capitalization: current token (stripped) starts with an uppercase letter
 
 For each (target_set, dataset) pair, we report:
     AARV(trigger) — mean rank shift on trigger-class tokens.
@@ -93,31 +99,38 @@ CIRCUITS = {
 
 
 def determiner_trigger_mask(input_ids, attention_mask, tokenizer):
-    """Mask True for tokens whose previous token decodes to 'a' or 'the' (case-insensitive)."""
+    """Mask True for tokens whose CURRENT token decodes to 'a' or 'the' (case-insensitive).
+
+    These are the positions where M1E9 z=915 fires (per Leonard's `MoEs/main.tex`),
+    and where the analytical ablation should produce its largest rank shift.
+    """
     bsz, n_tok = input_ids.shape
     mask = torch.zeros((bsz, n_tok), dtype=torch.bool, device=input_ids.device)
     for b in range(bsz):
-        for t in range(1, n_tok):
+        for t in range(n_tok):
             if not bool(attention_mask[b, t]):
                 continue
-            prev_id = int(input_ids[b, t - 1].item())
-            prev_text = tokenizer.decode([prev_id]).strip().lower()
-            if prev_text in {"a", "the"}:
+            cur_id = int(input_ids[b, t].item())
+            cur_text = tokenizer.decode([cur_id]).strip().lower()
+            if cur_text in {"a", "the"}:
                 mask[b, t] = True
     return mask
 
 
 def capitalization_trigger_mask(input_ids, attention_mask, tokenizer):
-    """Mask True for tokens whose previous token's stripped text starts with an uppercase letter."""
+    """Mask True for tokens whose CURRENT token's stripped text starts with an uppercase letter.
+
+    These are the positions where M2E30 z=742 fires (per Leonard's `MoEs/main.tex`).
+    """
     bsz, n_tok = input_ids.shape
     mask = torch.zeros((bsz, n_tok), dtype=torch.bool, device=input_ids.device)
     for b in range(bsz):
-        for t in range(1, n_tok):
+        for t in range(n_tok):
             if not bool(attention_mask[b, t]):
                 continue
-            prev_id = int(input_ids[b, t - 1].item())
-            prev_text = tokenizer.decode([prev_id]).strip()
-            if prev_text and prev_text[0].isupper():
+            cur_id = int(input_ids[b, t].item())
+            cur_text = tokenizer.decode([cur_id]).strip()
+            if cur_text and cur_text[0].isupper():
                 mask[b, t] = True
     return mask
 
@@ -371,9 +384,9 @@ for cname, cdef in CIRCUITS.items():
               for i in range(args.n_random_trials)]
 
     print(f"[{cname}]   V_C = {{{members_str}}}   trigger = {cdef['trigger_fn']!r}")
-    print(f"  Per-layer AARV (downstream l > {min(c for c, _ in members)}):")
-    print(f"    {'layer':>6} {'AARV(trig|real)':>18} {'AARV(ctrl|real)':>18} "
-          f"{'AARV(trig|rand)':>18} {'AARV(ctrl|rand)':>18}")
+    print(f"  Per-layer AARV with selectivity & specificity (downstream l > {min(c for c, _ in members)}):")
+    print(f"    {'layer':>6} {'trig|real':>10} {'ctrl|real':>10} "
+          f"{'trig|rand':>10} {'ctrl|rand':>10}   {'sel(T/C)':>9} {'spec(R/r)':>10}")
     for l in layers:
         rt = real["aarv_trigger_per_layer"][l]
         rc = real["aarv_control_per_layer"][l]
@@ -381,7 +394,10 @@ for cname, cdef in CIRCUITS.items():
                              for i in range(args.n_random_trials)]))
         rcr = float(np.mean([results[f"random_{cname}_t{i}"]["aarv_control_per_layer"][l]
                              for i in range(args.n_random_trials)]))
-        print(f"    M{l:>5d} {rt:>18.4f} {rc:>18.4f} {rtr:>18.4f} {rcr:>18.4f}")
+        sel_l = rt / max(rc, 1e-9)
+        spec_l = rt / max(rtr, 1e-9)
+        print(f"    M{l:>5d} {rt:>10.4f} {rc:>10.4f} {rtr:>10.4f} {rcr:>10.4f}   "
+              f"{sel_l:>8.2f}x {spec_l:>9.2f}x")
 
     print(f"\n  Aggregated across downstream layers:")
     print(f"    AARV(trigger | real circuit)   = {real_t:.4f}")
@@ -391,6 +407,6 @@ for cname, cdef in CIRCUITS.items():
 
     sel = real_t / max(real_c, 1e-9)
     spec = real_t / max(np.mean(rand_t), 1e-9)
-    print(f"\n  Selectivity  AARV(trigger | real) / AARV(control | real)   = {sel:.2f}x")
-    print(f"  Specificity  AARV(trigger | real) / AARV(trigger | random) = {spec:.2f}x")
+    print(f"\n  Aggregate selectivity  AARV(trigger | real) / AARV(control | real)   = {sel:.2f}x")
+    print(f"  Aggregate specificity  AARV(trigger | real) / AARV(trigger | random) = {spec:.2f}x")
     print()
