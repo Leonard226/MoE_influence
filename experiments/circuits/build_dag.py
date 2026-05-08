@@ -1,16 +1,18 @@
 """DAG builder for OLMoE on a chosen dataset, with multiple edge weights.
 
-Computes four edge weights conditioned on sender selection:
+Computes five edge weights conditioned on sender selection:
 
     APS(c, j → l, n)   = E_i [ max(S(g^{l,n}, e^{c,j}_{out,i}), 0) | (c,j) selected ]
     ANS(c, j → l, n)   = E_i [ min(S(g^{l,n}, e^{c,j}_{out,i}), 0) | (c,j) selected ]
     mean(c, j → l, n)  = E_i [     S(g^{l,n}, e^{c,j}_{out,i})     | (c,j) selected ]
     V_tok(c, j → l, n) = Var_i [   S(g^{l,n}, e^{c,j}_{out,i})     | (c,j) selected ]
+    AARV(c, j → l, n)  = E_i [ |rank_l^orig(n) − rank_l^pert(n)|   | (c,j) selected ]
 
 where S(g^{l,n}, e^{c,j}_{out,i}) = g^{l,n} · LN_bar^l_i(r^{c,j}(i) · e^{c,j}_{out,i})
 is the per-edge sub-score from the score decomposition (cf. MoEs/main.tex §2).
-V_tok captures per-edge consistency across tokens: low V_tok = stable, reliable
-edge; high V_tok = oscillating contribution.
+The first four are score-based; AARV is causal (the rank shift of receiver n
+at layer l when (c,j)'s sub-score is removed via score subtraction, conditional
+on sender (c,j) being selected at i).
 
 Usage:
     python experiments/circuits/build_dag.py --dataset c4
@@ -116,6 +118,9 @@ APS_accum  = torch.zeros(SHAPE, dtype=torch.float32, device=device)
 ANS_accum  = torch.zeros(SHAPE, dtype=torch.float32, device=device)
 mean_accum = torch.zeros(SHAPE, dtype=torch.float32, device=device)
 sq_accum   = torch.zeros(SHAPE, dtype=torch.float32, device=device)
+# aarv_accum[S, j, R, n] = Σ_{i : j ∈ top-K at S} | rank_R^orig(n) - rank_R^pert(n) |
+# where pert_score = orig_score - S(g^{R,n}, e^{S,j}_{out,i}).
+aarv_accum = torch.zeros(SHAPE, dtype=torch.float32, device=device)
 # count[S, j] = number of (token, top-k slot) events where expert j was selected at layer S.
 count = torch.zeros((N_LAYERS, N_EXPERTS), dtype=torch.long, device=device)
 
@@ -134,6 +139,7 @@ for B in range(0, N_PROMPTS, BSZ):
     _, hook_dict = model(input_ids=input_ids, attention_mask=attention_mask)
 
     after_res1   = hook_dict["hook_after_res1"]                # [bsz, L, n_tok, d_e]
+    after_norm2  = hook_dict["hook_after_norm2"]               # [bsz, L, n_tok, d_e]
     selected     = hook_dict["hook_selected_experts"]          # [bsz, L, n_tok, top_k]
     weighted_out = hook_dict["hook_expert_weighted_outputs"]   # [bsz, L, n_tok, top_k, d_e]
 
@@ -143,6 +149,17 @@ for B in range(0, N_PROMPTS, BSZ):
     # 1 / RMS^R_i, per token, per receiver layer R.
     rms_sq  = after_res1.float().pow(2).mean(dim=-1) + EPS                # [bsz, L, n_tok]
     rms_inv = torch.rsqrt(rms_sq).permute(0, 2, 1).reshape(bt, N_LAYERS)  # [bt, L_recv]
+
+    # Original assignment scores at every receiver layer (for AARV computation).
+    after_norm2_r = (after_norm2.float()
+                     .permute(0, 2, 1, 3)
+                     .reshape(bt, N_LAYERS, D_E))                          # [bt, L, d_e]
+    orig_score = torch.einsum("lnd,bld->bln", G_recv, after_norm2_r)       # [bt, L, N_EXPERTS]
+    orig_sorted = torch.argsort(orig_score, dim=-1, descending=True)       # [bt, L, N_EXPERTS]
+    orig_rank_of = torch.empty_like(orig_sorted)
+    orig_rank_of.scatter_(-1, orig_sorted,
+                          torch.arange(N_EXPERTS, device=device).expand_as(orig_sorted))
+    # orig_rank_of[bt, l, n] = position of expert n in the layer-l ordering.
 
     # Sender-side reshapes: [bt, S, k, ...]
     omega = (weighted_out.float()
@@ -180,10 +197,24 @@ for B in range(0, N_PROMPTS, BSZ):
             mean_accum[S, :, R, :].index_add_(0, sel_flat, scores.flatten(0, 1))
             sq_accum[S, :, R, :].index_add_(0, sel_flat, scores_sq.flatten(0, 1))
 
-            del ln_bar, scores, scores_pos, scores_neg, scores_sq
+            # Per-edge AARV: for each slot k, ablate the sender's contribution
+            # by subtracting `scores` from orig_score at layer R, re-rank, and
+            # measure the per-receiver rank shift |orig_rank − pert_rank|.
+            pert_score = orig_score[:, R, :].unsqueeze(1) - scores               # [bt, k, N_EXPERTS]
+            pert_sorted = torch.argsort(pert_score, dim=-1, descending=True)     # [bt, k, N_EXPERTS]
+            pert_rank_of = torch.empty_like(pert_sorted)
+            pert_rank_of.scatter_(-1, pert_sorted,
+                                  torch.arange(N_EXPERTS, device=device).expand_as(pert_sorted))
+            orig_rank_R = orig_rank_of[:, R, :].unsqueeze(1).expand_as(pert_rank_of)  # [bt, k, N_EXPERTS]
+            rank_shift = (pert_rank_of.float() - orig_rank_R.float()).abs()      # [bt, k, N_EXPERTS]
+            aarv_accum[S, :, R, :].index_add_(0, sel_flat, rank_shift.flatten(0, 1))
 
-    del hook_dict, after_res1, selected, weighted_out
-    del omega, sel, rms_sq, rms_inv
+            del ln_bar, scores, scores_pos, scores_neg, scores_sq
+            del pert_score, pert_sorted, pert_rank_of, orig_rank_R, rank_shift
+
+    del hook_dict, after_res1, after_norm2, selected, weighted_out
+    del omega, sel, rms_sq, rms_inv, after_norm2_r
+    del orig_score, orig_sorted, orig_rank_of
     torch.cuda.empty_cache()
 
     bnum = B // BSZ + 1
@@ -208,6 +239,8 @@ mean  = (mean_accum / denom).masked_fill(zero_mask, 0.0)
 mean_sq = (sq_accum / denom).masked_fill(zero_mask, 0.0)
 V_tok   = (mean_sq - mean * mean).clamp(min=0.0)  # numerical safety
 del mean_sq
+# Per-edge AARV: average rank shift over tokens where sender fired.
+AARV  = (aarv_accum / denom).masked_fill(zero_mask, 0.0)
 
 suffix = f"_s{args.seed}" if args.seed is not None else ""
 out_path = os.path.join(output_dir, f"dag_{args.dataset}{suffix}.pt")
@@ -216,6 +249,7 @@ torch.save({
     "ANS":   ANS.cpu(),                         # [c, j, l, n]
     "mean":  mean.cpu(),                        # [c, j, l, n]
     "V_tok": V_tok.cpu(),                       # [c, j, l, n] — Var_i[S | sender selected]
+    "AARV":  AARV.cpu(),                        # [c, j, l, n] — mean rank shift of receiver n
     "count": count.cpu(),                       # [c, j]
     "n_prompts": N_PROMPTS,
     "max_tokens": MAX_TOKENS,
@@ -271,6 +305,7 @@ print(f"   APS   = {APS[1, 9, 4, 14].item():+.4e}")
 print(f"   ANS   = {ANS[1, 9, 4, 14].item():+.4e}")
 print(f"   mean  = {mean[1, 9, 4, 14].item():+.4e}")
 print(f"   V_tok = {V_tok[1, 9, 4, 14].item():.4e}    (lower = more consistent edge)")
+print(f"   AARV  = {AARV[1, 9, 4, 14].item():.4e}    (mean rank shift of M4E14 when M1E9 ablated)")
 
 # Aggregate APS by sender layer — should reproduce M1, M4 stripe pattern from Fig 3d.
 print("\nAPS aggregated by sender layer (should peak at M1 and M4):")
