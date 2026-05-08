@@ -1,13 +1,16 @@
 """DAG builder for OLMoE on a chosen dataset, with multiple edge weights.
 
-Computes three signed-score edge weights conditioned on sender selection:
+Computes four edge weights conditioned on sender selection:
 
-    APS(c, j → l, n)  = E_i [ max(S(g^{l,n}, e^{c,j}_{out,i}), 0) | (c,j) selected ]
-    ANS(c, j → l, n)  = E_i [ min(S(g^{l,n}, e^{c,j}_{out,i}), 0) | (c,j) selected ]
-    mean(c, j → l, n) = E_i [     S(g^{l,n}, e^{c,j}_{out,i})     | (c,j) selected ]
+    APS(c, j → l, n)   = E_i [ max(S(g^{l,n}, e^{c,j}_{out,i}), 0) | (c,j) selected ]
+    ANS(c, j → l, n)   = E_i [ min(S(g^{l,n}, e^{c,j}_{out,i}), 0) | (c,j) selected ]
+    mean(c, j → l, n)  = E_i [     S(g^{l,n}, e^{c,j}_{out,i})     | (c,j) selected ]
+    V_tok(c, j → l, n) = Var_i [   S(g^{l,n}, e^{c,j}_{out,i})     | (c,j) selected ]
 
 where S(g^{l,n}, e^{c,j}_{out,i}) = g^{l,n} · LN_bar^l_i(r^{c,j}(i) · e^{c,j}_{out,i})
 is the per-edge sub-score from the score decomposition (cf. MoEs/main.tex §2).
+V_tok captures per-edge consistency across tokens: low V_tok = stable, reliable
+edge; high V_tok = oscillating contribution.
 
 Usage:
     python experiments/circuits/build_dag.py --dataset c4
@@ -103,13 +106,16 @@ prompts = loader(dataset_len=N_PROMPTS, seed=args.seed, min_words=MAX_TOKENS)
 print(f"  loaded in {time.time() - t0:.1f}s", flush=True)
 
 # ---- Accumulators ----
-# APS_accum[S, j, R, n]  = Σ_{i : j ∈ top-K at S} max(S(g^{R,n}, e^{S,j}_{out,i}), 0)
-# ANS_accum[S, j, R, n]  = Σ_{i : j ∈ top-K at S} min(S(g^{R,n}, e^{S,j}_{out,i}), 0)
-# mean_accum[S, j, R, n] = Σ_{i : j ∈ top-K at S}     S(g^{R,n}, e^{S,j}_{out,i})
+# APS_accum[S, j, R, n]   = Σ_{i : j ∈ top-K at S} max(S(g^{R,n}, e^{S,j}_{out,i}), 0)
+# ANS_accum[S, j, R, n]   = Σ_{i : j ∈ top-K at S} min(S(g^{R,n}, e^{S,j}_{out,i}), 0)
+# mean_accum[S, j, R, n]  = Σ_{i : j ∈ top-K at S}     S(g^{R,n}, e^{S,j}_{out,i})
+# sq_accum[S, j, R, n]    = Σ_{i : j ∈ top-K at S}     S(g^{R,n}, e^{S,j}_{out,i})^2
+# (Var_i is computed at the end as E[S^2] - E[S]^2.)
 SHAPE = (N_LAYERS, N_EXPERTS, N_LAYERS, N_EXPERTS)
 APS_accum  = torch.zeros(SHAPE, dtype=torch.float32, device=device)
 ANS_accum  = torch.zeros(SHAPE, dtype=torch.float32, device=device)
 mean_accum = torch.zeros(SHAPE, dtype=torch.float32, device=device)
+sq_accum   = torch.zeros(SHAPE, dtype=torch.float32, device=device)
 # count[S, j] = number of (token, top-k slot) events where expert j was selected at layer S.
 count = torch.zeros((N_LAYERS, N_EXPERTS), dtype=torch.long, device=device)
 
@@ -163,16 +169,18 @@ for B in range(0, N_PROMPTS, BSZ):
             #   S(g^{R,n}, e^{S,j_k}_{out,i})  with j_k = sel_S[bt, k].
             scores = torch.einsum("ed,bkd->bke", G_recv[R], ln_bar)  # [bt, k, N_EXPERTS]
 
-            # APS = positive part, ANS = negative part, mean = signed.
+            # APS = positive part, ANS = negative part, mean = signed, sq = squared.
             # Accumulate over (sender expert, receiver expert).
             scores_pos = scores.clamp(min=0.0)                  # [bt, k, N_EXPERTS]
             scores_neg = scores.clamp(max=0.0)                  # [bt, k, N_EXPERTS]
+            scores_sq  = scores * scores                        # [bt, k, N_EXPERTS]
             sel_flat = sel_S.flatten()
             APS_accum[S, :, R, :].index_add_(0, sel_flat, scores_pos.flatten(0, 1))
             ANS_accum[S, :, R, :].index_add_(0, sel_flat, scores_neg.flatten(0, 1))
             mean_accum[S, :, R, :].index_add_(0, sel_flat, scores.flatten(0, 1))
+            sq_accum[S, :, R, :].index_add_(0, sel_flat, scores_sq.flatten(0, 1))
 
-            del ln_bar, scores, scores_pos, scores_neg
+            del ln_bar, scores, scores_pos, scores_neg, scores_sq
 
     del hook_dict, after_res1, selected, weighted_out
     del omega, sel, rms_sq, rms_inv
@@ -193,16 +201,21 @@ count_safe = count.clamp(min=1).to(torch.float32)                      # [L, n_e
 denom      = count_safe.view(N_LAYERS, N_EXPERTS, 1, 1)
 zero_mask  = (count == 0).view(N_LAYERS, N_EXPERTS, 1, 1)
 
-APS  = (APS_accum  / denom).masked_fill(zero_mask, 0.0)
-ANS  = (ANS_accum  / denom).masked_fill(zero_mask, 0.0)
-mean = (mean_accum / denom).masked_fill(zero_mask, 0.0)
+APS   = (APS_accum  / denom).masked_fill(zero_mask, 0.0)
+ANS   = (ANS_accum  / denom).masked_fill(zero_mask, 0.0)
+mean  = (mean_accum / denom).masked_fill(zero_mask, 0.0)
+# Var_i[S | sender selected] = E[S^2] - (E[S])^2, computed pointwise per edge.
+mean_sq = (sq_accum / denom).masked_fill(zero_mask, 0.0)
+V_tok   = (mean_sq - mean * mean).clamp(min=0.0)  # numerical safety
+del mean_sq
 
 suffix = f"_s{args.seed}" if args.seed is not None else ""
 out_path = os.path.join(output_dir, f"dag_{args.dataset}{suffix}.pt")
 torch.save({
-    "APS":  APS.cpu(),                          # [c, j, l, n]
-    "ANS":  ANS.cpu(),                          # [c, j, l, n]
-    "mean": mean.cpu(),                         # [c, j, l, n]
+    "APS":   APS.cpu(),                         # [c, j, l, n]
+    "ANS":   ANS.cpu(),                         # [c, j, l, n]
+    "mean":  mean.cpu(),                        # [c, j, l, n]
+    "V_tok": V_tok.cpu(),                       # [c, j, l, n] — Var_i[S | sender selected]
     "count": count.cpu(),                       # [c, j]
     "n_prompts": N_PROMPTS,
     "max_tokens": MAX_TOKENS,
@@ -254,9 +267,10 @@ show_top10(mean, "mean", "abs")
 
 # Spot-check the known M1E9 → M4E14 chain from prior paper.
 print(f"\nSpot check  M1E9 → M4E14")
-print(f"   APS  = {APS[1, 9, 4, 14].item():+.4e}")
-print(f"   ANS  = {ANS[1, 9, 4, 14].item():+.4e}")
-print(f"   mean = {mean[1, 9, 4, 14].item():+.4e}")
+print(f"   APS   = {APS[1, 9, 4, 14].item():+.4e}")
+print(f"   ANS   = {ANS[1, 9, 4, 14].item():+.4e}")
+print(f"   mean  = {mean[1, 9, 4, 14].item():+.4e}")
+print(f"   V_tok = {V_tok[1, 9, 4, 14].item():.4e}    (lower = more consistent edge)")
 
 # Aggregate APS by sender layer — should reproduce M1, M4 stripe pattern from Fig 3d.
 print("\nAPS aggregated by sender layer (should peak at M1 and M4):")
