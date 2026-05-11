@@ -50,7 +50,7 @@ parser.add_argument("--top-K", type=int, default=5,
                     help="Per-sender top-K for sparsification (default: 5).")
 parser.add_argument("--chain-min-length", type=int, default=2,
                     help="Min number of edges in returned chains (default: 2).")
-parser.add_argument("--chain-max-length", type=int, default=10,
+parser.add_argument("--chain-max-length", type=int, default=4,
                     help="Max number of edges in returned chains (default: 4).")
 parser.add_argument("--n-chains", type=int, default=20,
                     help="Number of top chains to print/save per weight key (default: 20).")
