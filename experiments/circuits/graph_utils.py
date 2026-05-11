@@ -138,7 +138,7 @@ def extract_chains(
     min_length: int = 2,
     max_length: int = 4,
     weighted_score: str = "min",
-    max_paths: int = 100_000,
+    max_paths: int = 100_000_000_000,
 ) -> list[dict]:
     """Enumerate directed paths of edge-length in [min_length, max_length].
 

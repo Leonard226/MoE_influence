@@ -42,22 +42,15 @@ with open(os.path.join(ROOT, "config.yaml")) as f:
 art_dir = os.path.join(config["result_path"], "circuits")
 
 parser = argparse.ArgumentParser(description=__doc__)
-parser.add_argument("--dataset", default="c4",
-                    help="Dataset to discover circuits on (reads dag_<dataset>.pt).")
-parser.add_argument("--compare-with", default=None,
-                    help="Optional second dataset for differential-edge analysis.")
-parser.add_argument("--top-K", type=int, default=5,
-                    help="Per-sender top-K for sparsification (default: 5).")
-parser.add_argument("--chain-min-length", type=int, default=2,
-                    help="Min number of edges in returned chains (default: 2).")
-parser.add_argument("--chain-max-length", type=int, default=10,
-                    help="Max number of edges in returned chains (default: 4).")
-parser.add_argument("--n-chains", type=int, default=20,
-                    help="Number of top chains to print/save per weight key (default: 20).")
-parser.add_argument("--n-fan-outs", type=int, default=15,
-                    help="Number of top fan-out senders to report (default: 15).")
-parser.add_argument("--leiden-resolution", type=float, default=5.0,
-                    help="Resolution parameter for Leiden community detection (default: 5).")
+parser.add_argument("--dataset", default="c4", help="Dataset to discover circuits on (reads dag_<dataset>.pt).")
+parser.add_argument("--compare-with", default=None, help="Optional second dataset for differential-edge analysis.")
+parser.add_argument("--top-K", type=int, default=5, help="Per-sender top-K for sparsification (default: 5).")
+parser.add_argument("--chain-min-length", type=int, default=2, help="Min number of edges in returned chains (default: 2).")
+parser.add_argument("--chain-max-length", type=int, default=10, help="Max number of edges in returned chains (default: 4).")
+parser.add_argument("--max-paths", type=int, default=100_000_000, help="Number of paths to enumerate (default: 100_000).")
+parser.add_argument("--n-chains", type=int, default=20, help="Number of top chains to print/save per weight key (default: 20).")
+parser.add_argument("--n-fan-outs", type=int, default=15, help="Number of top fan-out senders to report (default: 15).")
+parser.add_argument("--leiden-resolution", type=float, default=5.0, help="Resolution parameter for Leiden community detection (default: 5).")
 args = parser.parse_args()
 
 
@@ -88,7 +81,8 @@ for weight_key in ["APS", "AARV"]:
     chains = extract_chains(g,
                             min_length=args.chain_min_length,
                             max_length=args.chain_max_length,
-                            weighted_score="min")
+                            weighted_score="min", 
+                            max_paths=args.max_paths)
     print(f"  enumerated {len(chains)} paths of length [{args.chain_min_length}, {args.chain_max_length}]")
     print(f"\n  Top {args.n_chains} chains by min-edge-weight:")
     for c in chains[:args.n_chains]:
@@ -168,6 +162,7 @@ results = {
         "top_K": args.top_K,
         "chain_min_length": args.chain_min_length,
         "chain_max_length": args.chain_max_length,
+        "max_paths": args.max_paths, 
         "leiden_resolution": args.leiden_resolution,
     },
     "chains": chains_by_weight,
