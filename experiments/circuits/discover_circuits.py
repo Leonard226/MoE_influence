@@ -98,7 +98,8 @@ print(f"  sparsified graph: {g_ans.vcount()} nodes, {g_ans.ecount()} edges")
 inhibitor_chains = extract_chains(g_ans,
                                    min_length=args.chain_min_length,
                                    max_length=args.chain_max_length,
-                                   weighted_score="min")
+                                   weighted_score="min",
+                                   max_paths=args.max_paths)
 print(f"  enumerated {len(inhibitor_chains)} paths")
 print(f"\n  Top {args.n_chains} inhibitor chains by min |edge-weight|:")
 for c in inhibitor_chains[:args.n_chains]:

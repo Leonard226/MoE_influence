@@ -247,8 +247,8 @@ out_path = os.path.join(output_dir, f"dag_{args.dataset}{suffix}.pt")
 torch.save({
     "APS":   APS.cpu(),                         # [c, j, l, n]
     "ANS":   ANS.cpu(),                         # [c, j, l, n]
-    "mean":  mean.cpu(),                        # [c, j, l, n]
-    "V_tok": V_tok.cpu(),                       # [c, j, l, n] — Var_i[S | sender selected]
+    "AVG":  mean.cpu(),                        # [c, j, l, n]
+    "VAR": V_tok.cpu(),                       # [c, j, l, n] — Var_i[S | sender selected]
     "AARV":  AARV.cpu(),                        # [c, j, l, n] — mean rank shift of receiver n
     "count": count.cpu(),                       # [c, j]
     "n_prompts": N_PROMPTS,
