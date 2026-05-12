@@ -147,7 +147,7 @@ for B in range(0, N_PROMPTS, BSZ):
     bt = bsz * n_tok
 
     # 1 / RMS^R_i, per token, per receiver layer R.
-    rms_sq  = after_res1.float().pow(2).AVG(dim=-1) + EPS                # [bsz, L, n_tok]
+    rms_sq  = after_res1.float().pow(2).mean(dim=-1) + EPS                # [bsz, L, n_tok]
     rms_inv = torch.rsqrt(rms_sq).permute(0, 2, 1).reshape(bt, N_LAYERS)  # [bt, L_recv]
 
     # Original assignment scores at every receiver layer (for AARV computation).
