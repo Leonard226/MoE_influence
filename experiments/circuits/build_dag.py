@@ -125,7 +125,7 @@ aarv_accum = torch.zeros(SHAPE, dtype=torch.float32, device=device)
 count = torch.zeros((N_LAYERS, N_EXPERTS), dtype=torch.long, device=device)
 
 n_batches = (N_PROMPTS + BSZ - 1) // BSZ
-print(f"Running {n_batches} batches (bsz={BSZ}, max_tokens={MAX_TOKENS}) ...", flush=True)
+print(f"Running {n_batches} batches (batch_size={BSZ}, max_tokens={MAX_TOKENS}) ...", flush=True)
 t_start = time.time()
 
 for B in range(0, N_PROMPTS, BSZ):
