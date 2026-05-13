@@ -49,14 +49,9 @@ DATASETS = {
 }
 
 parser = argparse.ArgumentParser(description=__doc__)
-parser.add_argument("--dataset", choices=list(DATASETS), default="c4",
-                    help="Which dataset to build the DAG on (default: c4).")
-parser.add_argument("--n-prompts", type=int, default=5000,
-                    help="Number of prompts to use (default: 5000).")
-parser.add_argument("--seed", type=int, default=None,
-                    help="Seed for dataset shuffling. None = sequential from "
-                         "start. Different seeds yield (mostly) disjoint subsets, "
-                         "useful for same-dataset baseline runs.")
+parser.add_argument("--dataset", choices=list(DATASETS), default="c4", help="Which dataset to build the DAG on (default: c4).")
+parser.add_argument("--n_prompts", type=int, default=5000, help="Number of prompts to use (default: 5000).")
+parser.add_argument("--seed", type=int, default=None, help="Seed for dataset shuffling. None = sequential from start. Different seeds yield (mostly) disjoint subsets, useful for same-dataset baseline runs.")
 args = parser.parse_args()
 
 device = "cuda:0"
