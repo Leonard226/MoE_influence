@@ -41,7 +41,7 @@ output_dir = os.path.join(config["result_path"], "circuits")
 os.makedirs(output_dir, exist_ok=True)
 
 # Dataset registry: name -> (module_path, helper_function_name).
-# All helpers must accept (dataset_len, seed, min_words) and return a list of strings.
+# All helpers must accept (dataset_len, min_words) and return a list of strings.
 DATASETS = {
     "c4":   ("dataset.c4_dataset",   "c4_dataset_helper"),
     "math": ("dataset.math_dataset", "open_r1_math_dataset_helper"),
@@ -50,8 +50,7 @@ DATASETS = {
 
 parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument("--dataset", choices=list(DATASETS), default="c4", help="Which dataset to build the DAG on (default: c4).")
-parser.add_argument("--n_prompts", type=int, default=5000, help="Number of prompts to use (default: 5000).")
-parser.add_argument("--seed", type=int, default=None, help="Seed for dataset shuffling. None = sequential from start. Different seeds yield (mostly) disjoint subsets, useful for same-dataset baseline runs.")
+parser.add_argument("--n_prompts", type=int, default=5000, help="Number of prompts to use).")
 args = parser.parse_args()
 
 device = "cuda:0"
@@ -96,10 +95,10 @@ gamma_recv = torch.stack([
 # ---- Load dataset ----
 mod_name, fn_name = DATASETS[args.dataset]
 loader = getattr(importlib.import_module(mod_name), fn_name)
-print(f"Loading dataset={args.dataset!r}, seed={args.seed!r} ({N_PROMPTS} prompts) ...",
+print(f"Loading dataset={args.dataset!r}  ({N_PROMPTS} prompts) ...",
       flush=True)
 t0 = time.time()
-prompts = loader(dataset_len=N_PROMPTS, seed=args.seed, min_words=MAX_TOKENS)
+prompts = loader(dataset_len=N_PROMPTS, min_words=MAX_TOKENS)
 print(f"  loaded in {time.time() - t0:.1f}s", flush=True)
 
 # ---- Accumulators ----
@@ -237,8 +236,7 @@ del AVG_sq
 # Per-edge AARV: average rank shift over tokens where sender fired.
 AARV  = (aarv_accum / denom).masked_fill(zero_mask, 0.0)
 
-suffix = f"_s{args.seed}" if args.seed is not None else ""
-out_path = os.path.join(output_dir, f"dag_{args.dataset}{suffix}.pt")
+out_path = os.path.join(output_dir, f"dag_{args.dataset}.pt")
 torch.save({
     "APS":   APS.cpu(),                         # [c, j, l, n]
     "ANS":   ANS.cpu(),                         # [c, j, l, n]
@@ -249,7 +247,6 @@ torch.save({
     "n_prompts": N_PROMPTS,
     "max_tokens": MAX_TOKENS,
     "model": MODEL_ID,
-    "dataset": args.dataset,
-    "seed": args.seed,
+    "dataset": args.dataset
 }, out_path)
 print(f"Saved {out_path}")

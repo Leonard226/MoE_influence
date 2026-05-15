@@ -2,7 +2,7 @@ from datasets import load_dataset
 import torch
 
 
-def code_dataset_helper(dataset_len, seed=None, min_words=64):
+def code_dataset_helper(dataset_len, min_words=64):
     """Select Python code samples from codeparrot-clean as test samples.
 
     Mirrors the interface of c4_dataset_helper / open_r1_math_dataset_helper.
@@ -12,8 +12,6 @@ def code_dataset_helper(dataset_len, seed=None, min_words=64):
 
     Args:
         dataset_len: how many code samples to return.
-        seed: if None, take the first `dataset_len` samples sequentially from
-            the stream. If an int, shuffle the stream with this seed first.
         min_words: drop samples whose `content.split()` length is below this.
     """
     ds = load_dataset(
@@ -21,11 +19,6 @@ def code_dataset_helper(dataset_len, seed=None, min_words=64):
         split="train",
         streaming=True,
     )
-
-    if seed is not None:
-        torch.manual_seed(seed)
-        # buffer_size controls the randomness window for streaming shuffle.
-        ds = ds.shuffle(seed=seed, buffer_size=10000)
 
     my_dataset = []
     for sample in ds:
