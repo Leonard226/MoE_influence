@@ -1,3 +1,6 @@
+import igraph as ig
+import numpy as np 
+
 def get_thresholds(dag: dict, target: str, quantiles: list) -> list: 
     matrix = dag[target]
     N_LAYERS = matrix.shape[0]
