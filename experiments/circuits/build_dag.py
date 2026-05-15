@@ -15,8 +15,7 @@ at layer l when (c,j)'s sub-score is removed via score subtraction, conditional
 on sender (c,j) being selected at i).
 
 Usage:
-    python experiments/circuits/build_dag.py --dataset c4
-    python experiments/circuits/build_dag.py --dataset math --n-prompts 5000
+    python experiments/circuits/build_dag.py --dataset {c4,math,code} --n-prompts 5000
 
 Output: {result_path}/circuits/dag_{dataset}.pt
 
@@ -124,9 +123,7 @@ t_start = time.time()
 
 for B in range(0, N_PROMPTS, BSZ):
     batch = prompts[B:B + BSZ]
-    inputs = tokenizer(
-        batch, return_tensors="pt", padding=False, truncation=True, max_length=MAX_TOKENS
-    )
+    inputs = tokenizer(batch, return_tensors="pt", padding=False, truncation=True, max_length=MAX_TOKENS)
     input_ids = inputs["input_ids"].to(device)
     attention_mask = inputs["attention_mask"].to(device)
 
@@ -151,8 +148,7 @@ for B in range(0, N_PROMPTS, BSZ):
     orig_score = torch.einsum("lnd,bld->bln", G_recv, after_norm2_r)       # [bt, L, N_EXPERTS]
     orig_sorted = torch.argsort(orig_score, dim=-1, descending=True)       # [bt, L, N_EXPERTS]
     orig_rank_of = torch.empty_like(orig_sorted)
-    orig_rank_of.scatter_(-1, orig_sorted,
-                          torch.arange(N_EXPERTS, device=device).expand_as(orig_sorted))
+    orig_rank_of.scatter_(-1, orig_sorted, torch.arange(N_EXPERTS, device=device).expand_as(orig_sorted))
     # orig_rank_of[bt, l, n] = position of expert n in the layer-l ordering.
 
     # Sender-side reshapes: [bt, S, k, ...]
@@ -200,7 +196,9 @@ for B in range(0, N_PROMPTS, BSZ):
             pert_rank_of.scatter_(-1, pert_sorted,
                                   torch.arange(N_EXPERTS, device=device).expand_as(pert_sorted))
             orig_rank_R = orig_rank_of[:, R, :].unsqueeze(1).expand_as(pert_rank_of)  # [bt, k, N_EXPERTS]
-            rank_shift = (pert_rank_of.float() - orig_rank_R.float()).abs()      # [bt, k, N_EXPERTS]
+            # NOTE: changed to incorporate direction of rank shift
+            # before: rank_shift = (pert_rank_of.float() - orig_rank_R.float()).abs()      # [bt, k, N_EXPERTS]
+            rank_shift = orig_rank_R.float() - pert_rank_of.float()
             aarv_accum[S, :, R, :].index_add_(0, sel_flat, rank_shift.flatten(0, 1))
 
             del ln_bar, scores, scores_pos, scores_neg, scores_sq
