@@ -67,7 +67,7 @@ TOP_K = 8
 EPS = 1e-5
 
 N_PROMPTS = args.n_prompts
-BSZ = 50
+BSZ = 64
 MAX_TOKENS = 32
 
 print(f"Building DAG on dataset={args.dataset!r}, {N_PROMPTS} prompts.", flush=True)
@@ -81,21 +81,15 @@ model = OlmoeForCausalLM.from_pretrained(
 tokenizer = AutoTokenizer.from_pretrained(MODEL_ID)
 print(f"  loaded in {time.time() - t0:.1f}s", flush=True)
 
-# Receiver-side weights as fp32.
-G_recv = torch.stack([
-    model.model.layers[R].mlp.gate.weight.detach().to(device, dtype=torch.float32)
-    for R in range(N_LAYERS)
-])  # [L, n_experts, d_e]
-gamma_recv = torch.stack([
-    model.model.layers[R].post_attention_layernorm.weight.detach().to(device, dtype=torch.float32)
-    for R in range(N_LAYERS)
-])  # [L, d_e]
+# Load weights [L, n_experts, d_e]
+G_recv = torch.stack([model.model.layers[R].mlp.gate.weight.detach().to(device, dtype=torch.float32) for R in range(N_LAYERS)]) 
+# [L, d_e]
+gamma_recv = torch.stack([model.model.layers[R].post_attention_layernorm.weight.detach().to(device, dtype=torch.float32) for R in range(N_LAYERS)])  
 
 # ---- Load dataset ----
 mod_name, fn_name = DATASETS[args.dataset]
 loader = getattr(importlib.import_module(mod_name), fn_name)
-print(f"Loading dataset={args.dataset!r}  ({N_PROMPTS} prompts) ...",
-      flush=True)
+print(f"Loading dataset={args.dataset!r}  ({N_PROMPTS} prompts) ...", flush=True)
 t0 = time.time()
 prompts = loader(dataset_len=N_PROMPTS, min_words=MAX_TOKENS)
 print(f"  loaded in {time.time() - t0:.1f}s", flush=True)
@@ -111,8 +105,7 @@ APS_accum  = torch.zeros(SHAPE, dtype=torch.float32, device=device)
 ANS_accum  = torch.zeros(SHAPE, dtype=torch.float32, device=device)
 AVG_accum = torch.zeros(SHAPE, dtype=torch.float32, device=device)
 sq_accum   = torch.zeros(SHAPE, dtype=torch.float32, device=device)
-# aarv_accum[S, j, R, n] = Σ_{i : j ∈ top-K at S} | rank_R^orig(n) - rank_R^pert(n) |
-# where pert_score = orig_score - S(g^{R,n}, e^{S,j}_{out,i}).
+# aarv_accum[S, j, R, n] = Σ_{i : j ∈ top-K at S} | rank_R^orig(n) - rank_R^pert(n) | where pert_score = orig_score - S(g^{R,n}, e^{S,j}_{out,i}).
 aarv_accum = torch.zeros(SHAPE, dtype=torch.float32, device=device)
 # count[S, j] = number of (token, top-k slot) events where expert j was selected at layer S.
 count = torch.zeros((N_LAYERS, N_EXPERTS), dtype=torch.long, device=device)
@@ -142,9 +135,7 @@ for B in range(0, N_PROMPTS, BSZ):
     rms_inv = torch.rsqrt(rms_sq).permute(0, 2, 1).reshape(bt, N_LAYERS)  # [bt, L_recv]
 
     # Original assignment scores at every receiver layer (for AARV computation).
-    after_norm2_r = (after_norm2.float()
-                     .permute(0, 2, 1, 3)
-                     .reshape(bt, N_LAYERS, D_E))                          # [bt, L, d_e]
+    after_norm2_r = (after_norm2.float().permute(0, 2, 1, 3).reshape(bt, N_LAYERS, D_E))   # [bt, L, d_e]
     orig_score = torch.einsum("lnd,bld->bln", G_recv, after_norm2_r)       # [bt, L, N_EXPERTS]
     orig_sorted = torch.argsort(orig_score, dim=-1, descending=True)       # [bt, L, N_EXPERTS]
     orig_rank_of = torch.empty_like(orig_sorted)
@@ -152,12 +143,8 @@ for B in range(0, N_PROMPTS, BSZ):
     # orig_rank_of[bt, l, n] = position of expert n in the layer-l ordering.
 
     # Sender-side reshapes: [bt, S, k, ...]
-    omega = (weighted_out.float()
-             .permute(0, 2, 1, 3, 4)
-             .reshape(bt, N_LAYERS, TOP_K, D_E))   # [bt, S, k, d_e]
-    sel = (selected.long()
-           .permute(0, 2, 1, 3)
-           .reshape(bt, N_LAYERS, TOP_K))           # [bt, S, k]
+    omega = (weighted_out.float().permute(0, 2, 1, 3, 4).reshape(bt, N_LAYERS, TOP_K, D_E))   # [bt, S, k, d_e]
+    sel = (selected.long().permute(0, 2, 1, 3).reshape(bt, N_LAYERS, TOP_K))                  # [bt, S, k]
 
     for S in range(N_LAYERS):
         sel_S = sel[:, S, :]                                    # [bt, top_k]
@@ -169,9 +156,7 @@ for B in range(0, N_PROMPTS, BSZ):
 
         for R in range(S + 1, N_LAYERS):
             # ln_bar^R(omega_S) = (omega_S ⊙ γ^R) / RMS^R_i
-            ln_bar = (omega_S
-                      * gamma_recv[R].view(1, 1, D_E)
-                      * rms_inv[:, R].view(bt, 1, 1))            # [bt, k, d_e]
+            ln_bar = omega_S * gamma_recv[R].view(1, 1, D_E) * rms_inv[:, R].view(bt, 1, 1)     # [bt, k, d_e]
             # scores[bt, k, n] = g^{R,n} · ln_bar  — per-edge sub-score
             #   S(g^{R,n}, e^{S,j_k}_{out,i})  with j_k = sel_S[bt, k].
             scores = torch.einsum("ed,bkd->bke", G_recv[R], ln_bar)  # [bt, k, N_EXPERTS]
