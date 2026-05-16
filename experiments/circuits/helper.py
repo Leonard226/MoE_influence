@@ -1,7 +1,8 @@
 import igraph as ig
-import numpy as np 
 
 def get_thresholds(dag: dict, target: str, quantiles: list) -> list: 
+    import torch
+
     matrix = dag[target]
     N_LAYERS = matrix.shape[0]
 
@@ -23,6 +24,7 @@ def get_thresholds(dag: dict, target: str, quantiles: list) -> list:
 
 
 def thresholding_routing_graph(dag: dict, target: str, threshold: float) -> ig.Graph:
+    import numpy as np
     # Get the 4D matrix (Shape: [16, 64, 16, 64])
     matrix = dag[target]
     N_LAYERS, N_EXPERTS = matrix.shape[0], matrix.shape[1]
