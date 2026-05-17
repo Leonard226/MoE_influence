@@ -54,9 +54,9 @@ N_NODES = N_LAYERS * N_EXPERTS
 DAG_DIR = os.path.join(config["result_path"], "circuits")
 
 # %% Load DAGs
-dag_c4   = torch.load(os.path.join(DAG_DIR, "dag_c4.pt"),   map_location="cpu")
-dag_math = torch.load(os.path.join(DAG_DIR, "dag_math.pt"), map_location="cpu")
-dag_code = torch.load(os.path.join(DAG_DIR, "dag_code.pt"), map_location="cpu")
+dag_c4   = torch.load(os.path.join(DAG_DIR, "dag_olmoe_c4.pt"),   map_location="cpu")
+dag_math = torch.load(os.path.join(DAG_DIR, "dag_olmoe_math.pt"), map_location="cpu")
+dag_code = torch.load(os.path.join(DAG_DIR, "dag_olmoe_code.pt"), map_location="cpu")
 print("Loaded DAGs. Keys:", list(dag_c4.keys()))
 
 # %% Utilities ---------------------------------------------------------------

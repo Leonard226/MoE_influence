@@ -1,4 +1,4 @@
-"""DAG builder for OLMoE on a chosen dataset, with multiple edge weights.
+"""DAG builder for a chosen MoE model + dataset, with multiple edge weights.
 
 Computes five edge weights conditioned on sender selection:
 
@@ -15,9 +15,9 @@ at layer l when (c,j)'s sub-score is removed via score subtraction, conditional
 on sender (c,j) being selected at i).
 
 Usage:
-    python experiments/circuits/build_dag.py --dataset {c4,math,code} --n-prompts 5000
+    python experiments/circuits/build_dag.py --model {olmoe,deepseek-v2-lite} --dataset {c4,math,code} --n-prompts 5000
 
-Output: {result_path}/circuits/dag_{dataset}.pt
+Output: {result_path}/circuits/dag_{model}_{dataset}.pt
 
 Modeled on experiments/variance/per_expert.py — same forward-pass loop and
 reshapes — but keeps the receiver-expert dimension instead of collapsing via Var_n.
@@ -39,6 +39,10 @@ with open(os.path.join(ROOT, "config.yaml")) as f:
 output_dir = os.path.join(config["result_path"], "circuits")
 os.makedirs(output_dir, exist_ok=True)
 
+from customized_models.modeling_olmoe_customized import OlmoeForCausalLM
+from customized_models.modeling_deepseek_customized import DeepseekV2ForCausalLM
+from transformers import AutoTokenizer
+
 # Dataset registry: name -> (module_path, helper_function_name).
 # All helpers must accept (dataset_len, min_words) and return a list of strings.
 DATASETS = {
@@ -47,7 +51,29 @@ DATASETS = {
     "code": ("dataset.code_dataset", "code_dataset_helper"),
 }
 
+# Model registry. `moe_layers` lists transformer-layer indices that have an MoE
+# block; the DAG indexes its layers 0..len(moe_layers)-1 against this list.
+MODELS = {
+    "olmoe": {
+        "id": "allenai/OLMoE-1B-7B-0924",
+        "cls": OlmoeForCausalLM,
+        "n_experts": 64,
+        "top_k": 8,
+        "d_e": 2048,
+        "moe_layers": list(range(16)),
+    },
+    "deepseek-v2-lite": {
+        "id": "deepseek-ai/DeepSeek-V2-Lite",
+        "cls": DeepseekV2ForCausalLM,
+        "n_experts": 64,
+        "top_k": 6,
+        "d_e": 2048,
+        "moe_layers": list(range(1, 27)),  # layer 0 is dense
+    },
+}
+
 parser = argparse.ArgumentParser(description=__doc__)
+parser.add_argument("--model", choices=list(MODELS), default="olmoe", help="Which MoE model to build the DAG for (default: olmoe).")
 parser.add_argument("--dataset", choices=list(DATASETS), default="c4", help="Which dataset to build the DAG on (default: c4).")
 parser.add_argument("--n_prompts", type=int, default=5000, help="Number of prompts to use).")
 args = parser.parse_args()
@@ -56,35 +82,34 @@ device = "cuda:0"
 torch.set_default_device(device)
 torch.set_grad_enabled(False)
 
-from customized_models.modeling_olmoe_customized import OlmoeForCausalLM
-from transformers import AutoTokenizer
-
-MODEL_ID = "allenai/OLMoE-1B-7B-0924"
-N_LAYERS = 16
-N_EXPERTS = 64
-D_E = 2048
-TOP_K = 8
+MODEL = MODELS[args.model]
+MODEL_ID   = MODEL["id"]
+MOE_LAYERS = MODEL["moe_layers"]
+N_LAYERS   = len(MOE_LAYERS)
+N_EXPERTS  = MODEL["n_experts"]
+D_E        = MODEL["d_e"]
+TOP_K      = MODEL["top_k"]
 EPS = 1e-5
 
 N_PROMPTS = args.n_prompts
-BSZ = 64
+BSZ = 32
 MAX_TOKENS = 32
 
-print(f"Building DAG on dataset={args.dataset!r}, {N_PROMPTS} prompts.", flush=True)
+print(f"Building DAG for model={args.model!r}, dataset={args.dataset!r}, {N_PROMPTS} prompts.", flush=True)
 
 # ---- Load model + tokenizer ----
 print(f"Loading {MODEL_ID} ...", flush=True)
 t0 = time.time()
-model = OlmoeForCausalLM.from_pretrained(
+model = MODEL["cls"].from_pretrained(
     MODEL_ID, attn_implementation="eager", torch_dtype=torch.bfloat16
 ).to(device).eval()
 tokenizer = AutoTokenizer.from_pretrained(MODEL_ID)
 print(f"  loaded in {time.time() - t0:.1f}s", flush=True)
 
 # Load weights [L, n_experts, d_e]
-G_recv = torch.stack([model.model.layers[R].mlp.gate.weight.detach().to(device, dtype=torch.float32) for R in range(N_LAYERS)]) 
+G_recv = torch.stack([model.model.layers[R].mlp.gate.weight.detach().to(device, dtype=torch.float32) for R in MOE_LAYERS])
 # [L, d_e]
-gamma_recv = torch.stack([model.model.layers[R].post_attention_layernorm.weight.detach().to(device, dtype=torch.float32) for R in range(N_LAYERS)])  
+gamma_recv = torch.stack([model.model.layers[R].post_attention_layernorm.weight.detach().to(device, dtype=torch.float32) for R in MOE_LAYERS])
 
 # ---- Load dataset ----
 mod_name, fn_name = DATASETS[args.dataset]
@@ -122,10 +147,13 @@ for B in range(0, N_PROMPTS, BSZ):
 
     _, hook_dict = model(input_ids=input_ids, attention_mask=attention_mask)
 
-    after_res1   = hook_dict["hook_after_res1"]                # [bsz, L, n_tok, d_e]
-    after_norm2  = hook_dict["hook_after_norm2"]               # [bsz, L, n_tok, d_e]
-    selected     = hook_dict["hook_selected_experts"]          # [bsz, L, n_tok, top_k]
-    weighted_out = hook_dict["hook_expert_weighted_outputs"]   # [bsz, L, n_tok, top_k, d_e]
+    # Slice to MoE layers only. For models with dense layers (e.g., DeepSeek-V2-Lite
+    # has a dense layer 0), the routing-related hook slots at non-MoE layers are
+    # uninitialized memory and must not be read.
+    after_res1   = hook_dict["hook_after_res1"][:, MOE_LAYERS, :, :]                # [bsz, L, n_tok, d_e]
+    after_norm2  = hook_dict["hook_after_norm2"][:, MOE_LAYERS, :, :]               # [bsz, L, n_tok, d_e]
+    selected     = hook_dict["hook_selected_experts"][:, MOE_LAYERS, :, :]          # [bsz, L, n_tok, top_k]
+    weighted_out = hook_dict["hook_expert_weighted_outputs"][:, MOE_LAYERS, :, :, :]   # [bsz, L, n_tok, top_k, d_e]
 
     bsz, _, n_tok, _ = after_res1.shape
     bt = bsz * n_tok
@@ -217,7 +245,7 @@ del AVG_sq
 # Per-edge AARV: average rank shift over tokens where sender fired.
 AARV  = (aarv_accum / denom).masked_fill(zero_mask, 0.0)
 
-out_path = os.path.join(output_dir, f"dag_{args.dataset}.pt")
+out_path = os.path.join(output_dir, f"dag_{args.model}_{args.dataset}.pt")
 torch.save({
     "APS":   APS.cpu(),                         # [c, j, l, n]
     "ANS":   ANS.cpu(),                         # [c, j, l, n]
@@ -228,6 +256,7 @@ torch.save({
     "n_prompts": N_PROMPTS,
     "max_tokens": MAX_TOKENS,
     "model": MODEL_ID,
+    "moe_layers": MOE_LAYERS,
     "dataset": args.dataset
 }, out_path)
 print(f"Saved {out_path}")
