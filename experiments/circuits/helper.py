@@ -61,8 +61,8 @@ def thresholding_routing_graph(dag: dict, target: str, threshold: float) -> ig.G
 
 
 def show_enhanced_layered_graph(g, quantile: float, target: str, dataset: str, n_prompts: int) -> None:
-    """Layered DAG visualization. NOTE: hardcoded to OLMoE (16 layers x 64 experts).
-    Parameterize N_LAYERS / N_EXPERTS for use with other models."""
+    """Layered DAG visualization. Reads N_LAYERS / N_EXPERTS from the graph's
+    `layer` vertex attribute (set by thresholding_routing_graph / dag_to_igraph)."""
     edge_list = g.get_edgelist()
     if not edge_list:
         print("No edges found to plot!")
@@ -78,7 +78,8 @@ def show_enhanced_layered_graph(g, quantile: float, target: str, dataset: str, n
     max_mag, min_mag = max(abs_weights), min(abs_weights)
 
     # --- SPARSITY CALCULATIONS ---
-    N_LAYERS, N_EXPERTS = 16, 64
+    N_LAYERS = max(g.vs["layer"]) + 1
+    N_EXPERTS = g.vcount() // N_LAYERS
     TOTAL_POSSIBLE_NODES = N_LAYERS * N_EXPERTS
     # Max possible edges in a layered DAG (Layer i to Layer >i)
     TOTAL_POSSIBLE_EDGES = sum(N_EXPERTS * ((N_LAYERS - 1 - i) * N_EXPERTS) for i in range(N_LAYERS - 1))
