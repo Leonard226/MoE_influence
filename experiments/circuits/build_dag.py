@@ -181,9 +181,7 @@ for B in range(0, N_PROMPTS, BSZ):
             pert_rank_of.scatter_(-1, pert_sorted,
                                   torch.arange(N_EXPERTS, device=device).expand_as(pert_sorted))
             orig_rank_R = orig_rank_of[:, R, :].unsqueeze(1).expand_as(pert_rank_of)  # [bt, k, N_EXPERTS]
-            # NOTE: changed to incorporate direction of rank shift
-            # before: rank_shift = (pert_rank_of.float() - orig_rank_R.float()).abs()      # [bt, k, N_EXPERTS]
-            rank_shift = orig_rank_R.float() - pert_rank_of.float()
+            rank_shift = (pert_rank_of.float() - orig_rank_R.float()).abs()             # [bt, k, N_EXPERTS]
             aarv_accum[S, :, R, :].index_add_(0, sel_flat, rank_shift.flatten(0, 1))
 
             del ln_bar, scores, scores_pos, scores_neg, scores_sq
