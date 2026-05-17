@@ -37,7 +37,7 @@ import torch
 import yaml
 import matplotlib.pyplot as plt
 
-ROOT = "/scratch/sleonard/routing_decision"
+ROOT = "/scratch/sleonard/MoE_circuits"
 sys.path.insert(0, ROOT)
 # Also make helper.py importable directly (matches spectral.ipynb's pattern).
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
