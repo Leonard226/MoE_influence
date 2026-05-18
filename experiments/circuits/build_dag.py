@@ -43,6 +43,7 @@ os.makedirs(output_dir, exist_ok=True)
 from customized_models.modeling_olmoe_customized import OlmoeForCausalLM
 from customized_models.modeling_deepseek_customized import DeepseekV2ForCausalLM
 from customized_models.modeling_mixtral_customized import MixtralForCausalLM
+from customized_models.modeling_qwen3_moe_customized import Qwen3MoeForCausalLM
 from transformers import AutoTokenizer
 
 # Dataset registry: name -> (module_path, helper_function_name).
@@ -95,6 +96,16 @@ MODELS = {
         "gate_path": "block_sparse_moe.gate",
         "multi_gpu": True,                  # ~282GB bf16: tight on 4x80GB
         "max_memory": {0: "60GiB", 1: "78GiB", 2: "78GiB", 3: "78GiB"},  # 294 GiB total
+    },
+    "qwen3-30b-a3b": {
+        "id": "Qwen/Qwen3-30B-A3B",
+        "cls": Qwen3MoeForCausalLM,
+        "n_experts": 128,
+        "top_k": 8,
+        "d_e": 2048,
+        "moe_layers": list(range(48)),     # all layers are MoE (mlp_only_layers=[])
+        "gate_path": "mlp.gate",
+        # 60 GB bf16 fits on a single 80GB A100; no multi_gpu flag needed.
     },
 }
 
