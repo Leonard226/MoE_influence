@@ -83,6 +83,18 @@ MODELS = {
         "moe_layers": list(range(32)),     # all layers are MoE
         "gate_path": "block_sparse_moe.gate",  # Mistral naming differs from OLMoE/DeepSeek
         "multi_gpu": True,                  # ~94GB bf16: needs sharding across GPUs
+        "max_memory": {0: "20GiB", 1: "30GiB", 2: "30GiB", 3: "30GiB"},
+    },
+    "mixtral-8x22b": {
+        "id": "mistralai/Mixtral-8x22B-v0.1",
+        "cls": MixtralForCausalLM,         # same class as 8x7B; only config differs
+        "n_experts": 8,
+        "top_k": 2,
+        "d_e": 6144,
+        "moe_layers": list(range(56)),     # all layers are MoE
+        "gate_path": "block_sparse_moe.gate",
+        "multi_gpu": True,                  # ~282GB bf16: tight on 4x80GB
+        "max_memory": {0: "60GiB", 1: "78GiB", 2: "78GiB", 3: "78GiB"},  # 294 GiB total
     },
 }
 
@@ -142,13 +154,9 @@ if MODEL.get("multi_gpu", False):
     with init_empty_weights():
         empty_model = MODEL["cls"](cfg)
     no_split = empty_model._no_split_modules
-    # Force balanced sharding across all available GPUs. GPU 0 gets the smallest
-    # share because it also hosts the hook tensors and input activations.
-    n_gpu = torch.cuda.device_count()
-    if n_gpu >= 2:
-        max_mem = {0: "20GiB", **{i: "30GiB" for i in range(1, n_gpu)}}
-    else:
-        max_mem = {0: "75GiB"}
+    # Use per-model max_memory if declared; else fall back to a single-GPU budget.
+    # GPU 0 typically gets a smaller share (it also hosts hook tensors).
+    max_mem = MODEL.get("max_memory", {0: "75GiB"})
     computed_map = infer_auto_device_map(
         empty_model,
         max_memory=max_mem,
