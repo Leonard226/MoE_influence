@@ -86,6 +86,7 @@ parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument("--model", choices=list(MODELS), default="olmoe", help="Which MoE model to build the DAG for (default: olmoe).")
 parser.add_argument("--dataset", choices=list(DATASETS), default="c4", help="Which dataset to build the DAG on (default: c4).")
 parser.add_argument("--n_prompts", type=int, default=5000, help="Number of prompts to use).")
+parser.add_argument("--bsz", type=int, default=32, help="Batch size (lower if you OOM; default 32).")
 args = parser.parse_args()
 
 device = "cuda:0"
@@ -102,7 +103,7 @@ TOP_K      = MODEL["top_k"]
 EPS = 1e-5
 
 N_PROMPTS = args.n_prompts
-BSZ = 32
+BSZ = args.bsz
 MAX_TOKENS = 32
 
 print(f"Building DAG for model={args.model!r}, dataset={args.dataset!r}, {N_PROMPTS} prompts.", flush=True)
