@@ -90,8 +90,9 @@ parser.add_argument("--B", type=int, default=32, help="Batch size (lower if you 
 args = parser.parse_args()
 
 device = "cuda:0"
-torch.set_default_device(device)
 torch.set_grad_enabled(False)
+# NOTE: torch.set_default_device(device) is deferred until AFTER from_pretrained;
+# setting it before can pin the model skeleton to cuda:0 and break device_map="auto".
 
 MODEL = MODELS[args.model]
 MODEL_ID   = MODEL["id"]
@@ -114,15 +115,22 @@ print(f"Building DAG for model={args.model!r}, dataset={args.dataset!r}, {N_PROM
 # on cuda:0 (via torch.set_default_device above); writes from off-device layers
 # rely on implicit PyTorch cross-device copies.
 print(f"Loading {MODEL_ID} ...", flush=True)
+print(f"  torch.cuda.device_count() = {torch.cuda.device_count()}", flush=True)
+print(f"  CUDA_VISIBLE_DEVICES = {os.environ.get('CUDA_VISIBLE_DEVICES', '<unset>')}", flush=True)
 t0 = time.time()
 load_kwargs = dict(attn_implementation="eager", torch_dtype=torch.bfloat16)
 if MODEL.get("multi_gpu", False):
     load_kwargs["device_map"] = "auto"
     model = MODEL["cls"].from_pretrained(MODEL_ID, **load_kwargs).eval()
+    print(f"  hf_device_map = {getattr(model, 'hf_device_map', '<not present>')}", flush=True)
 else:
     model = MODEL["cls"].from_pretrained(MODEL_ID, **load_kwargs).to(device).eval()
 tokenizer = AutoTokenizer.from_pretrained(MODEL_ID)
 print(f"  loaded in {time.time() - t0:.1f}s", flush=True)
+
+# Now set the default device — our accumulators and the customized model's
+# hook tensors (allocated inside its forward) will land on cuda:0.
+torch.set_default_device(device)
 
 # Load weights [L, n_experts, d_e]
 G_recv = torch.stack([model.model.layers[R].mlp.gate.weight.detach().to(device, dtype=torch.float32) for R in MOE_LAYERS])
