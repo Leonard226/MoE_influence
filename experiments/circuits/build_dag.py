@@ -124,9 +124,16 @@ print(f"  CUDA_VISIBLE_DEVICES = {os.environ.get('CUDA_VISIBLE_DEVICES', '<unset
 t0 = time.time()
 load_kwargs = dict(attn_implementation="eager", torch_dtype=torch.bfloat16)
 if MODEL.get("multi_gpu", False):
+    try:
+        import accelerate
+        print(f"  accelerate version: {accelerate.__version__}", flush=True)
+    except ImportError:
+        raise RuntimeError("multi_gpu=True requires the `accelerate` package: pip install accelerate")
     load_kwargs["device_map"] = "auto"
+    load_kwargs["low_cpu_mem_usage"] = True
     model = MODEL["cls"].from_pretrained(MODEL_ID, **load_kwargs).eval()
     print(f"  hf_device_map = {getattr(model, 'hf_device_map', '<not present>')}", flush=True)
+    print(f"  first-param device = {next(model.parameters()).device}", flush=True)
 else:
     model = MODEL["cls"].from_pretrained(MODEL_ID, **load_kwargs).to(device).eval()
 tokenizer = AutoTokenizer.from_pretrained(MODEL_ID)
