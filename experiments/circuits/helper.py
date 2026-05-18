@@ -60,7 +60,7 @@ def thresholding_routing_graph(dag: dict, target: str, threshold: float) -> ig.G
     return g
 
 
-def show_enhanced_layered_graph(g, quantile: float, target: str, dataset: str, n_prompts: int) -> None:
+def show_enhanced_layered_graph(g, quantile: float, target: str, model: str, dataset: str, n_prompts: int) -> None:
     """Layered DAG visualization. Reads N_LAYERS / N_EXPERTS from the graph's
     `layer` vertex attribute (set by thresholding_routing_graph / dag_to_igraph)."""
     edge_list = g.get_edgelist()
@@ -103,7 +103,7 @@ def show_enhanced_layered_graph(g, quantile: float, target: str, dataset: str, n
         G.add_node(node_idx)
 
     # --- COLOR LOGIC ---
-    if target.upper() in ["AVG", "AARV"]:
+    if target.upper() in ["AVG"]:
         cmap = plt.cm.RdBu
         color_lim = max(abs(max_w), abs(min_w))
         norm = mcolors.TwoSlopeNorm(vcenter=0, vmin=-color_lim, vmax=color_lim)
@@ -120,7 +120,7 @@ def show_enhanced_layered_graph(g, quantile: float, target: str, dataset: str, n
         G.add_edge(u, v)
         w = e["weight"]
 
-        val_for_color = w if target.upper() in ["AVG", "AARV"] else abs(w)
+        val_for_color = w if target.upper() in ["AVG"] else abs(w)
         edge_colors.append(cmap(norm(val_for_color)))
 
         w_norm = (abs(w) - min_mag) / (max_mag - min_mag + 1e-9)
@@ -131,7 +131,7 @@ def show_enhanced_layered_graph(g, quantile: float, target: str, dataset: str, n
     ax = plt.gca()
 
     title_str = (
-        f"MoE Routing DAG on {n_prompts} prompts of {dataset} dataset\n"
+        f"{model} Expert Routing DAG on {n_prompts} prompts ({dataset})\n"
         f"Metric: {target}\n"
         f"Threshold: {quantile} | max_w: {max_w:.2f} | min_w: {min_w:.2f}\n"
         f"Nodes: {n_nodes_used}/{TOTAL_POSSIBLE_NODES} ({node_sparsity:.2f}%) | "
