@@ -105,7 +105,10 @@ MODELS = {
         "d_e": 2048,
         "moe_layers": list(range(48)),     # all layers are MoE (mlp_only_layers=[])
         "gate_path": "mlp.gate",
-        # 60 GB bf16 fits on a single 80GB A100; no multi_gpu flag needed.
+        # 60GB bf16 nominally fits 1x80GB but hooks + activations push it OOM;
+        # shard across 4 GPUs with plenty of headroom.
+        "multi_gpu": True,
+        "max_memory": {0: "15GiB", 1: "25GiB", 2: "25GiB", 3: "25GiB"},  # 90 GiB for 60GB model
     },
 }
 
