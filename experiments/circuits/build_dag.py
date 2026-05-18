@@ -126,11 +126,32 @@ load_kwargs = dict(attn_implementation="eager", torch_dtype=torch.bfloat16)
 if MODEL.get("multi_gpu", False):
     try:
         import accelerate
-        print(f"  accelerate version: {accelerate.__version__}", flush=True)
+        from accelerate import infer_auto_device_map, init_empty_weights
+        import transformers
+        print(f"  accelerate={accelerate.__version__}  transformers={transformers.__version__}", flush=True)
     except ImportError:
-        raise RuntimeError("multi_gpu=True requires the `accelerate` package: pip install accelerate")
-    load_kwargs["device_map"] = "auto"
-    load_kwargs["low_cpu_mem_usage"] = True
+        raise RuntimeError("multi_gpu=True requires `accelerate`: pip install accelerate")
+
+    # Explicit two-step dispatch (the implicit `device_map='auto'` path silently
+    # fell back to CPU for the customized Mixtral class; this is the robust way).
+    # Step 1: build an empty (meta-device) model skeleton to plan the sharding.
+    print("  building empty model on meta device ...", flush=True)
+    cfg = MODEL["cls"].config_class.from_pretrained(MODEL_ID)
+    with init_empty_weights():
+        empty_model = MODEL["cls"](cfg)
+    no_split = empty_model._no_split_modules  # e.g., ["MixtralDecoderLayer"]
+    max_mem = {i: "75GiB" for i in range(torch.cuda.device_count())}
+    computed_map = infer_auto_device_map(
+        empty_model,
+        max_memory=max_mem,
+        no_split_module_classes=no_split,
+        dtype=torch.bfloat16,
+    )
+    print(f"  computed device_map: {computed_map}", flush=True)
+    del empty_model
+
+    # Step 2: load real weights into the planned devices.
+    load_kwargs["device_map"] = computed_map
     model = MODEL["cls"].from_pretrained(MODEL_ID, **load_kwargs).eval()
     print(f"  hf_device_map = {getattr(model, 'hf_device_map', '<not present>')}", flush=True)
     print(f"  first-param device = {next(model.parameters()).device}", flush=True)
