@@ -131,8 +131,8 @@ def show_enhanced_layered_graph(g, quantile: float, target: str, model: str, dat
     ax = plt.gca()
 
     title_str = (
-        f"{model} Expert Routing DAG on {n_prompts} prompts ({dataset})\n"
-        f"Metric: {target}\n"
+        f"{model.upper()} Expert Routing DAG\n"
+        f"Metric: {target} | Task: {dataset} ({n_prompts} prompts)\n"
         f"Threshold: {quantile} | max_w: {max_w:.2f} | min_w: {min_w:.2f}\n"
         f"Nodes: {n_nodes_used}/{TOTAL_POSSIBLE_NODES} ({node_sparsity:.2f}%) | "
         f"Edges: {n_edges_used}/{TOTAL_POSSIBLE_EDGES} ({edge_sparsity:.4f}%)"
