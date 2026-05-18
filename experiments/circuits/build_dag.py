@@ -126,20 +126,22 @@ load_kwargs = dict(attn_implementation="eager", torch_dtype=torch.bfloat16)
 if MODEL.get("multi_gpu", False):
     try:
         import accelerate
-        from accelerate import infer_auto_device_map, init_empty_weights
+        from accelerate import infer_auto_device_map, init_empty_weights, dispatch_model
         import transformers
         print(f"  accelerate={accelerate.__version__}  transformers={transformers.__version__}", flush=True)
     except ImportError:
         raise RuntimeError("multi_gpu=True requires `accelerate`: pip install accelerate")
 
-    # Explicit two-step dispatch (the implicit `device_map='auto'` path silently
-    # fell back to CPU for the customized Mixtral class; this is the robust way).
-    # Step 1: build an empty (meta-device) model skeleton to plan the sharding.
+    # `from_pretrained(..., device_map=...)` silently fell back to CPU for the
+    # customized model class. Workaround: plan with infer_auto_device_map, then
+    # do the actual placement ourselves via dispatch_model.
+
+    # Step 1: plan on a meta-device skeleton.
     print("  building empty model on meta device ...", flush=True)
     cfg = MODEL["cls"].config_class.from_pretrained(MODEL_ID)
     with init_empty_weights():
         empty_model = MODEL["cls"](cfg)
-    no_split = empty_model._no_split_modules  # e.g., ["MixtralDecoderLayer"]
+    no_split = empty_model._no_split_modules
     max_mem = {i: "75GiB" for i in range(torch.cuda.device_count())}
     computed_map = infer_auto_device_map(
         empty_model,
@@ -150,11 +152,15 @@ if MODEL.get("multi_gpu", False):
     print(f"  computed device_map: {computed_map}", flush=True)
     del empty_model
 
-    # Step 2: load real weights into the planned devices.
-    load_kwargs["device_map"] = computed_map
+    # Step 2: load weights normally (CPU), then physically dispatch ourselves.
+    print("  loading checkpoint to CPU ...", flush=True)
+    load_kwargs["low_cpu_mem_usage"] = True
     model = MODEL["cls"].from_pretrained(MODEL_ID, **load_kwargs).eval()
+    print(f"  pre-dispatch first-param device = {next(model.parameters()).device}", flush=True)
+    print("  dispatching to GPUs ...", flush=True)
+    model = dispatch_model(model, device_map=computed_map)
     print(f"  hf_device_map = {getattr(model, 'hf_device_map', '<not present>')}", flush=True)
-    print(f"  first-param device = {next(model.parameters()).device}", flush=True)
+    print(f"  post-dispatch first-param device = {next(model.parameters()).device}", flush=True)
 else:
     model = MODEL["cls"].from_pretrained(MODEL_ID, **load_kwargs).to(device).eval()
 tokenizer = AutoTokenizer.from_pretrained(MODEL_ID)
