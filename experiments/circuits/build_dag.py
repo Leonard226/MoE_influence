@@ -142,7 +142,13 @@ if MODEL.get("multi_gpu", False):
     with init_empty_weights():
         empty_model = MODEL["cls"](cfg)
     no_split = empty_model._no_split_modules
-    max_mem = {i: "75GiB" for i in range(torch.cuda.device_count())}
+    # Force balanced sharding across all available GPUs. GPU 0 gets the smallest
+    # share because it also hosts the hook tensors and input activations.
+    n_gpu = torch.cuda.device_count()
+    if n_gpu >= 2:
+        max_mem = {0: "20GiB", **{i: "30GiB" for i in range(1, n_gpu)}}
+    else:
+        max_mem = {0: "75GiB"}
     computed_map = infer_auto_device_map(
         empty_model,
         max_memory=max_mem,
