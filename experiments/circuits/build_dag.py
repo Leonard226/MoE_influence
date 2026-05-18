@@ -41,6 +41,7 @@ os.makedirs(output_dir, exist_ok=True)
 
 from customized_models.modeling_olmoe_customized import OlmoeForCausalLM
 from customized_models.modeling_deepseek_customized import DeepseekV2ForCausalLM
+from customized_models.modeling_mixtral_customized import MixtralForCausalLM
 from transformers import AutoTokenizer
 
 # Dataset registry: name -> (module_path, helper_function_name).
@@ -70,6 +71,15 @@ MODELS = {
         "d_e": 2048,
         "moe_layers": list(range(1, 27)),  # layer 0 is dense
     },
+    "mixtral-8x7b": {
+        "id": "mistralai/Mixtral-8x7B-v0.1",
+        "cls": MixtralForCausalLM,
+        "n_experts": 8,
+        "top_k": 2,
+        "d_e": 4096,
+        "moe_layers": list(range(32)),     # all layers are MoE
+        "multi_gpu": True,                  # ~94GB bf16: needs sharding across GPUs
+    },
 }
 
 parser = argparse.ArgumentParser(description=__doc__)
@@ -98,11 +108,18 @@ MAX_TOKENS = 32
 print(f"Building DAG for model={args.model!r}, dataset={args.dataset!r}, {N_PROMPTS} prompts.", flush=True)
 
 # ---- Load model + tokenizer ----
+# For models too large for a single GPU (multi_gpu=True), use device_map="auto"
+# so accelerate shards layers across visible GPUs. Hook tensors are pre-allocated
+# on cuda:0 (via torch.set_default_device above); writes from off-device layers
+# rely on implicit PyTorch cross-device copies.
 print(f"Loading {MODEL_ID} ...", flush=True)
 t0 = time.time()
-model = MODEL["cls"].from_pretrained(
-    MODEL_ID, attn_implementation="eager", torch_dtype=torch.bfloat16
-).to(device).eval()
+load_kwargs = dict(attn_implementation="eager", torch_dtype=torch.bfloat16)
+if MODEL.get("multi_gpu", False):
+    load_kwargs["device_map"] = "auto"
+    model = MODEL["cls"].from_pretrained(MODEL_ID, **load_kwargs).eval()
+else:
+    model = MODEL["cls"].from_pretrained(MODEL_ID, **load_kwargs).to(device).eval()
 tokenizer = AutoTokenizer.from_pretrained(MODEL_ID)
 print(f"  loaded in {time.time() - t0:.1f}s", flush=True)
 
