@@ -27,6 +27,7 @@ import importlib
 import os
 import sys
 import time
+from operator import attrgetter
 
 import torch
 import yaml
@@ -62,6 +63,7 @@ MODELS = {
         "top_k": 8,
         "d_e": 2048,
         "moe_layers": list(range(16)),
+        "gate_path": "mlp.gate",
     },
     "deepseek-v2-lite": {
         "id": "deepseek-ai/DeepSeek-V2-Lite",
@@ -70,6 +72,7 @@ MODELS = {
         "top_k": 6,
         "d_e": 2048,
         "moe_layers": list(range(1, 27)),  # layer 0 is dense
+        "gate_path": "mlp.gate",
     },
     "mixtral-8x7b": {
         "id": "mistralai/Mixtral-8x7B-v0.1",
@@ -78,6 +81,7 @@ MODELS = {
         "top_k": 2,
         "d_e": 4096,
         "moe_layers": list(range(32)),     # all layers are MoE
+        "gate_path": "block_sparse_moe.gate",  # Mistral naming differs from OLMoE/DeepSeek
         "multi_gpu": True,                  # ~94GB bf16: needs sharding across GPUs
     },
 }
@@ -133,7 +137,8 @@ print(f"  loaded in {time.time() - t0:.1f}s", flush=True)
 torch.set_default_device(device)
 
 # Load weights [L, n_experts, d_e]
-G_recv = torch.stack([model.model.layers[R].mlp.gate.weight.detach().to(device, dtype=torch.float32) for R in MOE_LAYERS])
+gate_of = attrgetter(MODEL["gate_path"])   # e.g., "mlp.gate" or "block_sparse_moe.gate"
+G_recv = torch.stack([gate_of(model.model.layers[R]).weight.detach().to(device, dtype=torch.float32) for R in MOE_LAYERS])
 # [L, d_e]
 gamma_recv = torch.stack([model.model.layers[R].post_attention_layernorm.weight.detach().to(device, dtype=torch.float32) for R in MOE_LAYERS])
 
