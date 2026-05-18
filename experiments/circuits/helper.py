@@ -173,3 +173,63 @@ def show_enhanced_layered_graph(g, quantile: float, target: str, model: str, dat
     plt.ylabel("Experts")
     plt.tight_layout()
     plt.show()
+
+
+def layer_pair_mass(W, n_buckets: int = 8) -> np.ndarray:
+    """Layer-pair mass distribution of an edge-weight tensor.
+
+    For each edge (s, j, r, n), accumulates |W[s, j, r, n]| into the bucket
+    determined by relative depth (s/L, r/L). The result is a 2D probability
+    distribution on an n_buckets x n_buckets grid indexed by relative
+    sender and receiver layer.
+
+    Size-invariant (relative depth absorbs the layer-count mismatch between
+    OLMoE and DeepSeek-V2-Lite) and within-layer permutation-invariant (we
+    sum over expert dims). Caller should pre-sparsify W if the metric should
+    reflect the thresholded graph rather than the full dense tensor.
+
+    Args:
+        W: weight tensor of shape [L, E, L, E] (torch or numpy).
+        n_buckets: grid resolution per axis.
+
+    Returns:
+        ndarray of shape [n_buckets, n_buckets] summing to 1. Returns a
+        uniform distribution if the input has no nonzero entries.
+    """
+    if hasattr(W, "cpu"):
+        W = W.cpu().numpy()
+    W = np.asarray(W, dtype=np.float64)
+    L = W.shape[0]
+    layer_mass = np.abs(W).sum(axis=(1, 3))                          # [L, L]
+    bucket = np.minimum((np.arange(L) * n_buckets) // L, n_buckets - 1)
+    M = np.zeros((n_buckets, n_buckets))
+    for s in range(L):
+        for r in range(L):
+            M[bucket[s], bucket[r]] += layer_mass[s, r]
+    total = M.sum()
+    if total == 0:
+        return np.full((n_buckets, n_buckets), 1.0 / (n_buckets * n_buckets))
+    return M / total
+
+
+def lpm_similarity(M1: np.ndarray, M2: np.ndarray, metric: str = "cosine") -> float:
+    """Compare two layer-pair mass distributions.
+
+    Args:
+        M1, M2: ndarrays of shape [K, K], each summing to 1.
+        metric: 'cosine' (cosine of flattened distributions; 1 = identical
+            shape) or 'tv' (total-variation similarity, 1 - 0.5 * sum|p - q|;
+            1 = identical distributions, 0 = disjoint support).
+
+    Returns:
+        Similarity in [0, 1].
+    """
+    p, q = M1.flatten(), M2.flatten()
+    if metric == "cosine":
+        n1, n2 = np.linalg.norm(p), np.linalg.norm(q)
+        if n1 == 0 or n2 == 0:
+            return 0.0
+        return float((p @ q) / (n1 * n2))
+    if metric == "tv":
+        return 1.0 - 0.5 * float(np.abs(p - q).sum())
+    raise ValueError(f"Unknown metric: {metric!r} (expected 'cosine' or 'tv')")
