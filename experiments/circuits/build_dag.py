@@ -125,7 +125,7 @@ MODELS = {
         "max_memory": {0: "20GiB", 1: "30GiB", 2: "30GiB", 3: "30GiB"},  # 110 GiB for 84GB model
     },
     "dbrx": {
-        "id": "databricks/dbrx-base",
+        "id": "alpindale/dbrx-instruct",
         "cls": DbrxForCausalLM,
         "n_experts": 16,
         "top_k": 4,
