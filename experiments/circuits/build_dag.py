@@ -45,6 +45,7 @@ from customized_models.modeling_deepseek_customized import DeepseekV2ForCausalLM
 from customized_models.modeling_mixtral_customized import MixtralForCausalLM
 from customized_models.modeling_qwen3_moe_customized import Qwen3MoeForCausalLM
 from customized_models.modeling_phimoe_customized import PhiMoEForCausalLM
+from customized_models.modeling_dbrx_customized import DbrxForCausalLM
 from transformers import AutoTokenizer
 
 # Dataset registry: name -> (module_path, helper_function_name).
@@ -122,6 +123,22 @@ MODELS = {
         # 84GB bf16: doesn't fit 1x80GB cleanly; shard across 4 GPUs.
         "multi_gpu": True,
         "max_memory": {0: "20GiB", 1: "30GiB", 2: "30GiB", 3: "30GiB"},  # 110 GiB for 84GB model
+    },
+    "dbrx": {
+        "id": "databricks/dbrx-base",
+        "cls": DbrxForCausalLM,
+        "n_experts": 16,
+        "top_k": 4,
+        "d_e": 6144,
+        "moe_layers": list(range(40)),       # all 40 layers are MoE
+        # DBRX has a different class hierarchy: blocks under transformer, FFN wraps router/experts,
+        # and uses a NormAttentionNorm wrapper instead of separate input/post_attention_layernorm.
+        "layers_path": "transformer.blocks",
+        "gate_path": "ffn.router.layer",
+        "norm_path": "norm_attn_norm.norm_2",
+        # 264GB bf16: needs 4 GPUs single-node (same as Mixtral-8x22B).
+        "multi_gpu": True,
+        "max_memory": {0: "55GiB", 1: "70GiB", 2: "70GiB", 3: "70GiB"},  # 265 GiB for 264GB model
     },
 }
 
@@ -212,10 +229,15 @@ print(f"  loaded in {time.time() - t0:.1f}s", flush=True)
 torch.set_default_device(device)
 
 # Load weights [L, n_experts, d_e]
-gate_of = attrgetter(MODEL["gate_path"])   # e.g., "mlp.gate" or "block_sparse_moe.gate"
-G_recv = torch.stack([gate_of(model.model.layers[R]).weight.detach().to(device, dtype=torch.float32) for R in MOE_LAYERS])
+# Most models expose decoder layers at `model.layers` and the post-attention norm at
+# `post_attention_layernorm`; DBRX uses `transformer.blocks` and `norm_attn_norm.norm_2`.
+layers_of = attrgetter(MODEL.get("layers_path", "model.layers"))
+gate_of   = attrgetter(MODEL["gate_path"])
+norm_of   = attrgetter(MODEL.get("norm_path", "post_attention_layernorm"))
+layers    = layers_of(model)
+G_recv     = torch.stack([gate_of(layers[R]).weight.detach().to(device, dtype=torch.float32) for R in MOE_LAYERS])
 # [L, d_e]
-gamma_recv = torch.stack([model.model.layers[R].post_attention_layernorm.weight.detach().to(device, dtype=torch.float32) for R in MOE_LAYERS])
+gamma_recv = torch.stack([norm_of(layers[R]).weight.detach().to(device, dtype=torch.float32) for R in MOE_LAYERS])
 
 # ---- Load dataset ----
 mod_name, fn_name = DATASETS[args.dataset]
