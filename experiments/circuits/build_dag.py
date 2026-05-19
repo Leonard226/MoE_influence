@@ -221,7 +221,7 @@ if MODEL.get("multi_gpu", False):
     print(f"  post-dispatch first-param device = {next(model.parameters()).device}", flush=True)
 else:
     model = MODEL["cls"].from_pretrained(MODEL_ID, **load_kwargs).to(device).eval()
-tokenizer = AutoTokenizer.from_pretrained(MODEL_ID)
+tokenizer = AutoTokenizer.from_pretrained(MODEL_ID, trust_remote_code=True)
 print(f"  loaded in {time.time() - t0:.1f}s", flush=True)
 
 # Now set the default device — our accumulators and the customized model's
