@@ -44,6 +44,7 @@ from customized_models.modeling_olmoe_customized import OlmoeForCausalLM
 from customized_models.modeling_deepseek_customized import DeepseekV2ForCausalLM
 from customized_models.modeling_mixtral_customized import MixtralForCausalLM
 from customized_models.modeling_qwen3_moe_customized import Qwen3MoeForCausalLM
+from customized_models.modeling_phimoe_customized import PhiMoEForCausalLM
 from transformers import AutoTokenizer
 
 # Dataset registry: name -> (module_path, helper_function_name).
@@ -109,6 +110,18 @@ MODELS = {
         # shard across 4 GPUs with plenty of headroom.
         "multi_gpu": True,
         "max_memory": {0: "15GiB", 1: "25GiB", 2: "25GiB", 3: "25GiB"},  # 90 GiB for 60GB model
+    },
+    "phi-3.5-moe": {
+        "id": "microsoft/Phi-3.5-MoE-instruct",
+        "cls": PhiMoEForCausalLM,
+        "n_experts": 16,
+        "top_k": 2,
+        "d_e": 4096,
+        "moe_layers": list(range(32)),     # all 32 layers are MoE
+        "gate_path": "block_sparse_moe.gate",  # same naming as Mixtral
+        # 84GB bf16: doesn't fit 1x80GB cleanly; shard across 4 GPUs.
+        "multi_gpu": True,
+        "max_memory": {0: "20GiB", 1: "30GiB", 2: "30GiB", 3: "30GiB"},  # 110 GiB for 84GB model
     },
 }
 
