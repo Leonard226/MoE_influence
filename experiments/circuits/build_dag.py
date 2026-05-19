@@ -127,7 +127,6 @@ MODELS = {
     "dbrx": {
         "id": "alpindale/dbrx-instruct",
         "cls": DbrxForCausalLM,
-        "trust_remote_code": True, 
         "n_experts": 16,
         "top_k": 4,
         "d_e": 6144,
@@ -195,7 +194,7 @@ if MODEL.get("multi_gpu", False):
 
     # Step 1: plan on a meta-device skeleton.
     print("  building empty model on meta device ...", flush=True)
-    cfg = MODEL["cls"].config_class.from_pretrained(MODEL_ID)
+    cfg = MODEL["cls"].config_class.from_pretrained(MODEL_ID, trust_remote_code=True)
     with init_empty_weights():
         empty_model = MODEL["cls"](cfg)
     no_split = empty_model._no_split_modules
