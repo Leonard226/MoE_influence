@@ -127,6 +127,7 @@ MODELS = {
     "dbrx": {
         "id": "alpindale/dbrx-instruct",
         "cls": DbrxForCausalLM,
+        "trust_remote_code": True, 
         "n_experts": 16,
         "top_k": 4,
         "d_e": 6144,
