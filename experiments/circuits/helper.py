@@ -5,26 +5,26 @@ import matplotlib.colors as mcolors
 from matplotlib.ticker import MultipleLocator, FuncFormatter
 import networkx as nx
 
-def get_thresholds(dag: dict, target: str, quantiles: list) -> list: 
+def get_thresholds(dag: dict, target: str, quantiles: list) -> dict:
     import torch
 
     matrix = dag[target]
+    if isinstance(matrix, torch.Tensor):
+        matrix = matrix.cpu().numpy()
+
     N_LAYERS = matrix.shape[0]
 
-    # Create a mask for forward edges (Layer S < Layer R)
-    # This ensures we don't include invalid backward connections in our distribution
-    s_idx = torch.arange(N_LAYERS).view(-1, 1, 1, 1)
-    r_idx = torch.arange(N_LAYERS).view(1, 1, -1, 1)
-    mask = (s_idx < r_idx).expand_as(matrix)    
-    # Flatten valid weights
-    valid_weights = torch.abs(matrix[mask].float())
+    # Forward-edge mask (Layer S < Layer R) — exclude invalid backward connections.
+    s_idx = np.arange(N_LAYERS).reshape(-1, 1, 1, 1)
+    r_idx = np.arange(N_LAYERS).reshape(1, 1, -1, 1)
+    mask = np.broadcast_to(s_idx < r_idx, matrix.shape)
+
+    # Flatten valid weights (np.quantile has no torch.quantile size cap, which
+    # bites for big-expert models like Qwen3 with 48*128*48*128 ~= 38M entries).
+    valid_weights = np.abs(matrix[mask]).astype(np.float64)
     valid_weights = valid_weights[valid_weights > 1e-9]
 
-    # Calculate all quantiles at once
-    q_tensor = torch.tensor(quantiles, device=valid_weights.device)
-    thresholds = torch.quantile(valid_weights, q_tensor)
-    
-    # Return a dictionary mapping quantile -> threshold
+    thresholds = np.quantile(valid_weights, quantiles)
     return dict(zip(quantiles, thresholds.tolist()))
 
 
