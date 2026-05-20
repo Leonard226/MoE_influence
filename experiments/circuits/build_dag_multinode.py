@@ -137,8 +137,12 @@ def load_partitioned_model(model_id, rank, world_size, local_rank):
       4. After load, replace non-owned `model.layers[i]` with None so we can
          skip them in our custom forward.
     """
-    from accelerate import init_empty_weights, load_checkpoint_and_dispatch
+    import json
+    import os
+    from accelerate import init_empty_weights
+    from accelerate.utils import set_module_tensor_to_device
     from huggingface_hub import snapshot_download
+    from safetensors import safe_open
 
     cfg = Qwen3MoeForCausalLM.config_class.from_pretrained(model_id, trust_remote_code=True)
     cfg._attn_implementation = "eager"
@@ -154,24 +158,9 @@ def load_partitioned_model(model_id, rank, world_size, local_rank):
         model = Qwen3MoeForCausalLM(cfg)
 
     gpu = f"cuda:{local_rank}"
-    device_map = {}
-    # embed_tokens lives on rank 0 (we tokenize there).
-    device_map["model.embed_tokens"] = gpu if rank == 0 else "meta"
-    # rotary_emb has no learnable params (just inv_freq buffer) but we keep one
-    # on each rank for local cos/sin computation.
-    device_map["model.rotary_emb"] = gpu
-    # final norm lives on the last rank; we run it but discard the output.
-    device_map["model.norm"] = gpu if rank == world_size - 1 else "meta"
-    # lm_head: we never need logits. Keep on meta.
-    device_map["lm_head"] = "meta"
-    # Decoder layers: owned -> our GPU, else -> meta.
-    for i in range(n_layers):
-        device_map[f"model.layers.{i}"] = gpu if i in owned else "meta"
 
-    # Download once on rank 0 to populate the shared HF cache (avoids parallel
-    # network races), then every rank calls snapshot_download (no-op once cached)
-    # to get the LOCAL PATH — load_checkpoint_and_dispatch needs a path on disk,
-    # not an HF repo ID.
+    # Download once on rank 0 to populate the shared HF cache, then all ranks
+    # read from cache to get the local path.
     if rank == 0:
         snapshot_download(model_id, allow_patterns=["*.safetensors", "*.json", "*.txt"])
     if dist.is_initialized():
@@ -180,24 +169,61 @@ def load_partitioned_model(model_id, rank, world_size, local_rank):
         model_id, allow_patterns=["*.safetensors", "*.json", "*.txt"]
     )
 
-    model = load_checkpoint_and_dispatch(
-        model,
-        checkpoint=checkpoint_path,
-        device_map=device_map,
-        dtype=torch.bfloat16,
-        no_split_module_classes=["Qwen3MoeDecoderLayer"],
-        offload_state_dict=False,
-    )
+    # Decide which parameters this rank should materialize.
+    # Everything not selected stays on meta (it'll never be called in forward).
+    def is_owned(param_name: str) -> bool:
+        if param_name.startswith("model.embed_tokens"):
+            return rank == 0
+        if param_name.startswith("model.norm"):
+            return rank == world_size - 1
+        if param_name.startswith("model.rotary_emb"):
+            return True   # rotary_emb has no params, but keep for completeness
+        if param_name.startswith("lm_head"):
+            return False
+        if param_name.startswith("model.layers."):
+            layer_idx = int(param_name.split(".")[2])
+            return layer_idx in owned
+        return False
 
-    # Replace non-owned decoder layers with None — saves the meta-tensor
-    # bookkeeping that accelerate leaves behind and makes our forward simpler.
+    # Read the safetensors index to map params -> shard files.
+    index_path = os.path.join(checkpoint_path, "model.safetensors.index.json")
+    if os.path.exists(index_path):
+        with open(index_path) as f:
+            index = json.load(f)
+        weight_map = index["weight_map"]
+    else:
+        # Single-file checkpoint (small models). Find the .safetensors file.
+        st_files = [f for f in os.listdir(checkpoint_path) if f.endswith(".safetensors")]
+        if not st_files:
+            raise FileNotFoundError(f"No .safetensors files in {checkpoint_path}")
+        # All params live in the single shard.
+        with safe_open(os.path.join(checkpoint_path, st_files[0]), framework="pt", device="cpu") as f:
+            weight_map = {key: st_files[0] for key in f.keys()}
+
+    # Group params by shard for efficient loading (open each file once).
+    shards_to_load: dict[str, list[str]] = {}
+    for param_name, shard_file in weight_map.items():
+        if is_owned(param_name):
+            shards_to_load.setdefault(shard_file, []).append(param_name)
+
+    rprint(rank, f"[rank {rank}] loading {sum(len(v) for v in shards_to_load.values())} params from {len(shards_to_load)} shards")
+
+    for shard_file, param_names in shards_to_load.items():
+        full_path = os.path.join(checkpoint_path, shard_file)
+        with safe_open(full_path, framework="pt", device=gpu) as f:
+            for name in param_names:
+                tensor = f.get_tensor(name)
+                # set_module_tensor_to_device replaces the meta-device param with
+                # this real tensor at the given location.
+                set_module_tensor_to_device(model, name, gpu, value=tensor, dtype=torch.bfloat16)
+
+    # Replace non-owned decoder layers with None so our forward skips them.
     inner = model.model
     new_layers = torch.nn.ModuleList()
     for i in range(n_layers):
         if i in owned:
             new_layers.append(inner.layers[i])
         else:
-            # Placeholder; we will never call it.
             new_layers.append(None)
     inner.layers = new_layers
 
