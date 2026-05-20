@@ -112,6 +112,22 @@ MODELS = {
         "multi_gpu": True,
         "max_memory": {0: "15GiB", 1: "25GiB", 2: "25GiB", 3: "25GiB"},  # 90 GiB for 60GB model
     },
+    "qwen3-235b-a22b": {
+        # Same modeling class as Qwen3-30B-A3B; only config differs (94 layers, 4096 hidden).
+        # 470GB bf16 doesn't fit 4x80GB single-node, so we load with int8 quantization
+        # (~235GB) via bitsandbytes. The router gate Linear and lm_head are kept in fp16
+        # so we read clean weights for the score-decomposition formulas.
+        "id": "Qwen/Qwen3-235B-A22B",
+        "cls": Qwen3MoeForCausalLM,
+        "n_experts": 128,
+        "top_k": 8,
+        "d_e": 4096,
+        "moe_layers": list(range(94)),
+        "gate_path": "mlp.gate",
+        "quantization": "int8",
+        "bnb_skip_modules": ["gate", "lm_head"],
+        "max_memory": {0: "30GiB", 1: "75GiB", 2: "75GiB", 3: "75GiB"},  # 255 GiB int8 model + headroom
+    },
     "phi-3.5-moe": {
         "id": "microsoft/Phi-3.5-MoE-instruct",
         "cls": PhiMoEForCausalLM,
@@ -179,7 +195,30 @@ print(f"  torch.cuda.device_count() = {torch.cuda.device_count()}", flush=True)
 print(f"  CUDA_VISIBLE_DEVICES = {os.environ.get('CUDA_VISIBLE_DEVICES', '<unset>')}", flush=True)
 t0 = time.time()
 load_kwargs = dict(attn_implementation="eager", torch_dtype=torch.bfloat16)
-if MODEL.get("multi_gpu", False):
+
+if MODEL.get("quantization") == "int8":
+    # int8 path via bitsandbytes. HF handles device_map automatically; we skip the
+    # manual init_empty_weights / dispatch_model dance. Router gate and lm_head are
+    # left in fp16 so the score-decomposition reads clean fp16 router weights.
+    try:
+        import bitsandbytes  # noqa: F401
+        from transformers import BitsAndBytesConfig
+    except ImportError:
+        raise RuntimeError("quantization='int8' requires bitsandbytes: pip install bitsandbytes")
+    skip_modules = MODEL.get("bnb_skip_modules", ["lm_head"])
+    print(f"  loading with int8 quantization (skip_modules={skip_modules})", flush=True)
+    load_kwargs.pop("torch_dtype", None)   # bnb manages dtype internally
+    load_kwargs["quantization_config"] = BitsAndBytesConfig(
+        load_in_8bit=True,
+        llm_int8_skip_modules=skip_modules,
+    )
+    load_kwargs["device_map"] = "auto"
+    if "max_memory" in MODEL:
+        load_kwargs["max_memory"] = MODEL["max_memory"]
+    model = MODEL["cls"].from_pretrained(MODEL_ID, **load_kwargs).eval()
+    print(f"  hf_device_map = {getattr(model, 'hf_device_map', '<not present>')}", flush=True)
+    print(f"  first-param device = {next(model.parameters()).device}", flush=True)
+elif MODEL.get("multi_gpu", False):
     try:
         import accelerate
         from accelerate import infer_auto_device_map, init_empty_weights, dispatch_model
