@@ -127,7 +127,9 @@ MODELS = {
         "gate_path": "mlp.gate",
         "quantization": "nf4",
         "bnb_skip_modules": ["gate", "lm_head"],
-        "max_memory": {0: "20GiB", 1: "40GiB", 2: "40GiB", 3: "40GiB"},  # 140 GiB total for ~118GB NF4
+        # Even distribution: accelerate's NF4 loading peaks at ~2.5× max_memory per GPU.
+        # 30 GiB × 2.5 = 75 GiB peak, fits 80 GiB. Total 120 GiB > 118 GiB NF4 model.
+        "max_memory": {0: "30GiB", 1: "30GiB", 2: "30GiB", 3: "30GiB"},
     },
     "phi-3.5-moe": {
         "id": "microsoft/Phi-3.5-MoE-instruct",
