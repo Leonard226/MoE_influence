@@ -168,16 +168,21 @@ def load_partitioned_model(model_id, rank, world_size, local_rank):
     for i in range(n_layers):
         device_map[f"model.layers.{i}"] = gpu if i in owned else "meta"
 
-    # Download once on rank 0 to populate the shared HF cache, then all ranks
-    # read from cache (avoids parallel network races).
+    # Download once on rank 0 to populate the shared HF cache (avoids parallel
+    # network races), then every rank calls snapshot_download (no-op once cached)
+    # to get the LOCAL PATH — load_checkpoint_and_dispatch needs a path on disk,
+    # not an HF repo ID.
     if rank == 0:
         snapshot_download(model_id, allow_patterns=["*.safetensors", "*.json", "*.txt"])
     if dist.is_initialized():
         dist.barrier()
+    checkpoint_path = snapshot_download(
+        model_id, allow_patterns=["*.safetensors", "*.json", "*.txt"]
+    )
 
     model = load_checkpoint_and_dispatch(
         model,
-        checkpoint=model_id,
+        checkpoint=checkpoint_path,
         device_map=device_map,
         dtype=torch.bfloat16,
         no_split_module_classes=["Qwen3MoeDecoderLayer"],
