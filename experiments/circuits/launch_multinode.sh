@@ -1,41 +1,59 @@
 #!/bin/bash
-#SBATCH --nodes=2
-#SBATCH --ntasks-per-node=4
+#SBATCH --nodelist=piora1,piora2
+#SBATCH --ntasks-per-node=1
 #SBATCH --gres=gpu:4
-#SBATCH --cpus-per-task=8
-#SBATCH --time=02:00:00
+#SBATCH --cpus-per-task=4
 #SBATCH --job-name=qwen3-235b-dag
-#SBATCH --output=logs/%x-%j.out
-#SBATCH --error=logs/%x-%j.err
-
-# Multi-node launch for build_dag_multinode.py (Qwen3-235B-A22B).
-# 2 nodes x 4 A100-80GB = 8 ranks; pipeline-parallel over the 94 decoder layers.
+#SBATCH --output=log.out
+#SBATCH --error=err
 
 set -euo pipefail
 
-mkdir -p logs
+# Use the megatron env's binaries directly. torchrun's shebang already points at
+# the correct python interpreter inside the env, so no conda activation needed.
+ENV_BIN=/scratch/sleonard/miniconda3/envs/megatron/bin
+export PATH="${ENV_BIN}:${PATH}"
+# Some bnb / nccl libs live in the env's lib dir; make them findable.
+export LD_LIBRARY_PATH="/scratch/sleonard/miniconda3/envs/megatron/lib:${LD_LIBRARY_PATH:-}"
+
+# Preserve the HuggingFace cache location (set in user's login shell, lost in srun).
+export HF_HOME="${HF_HOME:-$HOME/.hugging_face}"
 
 # Resolve master node IP from SLURM env.
 nodes=( $(scontrol show hostnames "$SLURM_JOB_NODELIST") )
 export MASTER_ADDR="${nodes[0]}"
 export MASTER_PORT=29500
-echo "MASTER_ADDR=$MASTER_ADDR  MASTER_PORT=$MASTER_PORT  nodes=${nodes[*]}"
+echo "Python: $(${ENV_BIN}/python --version)  torchrun: ${ENV_BIN}/torchrun"
+echo "MASTER_ADDR=$MASTER_ADDR  MASTER_PORT=$MASTER_PORT  nodes=${nodes[*]}  HF_HOME=$HF_HOME"
 
 # NCCL — favor IB; suppress noisy debug unless explicitly enabled.
 export NCCL_IB_DISABLE=0
 export NCCL_DEBUG=${NCCL_DEBUG:-WARN}
-# Per-rank visibility comes from SLURM/torchrun; do not set CUDA_VISIBLE_DEVICES here.
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# sbatch copies the .sh to /cm/local/apps/slurm/var/spool/job{ID}/ before executing,
+# so BASH_SOURCE[0] points there — not at the original launch_multinode.sh location.
+# Use SLURM_SUBMIT_DIR (the dir where `sbatch` was invoked) as the project root.
+PROJECT_ROOT="${SLURM_SUBMIT_DIR:-/scratch/sleonard/MoE_circuits}"
+SCRIPT_PATH="${PROJECT_ROOT}/experiments/circuits/build_dag_multinode.py"
 
-srun --kill-on-bad-exit=1 \
-    torchrun \
+if [ ! -f "$SCRIPT_PATH" ]; then
+    echo "ERROR: build_dag_multinode.py not found at $SCRIPT_PATH" >&2
+    echo "       SLURM_SUBMIT_DIR=$SLURM_SUBMIT_DIR" >&2
+    echo "       Run: sbatch from /scratch/sleonard/MoE_circuits/" >&2
+    exit 1
+fi
+echo "SCRIPT_PATH=$SCRIPT_PATH"
+
+# Note: --ntasks-per-node=1 means srun spawns one task per node; that task itself
+# runs torchrun, which fans out 4 worker processes (one per GPU on the node).
+srun --kill-on-bad-exit=1 --export=ALL \
+    ${ENV_BIN}/torchrun \
     --nnodes=2 \
     --nproc_per_node=4 \
     --node_rank=$SLURM_NODEID \
     --rdzv_backend=c10d \
     --rdzv_endpoint=$MASTER_ADDR:$MASTER_PORT \
-    "$SCRIPT_DIR/build_dag_multinode.py" \
+    "$SCRIPT_PATH" \
     --model qwen3-235b-a22b \
     --dataset c4 \
     --n_prompts 5000 \
