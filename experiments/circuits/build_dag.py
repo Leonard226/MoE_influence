@@ -114,9 +114,10 @@ MODELS = {
     },
     "qwen3-235b-a22b": {
         # Same modeling class as Qwen3-30B-A3B; only config differs (94 layers, 4096 hidden).
-        # 470GB bf16 doesn't fit 4x80GB single-node, so we load with int8 quantization
-        # (~235GB) via bitsandbytes. The router gate Linear and lm_head are kept in fp16
-        # so we read clean weights for the score-decomposition formulas.
+        # 470GB bf16 doesn't fit 4x80GB single-node. int8 (~235GB) hit a loading-peak OOM
+        # because bnb's loader holds fp16 on-device before quantizing. NF4 (4-bit double-quant)
+        # halves the footprint to ~118GB so the loading peak fits per GPU. Router gate and
+        # lm_head are kept in bf16 so the score-decomposition reads clean weights.
         "id": "Qwen/Qwen3-235B-A22B",
         "cls": Qwen3MoeForCausalLM,
         "n_experts": 128,
@@ -124,9 +125,9 @@ MODELS = {
         "d_e": 4096,
         "moe_layers": list(range(94)),
         "gate_path": "mlp.gate",
-        "quantization": "int8",
+        "quantization": "nf4",
         "bnb_skip_modules": ["gate", "lm_head"],
-        "max_memory": {0: "30GiB", 1: "75GiB", 2: "75GiB", 3: "75GiB"},  # 255 GiB int8 model + headroom
+        "max_memory": {0: "20GiB", 1: "40GiB", 2: "40GiB", 3: "40GiB"},  # 140 GiB total for ~118GB NF4
     },
     "phi-3.5-moe": {
         "id": "microsoft/Phi-3.5-MoE-instruct",
@@ -196,22 +197,33 @@ print(f"  CUDA_VISIBLE_DEVICES = {os.environ.get('CUDA_VISIBLE_DEVICES', '<unset
 t0 = time.time()
 load_kwargs = dict(attn_implementation="eager", torch_dtype=torch.bfloat16)
 
-if MODEL.get("quantization") == "int8":
-    # int8 path via bitsandbytes. HF handles device_map automatically; we skip the
+if MODEL.get("quantization") in ("int8", "nf4"):
+    # Bitsandbytes quantization. HF handles device_map automatically; we skip the
     # manual init_empty_weights / dispatch_model dance. Router gate and lm_head are
-    # left in fp16 so the score-decomposition reads clean fp16 router weights.
+    # in the skip list so the score-decomposition reads them in their native dtype.
     try:
         import bitsandbytes  # noqa: F401
         from transformers import BitsAndBytesConfig
     except ImportError:
-        raise RuntimeError("quantization='int8' requires bitsandbytes: pip install bitsandbytes")
+        raise RuntimeError("quantization requires bitsandbytes: pip install bitsandbytes")
+    quant = MODEL["quantization"]
     skip_modules = MODEL.get("bnb_skip_modules", ["lm_head"])
-    print(f"  loading with int8 quantization (skip_modules={skip_modules})", flush=True)
+    print(f"  loading with {quant} quantization (skip_modules={skip_modules})", flush=True)
+    if quant == "int8":
+        bnb_config = BitsAndBytesConfig(
+            load_in_8bit=True,
+            llm_int8_skip_modules=skip_modules,
+        )
+    else:  # nf4
+        bnb_config = BitsAndBytesConfig(
+            load_in_4bit=True,
+            bnb_4bit_quant_type="nf4",
+            bnb_4bit_compute_dtype=torch.bfloat16,
+            bnb_4bit_use_double_quant=True,
+            llm_int8_skip_modules=skip_modules,  # name says int8 but applies to 4-bit too
+        )
     load_kwargs.pop("torch_dtype", None)   # bnb manages dtype internally
-    load_kwargs["quantization_config"] = BitsAndBytesConfig(
-        load_in_8bit=True,
-        llm_int8_skip_modules=skip_modules,
-    )
+    load_kwargs["quantization_config"] = bnb_config
     load_kwargs["device_map"] = "auto"
     if "max_memory" in MODEL:
         load_kwargs["max_memory"] = MODEL["max_memory"]
