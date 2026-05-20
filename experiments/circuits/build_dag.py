@@ -140,27 +140,6 @@ MODELS = {
         "multi_gpu": True,
         "max_memory": {0: "55GiB", 1: "70GiB", 2: "70GiB", 3: "70GiB"},  # 265 GiB for 264GB model
     },
-    "dbrx-l1norm": {
-        # Controlled variant: identical to DBRX but with the top-K weights L1-renormalized
-        # (sum-to-1 per token), matching the convention used by every other model in our set.
-        # Tests whether DBRX's late-layer routing concentration is driven by the lack of
-        # weight renormalization. Setting moe_normalize_expert_weights=1 via post-load patch
-        # triggers DBRX's existing `torch.norm(p=1, ...)` branch, which equals sum-to-1 for
-        # the non-negative softmax outputs.
-        "id": "alpindale/dbrx-instruct",
-        "cls": DbrxForCausalLM,
-        "n_experts": 16,
-        "top_k": 4,
-        "d_e": 6144,
-        "moe_layers": list(range(40)),
-        "layers_path": "transformer.blocks",
-        "gate_path": "ffn.router.layer",
-        "norm_path": "norm_attn_norm.norm_2",
-        "router_path": "ffn.router",
-        "force_l1_norm": True,
-        "multi_gpu": True,
-        "max_memory": {0: "55GiB", 1: "70GiB", 2: "70GiB", 3: "70GiB"},
-    },
 }
 
 parser = argparse.ArgumentParser(description=__doc__)
@@ -259,15 +238,6 @@ layers    = layers_of(model)
 G_recv     = torch.stack([gate_of(layers[R]).weight.detach().to(device, dtype=torch.float32) for R in MOE_LAYERS])
 # [L, d_e]
 gamma_recv = torch.stack([norm_of(layers[R]).weight.detach().to(device, dtype=torch.float32) for R in MOE_LAYERS])
-
-# Controlled-variant patch: force L1 renormalization of top-K routing weights for
-# models that don't do it by default (DBRX). Triggers each router's existing
-# `torch.norm(p=1)` branch.
-if MODEL.get("force_l1_norm", False):
-    router_of = attrgetter(MODEL["router_path"])
-    for R in MOE_LAYERS:
-        router_of(layers[R]).moe_normalize_expert_weights = 1
-    print(f"  patched {len(MOE_LAYERS)} routers: moe_normalize_expert_weights -> 1 (L1 sum-to-1)", flush=True)
 
 # ---- Load dataset ----
 mod_name, fn_name = DATASETS[args.dataset]
