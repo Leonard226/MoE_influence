@@ -20,10 +20,10 @@ def get_thresholds(dag: dict, target: str, quantiles: list) -> list:
     valid_weights = torch.abs(matrix[mask].float())
     valid_weights = valid_weights[valid_weights > 1e-9]
 
-    # Calculate all quantiles at once
-    q_tensor = torch.tensor(quantiles, device=valid_weights.device)
-    thresholds = torch.quantile(valid_weights, q_tensor)
-    
+    # torch.quantile errors out above ~16M elements (Qwen3-235B-A22B has ~72M
+    # forward edges). numpy.quantile has no such cap.
+    thresholds = np.quantile(valid_weights.cpu().numpy(), quantiles)
+
     # Return a dictionary mapping quantile -> threshold
     return dict(zip(quantiles, thresholds.tolist()))
 
