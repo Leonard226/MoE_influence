@@ -46,15 +46,26 @@ echo "SCRIPT_PATH=$SCRIPT_PATH"
 
 # Note: --ntasks-per-node=1 means srun spawns one task per node; that task itself
 # runs torchrun, which fans out 4 worker processes (one per GPU on the node).
-srun --kill-on-bad-exit=1 --export=ALL \
-    ${ENV_BIN}/torchrun \
-    --nnodes=2 \
-    --nproc_per_node=4 \
-    --node_rank=$SLURM_NODEID \
-    --rdzv_backend=c10d \
-    --rdzv_endpoint=$MASTER_ADDR:$MASTER_PORT \
-    "$SCRIPT_PATH" \
-    --model qwen3-235b-a22b \
-    --dataset c4 \
-    --n_prompts 5000 \
-    --B 4
+# Run c4, math, code sequentially in one allocation. Datasets are independent,
+# so a failure in one doesn't block the next.
+for DATASET in c4 math code; do
+    echo "==================================================="
+    echo "Starting dataset=${DATASET} at $(date)"
+    echo "==================================================="
+    srun --kill-on-bad-exit=1 --export=ALL \
+        ${ENV_BIN}/torchrun \
+        --nnodes=2 \
+        --nproc_per_node=4 \
+        --node_rank=$SLURM_NODEID \
+        --rdzv_backend=c10d \
+        --rdzv_endpoint=$MASTER_ADDR:$MASTER_PORT \
+        "$SCRIPT_PATH" \
+        --model qwen3-235b-a22b \
+        --dataset "$DATASET" \
+        --n_prompts 5000 \
+        --B 4 \
+        || echo "WARN: dataset=${DATASET} failed; continuing"
+    echo "Finished dataset=${DATASET} at $(date)"
+    # Brief pause so port 29500 (c10d rendezvous) clears TIME_WAIT before re-bind.
+    sleep 30
+done
