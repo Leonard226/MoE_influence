@@ -5,7 +5,67 @@ import matplotlib.colors as mcolors
 from matplotlib.ticker import MultipleLocator, FuncFormatter
 import networkx as nx
 
-def get_thresholds(dag: dict, target: str, quantiles: list) -> list: 
+def update_topk_per_sender(top_weight, top_prompt, top_pos, top_token,
+                           sender_j, weight, prompt_idx, pos, token_id,
+                           n_experts, k_top, max_per_j):
+    """For one layer, merge new events into a per-sender-j top-K-by-weight buffer.
+
+    All buffers are updated in place; on entry, empty slots have `top_weight = -1`
+    (any value < 0 works; routing weights are in [0, 1]).
+
+    top_weight: [n_experts, k_top] float32 buffer of top-k weights per sender j
+    top_prompt: [n_experts, k_top] int32   global prompt index of each top event
+    top_pos:    [n_experts, k_top] int16   token position within the prompt
+    top_token:  [n_experts, k_top] int32   token id at that position
+    sender_j:   [n_events]  long           selected expert per event
+    weight:     [n_events]  float32        routing weight per event
+    prompt_idx: [n_events]  int32
+    pos:        [n_events]  int16
+    token_id:   [n_events]  int32
+    max_per_j: upper bound on events per j in this call (e.g. bt = bsz*n_tok,
+        since for a given token expert j can be in top-K at most once).
+    """
+    import torch
+    n_events = sender_j.shape[0]
+    if n_events == 0:
+        return
+    device = sender_j.device
+
+    # Rank-within-j-group for each event via stable sort + cumcount.
+    sort_idx = torch.argsort(sender_j, stable=True)
+    sorted_j = sender_j[sort_idx]
+    new_block = torch.empty_like(sorted_j, dtype=torch.bool)
+    new_block[0] = True
+    new_block[1:] = sorted_j[1:] != sorted_j[:-1]
+    block_start = torch.where(new_block)[0]
+    block_id = new_block.long().cumsum(0) - 1
+    rank_sorted = torch.arange(n_events, device=device) - block_start[block_id]
+    rank_orig = torch.empty_like(rank_sorted)
+    rank_orig[sort_idx] = rank_sorted
+
+    # Scatter events into [n_experts, max_per_j] padded candidate tensors.
+    cand_w   = torch.full((n_experts, max_per_j), -1.0, dtype=top_weight.dtype, device=device)
+    cand_p   = torch.zeros((n_experts, max_per_j), dtype=top_prompt.dtype, device=device)
+    cand_pos = torch.zeros((n_experts, max_per_j), dtype=top_pos.dtype,    device=device)
+    cand_t   = torch.zeros((n_experts, max_per_j), dtype=top_token.dtype,  device=device)
+    cand_w  [sender_j, rank_orig] = weight
+    cand_p  [sender_j, rank_orig] = prompt_idx
+    cand_pos[sender_j, rank_orig] = pos
+    cand_t  [sender_j, rank_orig] = token_id
+
+    # Concat existing buffer + new candidates, take per-row top-K.
+    combined_w   = torch.cat([top_weight, cand_w  ], dim=1)
+    combined_p   = torch.cat([top_prompt, cand_p  ], dim=1)
+    combined_pos = torch.cat([top_pos,    cand_pos], dim=1)
+    combined_t   = torch.cat([top_token,  cand_t  ], dim=1)
+    topk = combined_w.topk(k_top, dim=1)
+    top_weight.copy_(topk.values)
+    top_prompt.copy_(torch.gather(combined_p,   1, topk.indices))
+    top_pos.copy_(   torch.gather(combined_pos, 1, topk.indices))
+    top_token.copy_( torch.gather(combined_t,   1, topk.indices))
+
+
+def get_thresholds(dag: dict, target: str, quantiles: list) -> list:
     import torch
 
     matrix = dag[target]

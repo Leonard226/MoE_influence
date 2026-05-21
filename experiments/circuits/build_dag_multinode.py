@@ -15,9 +15,10 @@ on its owned layers and collects the four hooks we need:
 Captured hook tensors are sent to rank 0 via dist.gather (per-rank tensors
 shaped [n_owned, bsz, n_tok, ...]; rank 0 concatenates along layer axis).
 
-Rank 0 owns the accumulators (APS, ANS, AVG, sq, aarv, count) and runs the
-score-decomposition inner loop. The router gate and post-attention RMSNorm
-weights from every layer are gathered to rank 0 once at startup (~5 GiB total).
+Rank 0 owns the accumulators (APS, ANS, AVG, sq, aarv, arv, padd, prem,
+n_tokens_selected, top-K-by-routing-weight token buffer) and runs the score-
+decomposition inner loop. The router gate and post-attention RMSNorm weights
+from every layer are gathered to rank 0 once at startup (~5 GiB total).
 
 Numerical semantics are identical to `build_dag.py` (modulo cross-rank dtype
 casts and NCCL gather precision; both stay in float32 on rank 0 so it is
@@ -473,6 +474,7 @@ def main():
     N_PROMPTS = args.n_prompts
     BSZ = args.B
     MAX_TOKENS = 32
+    K_TOP_TOKENS = 100  # per-sender buffer: keep top-100 routing-weight events per (c, j)
 
     rprint(rank, f"world_size={world_size}  rank={rank}  local_rank={local_rank}")
     rprint(rank, f"Building DAG for model={args.model!r}, dataset={args.dataset!r}, {N_PROMPTS} prompts.")
@@ -520,7 +522,19 @@ def main():
         AVG_accum  = torch.zeros(SHAPE, dtype=torch.float32, device=device0)
         sq_accum   = torch.zeros(SHAPE, dtype=torch.float32, device=device0)
         aarv_accum = torch.zeros(SHAPE, dtype=torch.float32, device=device0)
-        count = torch.zeros((N_LAYERS, N_EXPERTS), dtype=torch.long, device=device0)
+        arv_accum  = torch.zeros(SHAPE, dtype=torch.float32, device=device0)
+        padd_accum = torch.zeros(SHAPE, dtype=torch.float32, device=device0)
+        prem_accum = torch.zeros(SHAPE, dtype=torch.float32, device=device0)
+        n_tokens_selected = torch.zeros((N_LAYERS, N_EXPERTS), dtype=torch.long, device=device0)
+
+        # Per-sender top-K-by-routing-weight token buffer. Empty slots: weight = -1.
+        TOPK_SHAPE = (N_LAYERS, N_EXPERTS, K_TOP_TOKENS)
+        top_weight = torch.full(TOPK_SHAPE, -1.0, dtype=torch.float32, device=device0)
+        top_prompt = torch.zeros(TOPK_SHAPE, dtype=torch.int32, device=device0)
+        top_pos    = torch.zeros(TOPK_SHAPE, dtype=torch.int16, device=device0)
+        top_token  = torch.zeros(TOPK_SHAPE, dtype=torch.int32, device=device0)
+
+        from experiments.circuits.helper import update_topk_per_sender
 
     n_batches = (N_PROMPTS + BSZ - 1) // BSZ
     rprint(rank, f"Running {n_batches} batches (batch_size={BSZ}, max_tokens={MAX_TOKENS}) ...")
@@ -605,9 +619,32 @@ def main():
             omega = weighted_out.permute(0, 2, 1, 3, 4).reshape(bt, N_LAYERS, TOP_K, D_E)
             sel = selected.permute(0, 2, 1, 3).reshape(bt, N_LAYERS, TOP_K)
 
+            # Routing weights actually applied in the forward pass: softmax over
+            # all experts, gather top-K, then L1-renormalize (norm_topk_prob=true).
+            all_softmax      = torch.softmax(orig_score, dim=-1)                                  # [bt, L, n_experts]
+            selected_softmax = torch.gather(all_softmax, dim=-1, index=sel)                       # [bt, L, top_k]
+            routing_weight   = selected_softmax / selected_softmax.sum(dim=-1, keepdim=True)      # [bt, L, top_k]
+            del all_softmax, selected_softmax
+
+            # Per-event auxiliary indices, used by the top-K buffer update.
+            B_global = batch_idx * BSZ
+            event_bt = torch.arange(bt, device=device0).repeat_interleave(TOP_K)                  # [bt*top_k]
+            event_bsz = event_bt // n_tok
+            event_pos = (event_bt % n_tok).to(torch.int16)
+            prompt_indices = torch.arange(B_global, B_global + bsz, dtype=torch.int32, device=device0)
+            event_prompt = prompt_indices[event_bsz]
+            event_token = input_ids.flatten()[event_bt].to(torch.int32)
+
             for S in range(N_LAYERS):
                 sel_S = sel[:, S, :]
-                count[S] += torch.bincount(sel_S.flatten(), minlength=N_EXPERTS)
+                n_tokens_selected[S] += torch.bincount(sel_S.flatten(), minlength=N_EXPERTS)
+
+                update_topk_per_sender(
+                    top_weight[S], top_prompt[S], top_pos[S], top_token[S],
+                    sel_S.flatten(), routing_weight[:, S, :].flatten(),
+                    event_prompt, event_pos, event_token,
+                    N_EXPERTS, K_TOP_TOKENS, max_per_j=bt,
+                )
 
                 if S == N_LAYERS - 1:
                     continue
@@ -634,11 +671,21 @@ def main():
                         torch.arange(N_EXPERTS, device=device0).expand_as(pert_sorted),
                     )
                     orig_rank_R = orig_rank_of[:, R, :].unsqueeze(1).expand_as(pert_rank_of)
-                    rank_shift = (pert_rank_of.float() - orig_rank_R.float()).abs()
-                    aarv_accum[S, :, R, :].index_add_(0, sel_flat, rank_shift.flatten(0, 1))
+                    arv  = (orig_rank_R.float() - pert_rank_of.float())                     # signed
+                    aarv = arv.abs()
+                    in_topk_orig = (orig_rank_R <= TOP_K - 1)
+                    in_topk_pert = (pert_rank_of <= TOP_K - 1)
+                    padd = (~in_topk_orig &  in_topk_pert).float()
+                    prem = ( in_topk_orig & ~in_topk_pert).float()
+
+                    aarv_accum[S, :, R, :].index_add_(0, sel_flat, aarv.flatten(0, 1))
+                    arv_accum [S, :, R, :].index_add_(0, sel_flat, arv .flatten(0, 1))
+                    padd_accum[S, :, R, :].index_add_(0, sel_flat, padd.flatten(0, 1))
+                    prem_accum[S, :, R, :].index_add_(0, sel_flat, prem.flatten(0, 1))
 
                     del ln_bar, scores, scores_pos, scores_neg, scores_sq
-                    del pert_score, pert_sorted, pert_rank_of, orig_rank_R, rank_shift
+                    del pert_score, pert_sorted, pert_rank_of, orig_rank_R
+                    del arv, aarv, in_topk_orig, in_topk_pert, padd, prem
 
             del full_hooks, after_res1, after_norm2, selected, weighted_out
             del omega, sel, rms_sq, rms_inv, after_norm2_r
@@ -663,9 +710,9 @@ def main():
 
     # ---- Normalize + save (rank 0 only) ----
     if rank == 0:
-        count_safe = count.clamp(min=1).to(torch.float32)
+        count_safe = n_tokens_selected.clamp(min=1).to(torch.float32)
         denom = count_safe.view(N_LAYERS, N_EXPERTS, 1, 1)
-        zero_mask = (count == 0).view(N_LAYERS, N_EXPERTS, 1, 1)
+        zero_mask = (n_tokens_selected == 0).view(N_LAYERS, N_EXPERTS, 1, 1)
 
         APS = (APS_accum / denom).masked_fill(zero_mask, 0.0)
         ANS = (ANS_accum / denom).masked_fill(zero_mask, 0.0)
@@ -673,7 +720,10 @@ def main():
         AVG_sq = (sq_accum / denom).masked_fill(zero_mask, 0.0)
         VAR = (AVG_sq - AVG * AVG).clamp(min=0.0)
         del AVG_sq
-        AARV = (aarv_accum / denom).masked_fill(zero_mask, 0.0)
+        AARV  = (aarv_accum / denom).masked_fill(zero_mask, 0.0)
+        ARV   = (arv_accum  / denom).masked_fill(zero_mask, 0.0)
+        P_add = (padd_accum / denom).masked_fill(zero_mask, 0.0)
+        P_rem = (prem_accum / denom).masked_fill(zero_mask, 0.0)
 
         out_path = os.path.join(output_dir, f"dag_{args.model}_{args.dataset}.pt")
         torch.save({
@@ -682,7 +732,15 @@ def main():
             "AVG":   AVG.cpu(),
             "VAR":   VAR.cpu(),
             "AARV":  AARV.cpu(),
-            "count": count.cpu(),
+            "ARV":   ARV.cpu(),
+            "P_add": P_add.cpu(),
+            "P_rem": P_rem.cpu(),
+            "n_tokens_selected": n_tokens_selected.cpu(),
+            "top_weight": top_weight.cpu(),
+            "top_prompt": top_prompt.cpu(),
+            "top_pos":    top_pos.cpu(),
+            "top_token":  top_token.cpu(),
+            "k_top_tokens": K_TOP_TOKENS,
             "n_prompts": N_PROMPTS,
             "max_tokens": MAX_TOKENS,
             "model": MODEL_ID,

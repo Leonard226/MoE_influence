@@ -1,18 +1,26 @@
 """DAG builder for a chosen MoE model + dataset, with multiple edge weights.
 
-Computes five edge weights conditioned on sender selection:
+Computes eight edge weights conditioned on sender selection:
 
-    APS(c, j → l, n)   = E_i [ max(S(g^{l,n}, e^{c,j}_{out,i}), 0) | (c,j) selected ]
-    ANS(c, j → l, n)   = E_i [ min(S(g^{l,n}, e^{c,j}_{out,i}), 0) | (c,j) selected ]
-    AVG(c, j → l, n)  = E_i [     S(g^{l,n}, e^{c,j}_{out,i})     | (c,j) selected ]
-    VAR(c, j → l, n) = Var_i [   S(g^{l,n}, e^{c,j}_{out,i})     | (c,j) selected ]
-    AARV(c, j → l, n)  = E_i [ |rank_l^orig(n) − rank_l^pert(n)|   | (c,j) selected ]
+    APS(c, j → l, n)    = E_i  [ max(S(g^{l,n}, e^{c,j}_{out,i}), 0)            | (c,j) selected ]
+    ANS(c, j → l, n)    = E_i  [ min(S(g^{l,n}, e^{c,j}_{out,i}), 0)            | (c,j) selected ]
+    AVG(c, j → l, n)    = E_i  [     S(g^{l,n}, e^{c,j}_{out,i})                | (c,j) selected ]
+    VAR(c, j → l, n)    = Var_i[     S(g^{l,n}, e^{c,j}_{out,i})                | (c,j) selected ]
+    AARV(c, j → l, n)   = E_i  [ | rank_l^orig(n) − rank_l^pert(n) |            | (c,j) selected ]
+    ARV(c, j → l, n)    = E_i  [   rank_l^orig(n) − rank_l^pert(n)              | (c,j) selected ]
+    P_add(c, j → l, n)  = P_i  [ rank_l^orig(n) > K-1  ∧  rank_l^pert(n) ≤ K-1  | (c,j) selected ]
+    P_rem(c, j → l, n)  = P_i  [ rank_l^orig(n) ≤ K-1  ∧  rank_l^pert(n) > K-1  | (c,j) selected ]
 
 where S(g^{l,n}, e^{c,j}_{out,i}) = g^{l,n} · LN_bar^l_i(r^{c,j}(i) · e^{c,j}_{out,i})
-is the per-edge sub-score from the score decomposition (cf. MoEs/main.tex §2).
-The first four are score-based; AARV is causal (the rank shift of receiver n
-at layer l when (c,j)'s sub-score is removed via score subtraction, conditional
-on sender (c,j) being selected at i).
+is the per-edge sub-score from the score decomposition (cf. circuits/main.tex §2),
+rank_l^pert is the receiver-rank after ablating the sender's score contribution,
+and K is the model's top_k.
+
+Also computed per sender expert:
+    n_tokens_selected[c, j]                = #tokens where (c,j) ∈ top-K at layer c
+    top_weight/top_prompt/top_pos/top_token = K_TOP_TOKENS (=100) highest-routing-weight
+        token events per sender (c, j); used downstream to inspect what kind of
+        tokens "super experts" specialize in.
 
 Usage:
     python experiments/circuits/build_dag.py --model {olmoe,deepseek-v2-lite} --dataset {c4,math,code} --n-prompts 5000
@@ -185,6 +193,7 @@ EPS = 1e-5
 N_PROMPTS = args.n_prompts
 BSZ = args.B
 MAX_TOKENS = 32
+K_TOP_TOKENS = 100  # per-sender buffer: keep top-100 routing-weight events per (c, j)
 
 print(f"Building DAG for model={args.model!r}, dataset={args.dataset!r}, {N_PROMPTS} prompts.", flush=True)
 
@@ -301,20 +310,30 @@ prompts = loader(dataset_len=N_PROMPTS, min_words=MAX_TOKENS)
 print(f"  loaded in {time.time() - t0:.1f}s", flush=True)
 
 # ---- Accumulators ----
-# APS_accum[S, j, R, n]   = Σ_{i : j ∈ top-K at S} max(S(g^{R,n}, e^{S,j}_{out,i}), 0)
-# ANS_accum[S, j, R, n]   = Σ_{i : j ∈ top-K at S} min(S(g^{R,n}, e^{S,j}_{out,i}), 0)
-# AVG_accum[S, j, R, n]  = Σ_{i : j ∈ top-K at S}     S(g^{R,n}, e^{S,j}_{out,i})
-# sq_accum[S, j, R, n]    = Σ_{i : j ∈ top-K at S}     S(g^{R,n}, e^{S,j}_{out,i})^2
-# (Var_i is computed at the end as E[S^2] - E[S]^2.)
+# APS/ANS/AVG/sq_accum  : score-based statistics (Var_i = E[S^2] - E[S]^2 at end).
+# aarv/arv_accum        : |rank shift| and signed rank shift after sender-score ablation.
+# padd/prem_accum       : indicator counts for the receiver crossing the top-K boundary.
 SHAPE = (N_LAYERS, N_EXPERTS, N_LAYERS, N_EXPERTS)
 APS_accum  = torch.zeros(SHAPE, dtype=torch.float32, device=device)
 ANS_accum  = torch.zeros(SHAPE, dtype=torch.float32, device=device)
-AVG_accum = torch.zeros(SHAPE, dtype=torch.float32, device=device)
+AVG_accum  = torch.zeros(SHAPE, dtype=torch.float32, device=device)
 sq_accum   = torch.zeros(SHAPE, dtype=torch.float32, device=device)
-# aarv_accum[S, j, R, n] = Σ_{i : j ∈ top-K at S} | rank_R^orig(n) - rank_R^pert(n) | where pert_score = orig_score - S(g^{R,n}, e^{S,j}_{out,i}).
 aarv_accum = torch.zeros(SHAPE, dtype=torch.float32, device=device)
-# count[S, j] = number of (token, top-k slot) events where expert j was selected at layer S.
-count = torch.zeros((N_LAYERS, N_EXPERTS), dtype=torch.long, device=device)
+arv_accum  = torch.zeros(SHAPE, dtype=torch.float32, device=device)
+padd_accum = torch.zeros(SHAPE, dtype=torch.float32, device=device)
+prem_accum = torch.zeros(SHAPE, dtype=torch.float32, device=device)
+# n_tokens_selected[S, j] = #tokens where expert j was in top-K at layer S.
+n_tokens_selected = torch.zeros((N_LAYERS, N_EXPERTS), dtype=torch.long, device=device)
+
+# Per-sender top-K-by-routing-weight token buffer. Empty slots have weight = -1
+# (real routing weights live in [0, 1]). Layout: [S, j, slot].
+TOPK_SHAPE = (N_LAYERS, N_EXPERTS, K_TOP_TOKENS)
+top_weight = torch.full(TOPK_SHAPE, -1.0, dtype=torch.float32, device=device)
+top_prompt = torch.zeros(TOPK_SHAPE, dtype=torch.int32, device=device)
+top_pos    = torch.zeros(TOPK_SHAPE, dtype=torch.int16, device=device)
+top_token  = torch.zeros(TOPK_SHAPE, dtype=torch.int32, device=device)
+
+from experiments.circuits.helper import update_topk_per_sender
 
 n_batches = (N_PROMPTS + BSZ - 1) // BSZ
 print(f"Running {n_batches} batches (batch_size={BSZ}, max_tokens={MAX_TOKENS}) ...", flush=True)
@@ -355,9 +374,33 @@ for B in range(0, N_PROMPTS, BSZ):
     omega = (weighted_out.float().permute(0, 2, 1, 3, 4).reshape(bt, N_LAYERS, TOP_K, D_E))   # [bt, S, k, d_e]
     sel = (selected.long().permute(0, 2, 1, 3).reshape(bt, N_LAYERS, TOP_K))                  # [bt, S, k]
 
+    # Routing weights actually applied in the forward pass: softmax over all
+    # experts, gather the top-K, then L1-renormalize (norm_topk_prob = true on
+    # all seven models we analyze).
+    all_softmax       = torch.softmax(orig_score, dim=-1)                                     # [bt, L, n_experts]
+    selected_softmax  = torch.gather(all_softmax, dim=-1, index=sel)                          # [bt, L, top_k]
+    routing_weight    = selected_softmax / selected_softmax.sum(dim=-1, keepdim=True)         # [bt, L, top_k]
+    del all_softmax, selected_softmax
+
+    # Per-event auxiliary indices (layer-independent), used by the top-K buffer update.
+    event_bt   = torch.arange(bt, device=device).repeat_interleave(TOP_K)                     # [bt*top_k]
+    event_bsz  = event_bt // n_tok
+    event_pos  = (event_bt % n_tok).to(torch.int16)                                           # [bt*top_k]
+    prompt_indices = torch.arange(B, B + bsz, dtype=torch.int32, device=device)               # [bsz]
+    event_prompt   = prompt_indices[event_bsz]                                                # [bt*top_k] int32
+    event_token    = input_ids.flatten()[event_bt].to(torch.int32)                            # [bt*top_k] int32
+
     for S in range(N_LAYERS):
         sel_S = sel[:, S, :]                                    # [bt, top_k]
-        count[S] += torch.bincount(sel_S.flatten(), minlength=N_EXPERTS)
+        n_tokens_selected[S] += torch.bincount(sel_S.flatten(), minlength=N_EXPERTS)
+
+        # Update top-K-by-routing-weight token buffer for sender (S, j).
+        update_topk_per_sender(
+            top_weight[S], top_prompt[S], top_pos[S], top_token[S],
+            sel_S.flatten(), routing_weight[:, S, :].flatten(),
+            event_prompt, event_pos, event_token,
+            N_EXPERTS, K_TOP_TOKENS, max_per_j=bt,
+        )
 
         if S == N_LAYERS - 1:
             continue
@@ -381,20 +424,29 @@ for B in range(0, N_PROMPTS, BSZ):
             AVG_accum[S, :, R, :].index_add_(0, sel_flat, scores.flatten(0, 1))
             sq_accum[S, :, R, :].index_add_(0, sel_flat, scores_sq.flatten(0, 1))
 
-            # Per-edge AARV: for each slot k, ablate the sender's contribution
-            # by subtracting `scores` from orig_score at layer R, re-rank, and
-            # measure the per-receiver rank shift |orig_rank − pert_rank|.
+            # Causal-routing features: ablate sender's contribution at layer R,
+            # re-rank receivers, derive AARV / ARV / P_add / P_rem from the shift.
             pert_score = orig_score[:, R, :].unsqueeze(1) - scores               # [bt, k, N_EXPERTS]
             pert_sorted = torch.argsort(pert_score, dim=-1, descending=True)     # [bt, k, N_EXPERTS]
             pert_rank_of = torch.empty_like(pert_sorted)
             pert_rank_of.scatter_(-1, pert_sorted,
                                   torch.arange(N_EXPERTS, device=device).expand_as(pert_sorted))
-            orig_rank_R = orig_rank_of[:, R, :].unsqueeze(1).expand_as(pert_rank_of)  # [bt, k, N_EXPERTS]
-            rank_shift = (pert_rank_of.float() - orig_rank_R.float()).abs()             # [bt, k, N_EXPERTS]
-            aarv_accum[S, :, R, :].index_add_(0, sel_flat, rank_shift.flatten(0, 1))
+            orig_rank_R = orig_rank_of[:, R, :].unsqueeze(1).expand_as(pert_rank_of)   # [bt, k, N_EXPERTS]
+            arv  = (orig_rank_R.float() - pert_rank_of.float())                        # signed (main.tex convention)
+            aarv = arv.abs()
+            in_topk_orig = (orig_rank_R <= TOP_K - 1)
+            in_topk_pert = (pert_rank_of <= TOP_K - 1)
+            padd = (~in_topk_orig &  in_topk_pert).float()
+            prem = ( in_topk_orig & ~in_topk_pert).float()
+
+            aarv_accum[S, :, R, :].index_add_(0, sel_flat, aarv.flatten(0, 1))
+            arv_accum [S, :, R, :].index_add_(0, sel_flat, arv .flatten(0, 1))
+            padd_accum[S, :, R, :].index_add_(0, sel_flat, padd.flatten(0, 1))
+            prem_accum[S, :, R, :].index_add_(0, sel_flat, prem.flatten(0, 1))
 
             del ln_bar, scores, scores_pos, scores_neg, scores_sq
-            del pert_score, pert_sorted, pert_rank_of, orig_rank_R, rank_shift
+            del pert_score, pert_sorted, pert_rank_of, orig_rank_R
+            del arv, aarv, in_topk_orig, in_topk_pert, padd, prem
 
     del hook_dict, after_res1, after_norm2, selected, weighted_out
     del omega, sel, rms_sq, rms_inv, after_norm2_r
@@ -411,29 +463,38 @@ for B in range(0, N_PROMPTS, BSZ):
 
 print(f"\nDone in {time.time() - t_start:.1f}s.\n", flush=True)
 
-# ---- Normalize: weight[S, j, R, n] = accum / count[S, j] ----
-count_safe = count.clamp(min=1).to(torch.float32)                      # [L, n_experts]
+# ---- Normalize: weight[S, j, R, n] = accum / n_tokens_selected[S, j] ----
+count_safe = n_tokens_selected.clamp(min=1).to(torch.float32)          # [L, n_experts]
 denom      = count_safe.view(N_LAYERS, N_EXPERTS, 1, 1)
-zero_mask  = (count == 0).view(N_LAYERS, N_EXPERTS, 1, 1)
+zero_mask  = (n_tokens_selected == 0).view(N_LAYERS, N_EXPERTS, 1, 1)
 
 APS   = (APS_accum  / denom).masked_fill(zero_mask, 0.0)
 ANS   = (ANS_accum  / denom).masked_fill(zero_mask, 0.0)
-AVG  = (AVG_accum / denom).masked_fill(zero_mask, 0.0)
-# Var_i[S | sender selected] = E[S^2] - (E[S])^2, computed pointwise per edge.
-AVG_sq = (sq_accum / denom).masked_fill(zero_mask, 0.0)
-VAR   = (AVG_sq - AVG * AVG).clamp(min=0.0)  # numerical safety
+AVG   = (AVG_accum  / denom).masked_fill(zero_mask, 0.0)
+AVG_sq = (sq_accum  / denom).masked_fill(zero_mask, 0.0)
+VAR   = (AVG_sq - AVG * AVG).clamp(min=0.0)
 del AVG_sq
-# Per-edge AARV: average rank shift over tokens where sender fired.
 AARV  = (aarv_accum / denom).masked_fill(zero_mask, 0.0)
+ARV   = (arv_accum  / denom).masked_fill(zero_mask, 0.0)
+P_add = (padd_accum / denom).masked_fill(zero_mask, 0.0)
+P_rem = (prem_accum / denom).masked_fill(zero_mask, 0.0)
 
 out_path = os.path.join(output_dir, f"dag_{args.model}_{args.dataset}.pt")
 torch.save({
     "APS":   APS.cpu(),                         # [c, j, l, n]
     "ANS":   ANS.cpu(),                         # [c, j, l, n]
-    "AVG":  AVG.cpu(),                          # [c, j, l, n]
-    "VAR": VAR.cpu(),                           # [c, j, l, n] — Var_i[S | sender selected]
-    "AARV":  AARV.cpu(),                        # [c, j, l, n] — AVG rank shift of receiver n
-    "count": count.cpu(),                       # [c, j]
+    "AVG":   AVG.cpu(),                         # [c, j, l, n]
+    "VAR":   VAR.cpu(),                         # [c, j, l, n]
+    "AARV":  AARV.cpu(),                        # [c, j, l, n]
+    "ARV":   ARV.cpu(),                         # [c, j, l, n] — signed rank shift
+    "P_add": P_add.cpu(),                       # [c, j, l, n] — receiver crosses INTO top-K
+    "P_rem": P_rem.cpu(),                       # [c, j, l, n] — receiver crosses OUT OF top-K
+    "n_tokens_selected": n_tokens_selected.cpu(),  # [c, j] — #tokens routed to expert (c, j)
+    "top_weight": top_weight.cpu(),             # [c, j, K_TOP_TOKENS] — empty slot = -1
+    "top_prompt": top_prompt.cpu(),             # [c, j, K_TOP_TOKENS] — global prompt idx
+    "top_pos":    top_pos.cpu(),                # [c, j, K_TOP_TOKENS] — position in prompt
+    "top_token":  top_token.cpu(),              # [c, j, K_TOP_TOKENS] — token id
+    "k_top_tokens": K_TOP_TOKENS,
     "n_prompts": N_PROMPTS,
     "max_tokens": MAX_TOKENS,
     "model": MODEL_ID,
