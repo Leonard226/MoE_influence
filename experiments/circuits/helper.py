@@ -169,8 +169,8 @@ def show_enhanced_layered_graph(g, quantile: float, target: str, model: str, dat
         plt.xlim(min(all_x) - (X_SPACING * 1.5), max(all_x) + (X_SPACING * 1.5))
         plt.ylim(min(all_y) - Y_SPACING, max(all_y) + Y_SPACING)
 
-    plt.xlabel("Layers")
-    plt.ylabel("Experts")
+    plt.xlabel("Experts e")
+    plt.ylabel("Layers l")
     plt.tight_layout()
     plt.show()
 
