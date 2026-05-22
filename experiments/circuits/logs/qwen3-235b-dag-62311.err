@@ -1,0 +1,426 @@
+/scratch/sleonard/miniconda3/envs/megatron/lib/python3.11/site-packages/torch/cuda/__init__.py:61: FutureWarning: The pynvml package is deprecated. Please install nvidia-ml-py instead. If you did not install pynvml directly, please report this to the maintainers of the package that installed pynvml for you.
+  import pynvml  # type: ignore[import]
+/scratch/sleonard/miniconda3/envs/megatron/lib/python3.11/site-packages/torch/cuda/__init__.py:61: FutureWarning: The pynvml package is deprecated. Please install nvidia-ml-py instead. If you did not install pynvml directly, please report this to the maintainers of the package that installed pynvml for you.
+  import pynvml  # type: ignore[import]
+/scratch/sleonard/miniconda3/envs/megatron/lib/python3.11/site-packages/torch/cuda/__init__.py:61: FutureWarning: The pynvml package is deprecated. Please install nvidia-ml-py instead. If you did not install pynvml directly, please report this to the maintainers of the package that installed pynvml for you.
+  import pynvml  # type: ignore[import]
+/scratch/sleonard/miniconda3/envs/megatron/lib/python3.11/site-packages/torch/cuda/__init__.py:61: FutureWarning: The pynvml package is deprecated. Please install nvidia-ml-py instead. If you did not install pynvml directly, please report this to the maintainers of the package that installed pynvml for you.
+  import pynvml  # type: ignore[import]
+/scratch/sleonard/miniconda3/envs/megatron/lib/python3.11/site-packages/torch/cuda/__init__.py:61: FutureWarning: The pynvml package is deprecated. Please install nvidia-ml-py instead. If you did not install pynvml directly, please report this to the maintainers of the package that installed pynvml for you.
+  import pynvml  # type: ignore[import]
+/scratch/sleonard/miniconda3/envs/megatron/lib/python3.11/site-packages/torch/cuda/__init__.py:61: FutureWarning: The pynvml package is deprecated. Please install nvidia-ml-py instead. If you did not install pynvml directly, please report this to the maintainers of the package that installed pynvml for you.
+  import pynvml  # type: ignore[import]
+/scratch/sleonard/miniconda3/envs/megatron/lib/python3.11/site-packages/torch/cuda/__init__.py:61: FutureWarning: The pynvml package is deprecated. Please install nvidia-ml-py instead. If you did not install pynvml directly, please report this to the maintainers of the package that installed pynvml for you.
+  import pynvml  # type: ignore[import]
+/scratch/sleonard/miniconda3/envs/megatron/lib/python3.11/site-packages/torch/cuda/__init__.py:61: FutureWarning: The pynvml package is deprecated. Please install nvidia-ml-py instead. If you did not install pynvml directly, please report this to the maintainers of the package that installed pynvml for you.
+  import pynvml  # type: ignore[import]
+W0520 08:08:16.876000 2773678 site-packages/torch/distributed/run.py:792] 
+W0520 08:08:16.876000 2773678 site-packages/torch/distributed/run.py:792] *****************************************
+W0520 08:08:16.876000 2773678 site-packages/torch/distributed/run.py:792] Setting OMP_NUM_THREADS environment variable for each process to be 1 in default, to avoid your system being overloaded, please further tune the variable for optimal performance in your application as needed. 
+W0520 08:08:16.876000 2773678 site-packages/torch/distributed/run.py:792] *****************************************
+W0520 08:08:16.876000 2773679 site-packages/torch/distributed/run.py:792] 
+W0520 08:08:16.876000 2773679 site-packages/torch/distributed/run.py:792] *****************************************
+W0520 08:08:16.876000 2773679 site-packages/torch/distributed/run.py:792] Setting OMP_NUM_THREADS environment variable for each process to be 1 in default, to avoid your system being overloaded, please further tune the variable for optimal performance in your application as needed. 
+W0520 08:08:16.876000 2773679 site-packages/torch/distributed/run.py:792] *****************************************
+W0520 08:08:16.876000 2773680 site-packages/torch/distributed/run.py:792] 
+W0520 08:08:16.876000 2773680 site-packages/torch/distributed/run.py:792] *****************************************
+W0520 08:08:16.876000 2773680 site-packages/torch/distributed/run.py:792] Setting OMP_NUM_THREADS environment variable for each process to be 1 in default, to avoid your system being overloaded, please further tune the variable for optimal performance in your application as needed. 
+W0520 08:08:16.876000 2773680 site-packages/torch/distributed/run.py:792] *****************************************
+W0520 08:08:16.876000 2773681 site-packages/torch/distributed/run.py:792] 
+W0520 08:08:16.876000 2773681 site-packages/torch/distributed/run.py:792] *****************************************
+W0520 08:08:16.876000 2773681 site-packages/torch/distributed/run.py:792] Setting OMP_NUM_THREADS environment variable for each process to be 1 in default, to avoid your system being overloaded, please further tune the variable for optimal performance in your application as needed. 
+W0520 08:08:16.876000 2773681 site-packages/torch/distributed/run.py:792] *****************************************
+W0520 08:08:17.527000 926683 site-packages/torch/distributed/run.py:792] 
+W0520 08:08:17.527000 926683 site-packages/torch/distributed/run.py:792] *****************************************
+W0520 08:08:17.527000 926683 site-packages/torch/distributed/run.py:792] Setting OMP_NUM_THREADS environment variable for each process to be 1 in default, to avoid your system being overloaded, please further tune the variable for optimal performance in your application as needed. 
+W0520 08:08:17.527000 926683 site-packages/torch/distributed/run.py:792] *****************************************
+W0520 08:08:17.527000 926685 site-packages/torch/distributed/run.py:792] 
+W0520 08:08:17.527000 926685 site-packages/torch/distributed/run.py:792] *****************************************
+W0520 08:08:17.527000 926685 site-packages/torch/distributed/run.py:792] Setting OMP_NUM_THREADS environment variable for each process to be 1 in default, to avoid your system being overloaded, please further tune the variable for optimal performance in your application as needed. 
+W0520 08:08:17.527000 926685 site-packages/torch/distributed/run.py:792] *****************************************
+W0520 08:08:17.527000 926682 site-packages/torch/distributed/run.py:792] 
+W0520 08:08:17.527000 926682 site-packages/torch/distributed/run.py:792] *****************************************
+W0520 08:08:17.527000 926682 site-packages/torch/distributed/run.py:792] Setting OMP_NUM_THREADS environment variable for each process to be 1 in default, to avoid your system being overloaded, please further tune the variable for optimal performance in your application as needed. 
+W0520 08:08:17.527000 926682 site-packages/torch/distributed/run.py:792] *****************************************
+W0520 08:08:17.527000 926684 site-packages/torch/distributed/run.py:792] 
+W0520 08:08:17.527000 926684 site-packages/torch/distributed/run.py:792] *****************************************
+W0520 08:08:17.527000 926684 site-packages/torch/distributed/run.py:792] Setting OMP_NUM_THREADS environment variable for each process to be 1 in default, to avoid your system being overloaded, please further tune the variable for optimal performance in your application as needed. 
+W0520 08:08:17.527000 926684 site-packages/torch/distributed/run.py:792] *****************************************
+/scratch/sleonard/miniconda3/envs/megatron/bin/python3.11: can't open file '/cm/local/apps/slurm/var/spool/job62311/build_dag_multinode.py': [Errno 2] No such file or directory
+/scratch/sleonard/miniconda3/envs/megatron/bin/python3.11: can't open file '/cm/local/apps/slurm/var/spool/job62311/build_dag_multinode.py': [Errno 2] No such file or directory
+/scratch/sleonard/miniconda3/envs/megatron/bin/python3.11: can't open file '/cm/local/apps/slurm/var/spool/job62311/build_dag_multinode.py': [Errno 2] No such file or directory
+/scratch/sleonard/miniconda3/envs/megatron/bin/python3.11: can't open file '/cm/local/apps/slurm/var/spool/job62311/build_dag_multinode.py': [Errno 2] No such file or directory
+/scratch/sleonard/miniconda3/envs/megatron/bin/python3.11: can't open file '/cm/local/apps/slurm/var/spool/job62311/build_dag_multinode.py': [Errno 2] No such file or directory
+/scratch/sleonard/miniconda3/envs/megatron/bin/python3.11: can't open file '/cm/local/apps/slurm/var/spool/job62311/build_dag_multinode.py': [Errno 2] No such file or directory
+/scratch/sleonard/miniconda3/envs/megatron/bin/python3.11: can't open file '/cm/local/apps/slurm/var/spool/job62311/build_dag_multinode.py': [Errno 2] No such file or directory
+/scratch/sleonard/miniconda3/envs/megatron/bin/python3.11: can't open file '/cm/local/apps/slurm/var/spool/job62311/build_dag_multinode.py': [Errno 2] No such file or directory
+E0520 08:08:18.127000 2773678 site-packages/torch/distributed/elastic/multiprocessing/api.py:869] failed (exitcode: 2) local_rank: 0 (pid: 2773689) of binary: /scratch/sleonard/miniconda3/envs/megatron/bin/python3.11
+E0520 08:08:18.128000 2773679 site-packages/torch/distributed/elastic/multiprocessing/api.py:869] failed (exitcode: 2) local_rank: 0 (pid: 2773688) of binary: /scratch/sleonard/miniconda3/envs/megatron/bin/python3.11
+Traceback (most recent call last):
+  File "/scratch/sleonard/miniconda3/envs/megatron/bin/torchrun", line 6, in <module>
+    sys.exit(main())
+             ^^^^^^
+  File "/scratch/sleonard/miniconda3/envs/megatron/lib/python3.11/site-packages/torch/distributed/elastic/multiprocessing/errors/__init__.py", line 355, in wrapper
+    return f(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^
+  File "/scratch/sleonard/miniconda3/envs/megatron/lib/python3.11/site-packages/torch/distributed/run.py", line 918, in main
+    run(args)
+  File "/scratch/sleonard/miniconda3/envs/megatron/lib/python3.11/site-packages/torch/distributed/run.py", line 909, in run
+    elastic_launch(
+  File "/scratch/sleonard/miniconda3/envs/megatron/lib/python3.11/site-packages/torch/distributed/launcher/api.py", line 138, in __call__
+    return launch_agent(self._config, self._entrypoint, list(args))
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/scratch/sleonard/miniconda3/envs/megatron/lib/python3.11/site-packages/torch/distributed/launcher/api.py", line 269, in launch_agent
+    raise ChildFailedError(
+torch.distributed.elastic.multiprocessing.errors.ChildFailedError: 
+============================================================
+/cm/local/apps/slurm/var/spool/job62311/build_dag_multinode.py FAILED
+------------------------------------------------------------
+Failures:
+[1]:
+  time      : 2026-05-20_08:08:18
+  host      : piora1.cm.cluster
+  rank      : 1 (local_rank: 1)
+  exitcode  : 2 (pid: 2773691)
+  error_file: <N/A>
+  traceback : To enable traceback see: https://pytorch.org/docs/stable/elastic/errors.html
+[2]:
+  time      : 2026-05-20_08:08:18
+  host      : piora1.cm.cluster
+  rank      : 2 (local_rank: 2)
+  exitcode  : 2 (pid: 2773693)
+  error_file: <N/A>
+  traceback : To enable traceback see: https://pytorch.org/docs/stable/elastic/errors.html
+[3]:
+  time      : 2026-05-20_08:08:18
+  host      : piora1.cm.cluster
+  rank      : 3 (local_rank: 3)
+  exitcode  : 2 (pid: 2773694)
+  error_file: <N/A>
+  traceback : To enable traceback see: https://pytorch.org/docs/stable/elastic/errors.html
+------------------------------------------------------------
+Root Cause (first observed failure):
+[0]:
+  time      : 2026-05-20_08:08:18
+  host      : piora1.cm.cluster
+  rank      : 0 (local_rank: 0)
+  exitcode  : 2 (pid: 2773689)
+  error_file: <N/A>
+  traceback : To enable traceback see: https://pytorch.org/docs/stable/elastic/errors.html
+============================================================
+Traceback (most recent call last):
+  File "/scratch/sleonard/miniconda3/envs/megatron/bin/torchrun", line 6, in <module>
+    sys.exit(main())
+             ^^^^^^
+  File "/scratch/sleonard/miniconda3/envs/megatron/lib/python3.11/site-packages/torch/distributed/elastic/multiprocessing/errors/__init__.py", line 355, in wrapper
+    return f(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^
+  File "/scratch/sleonard/miniconda3/envs/megatron/lib/python3.11/site-packages/torch/distributed/run.py", line 918, in main
+    run(args)
+  File "/scratch/sleonard/miniconda3/envs/megatron/lib/python3.11/site-packages/torch/distributed/run.py", line 909, in run
+    elastic_launch(
+  File "/scratch/sleonard/miniconda3/envs/megatron/lib/python3.11/site-packages/torch/distributed/launcher/api.py", line 138, in __call__
+    return launch_agent(self._config, self._entrypoint, list(args))
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/scratch/sleonard/miniconda3/envs/megatron/lib/python3.11/site-packages/torch/distributed/launcher/api.py", line 269, in launch_agent
+    raise ChildFailedError(
+torch.distributed.elastic.multiprocessing.errors.ChildFailedError: 
+============================================================
+/cm/local/apps/slurm/var/spool/job62311/build_dag_multinode.py FAILED
+------------------------------------------------------------
+Failures:
+[1]:
+  time      : 2026-05-20_08:08:18
+  host      : piora1.cm.cluster
+  rank      : 5 (local_rank: 1)
+  exitcode  : 2 (pid: 2773690)
+  error_file: <N/A>
+  traceback : To enable traceback see: https://pytorch.org/docs/stable/elastic/errors.html
+[2]:
+  time      : 2026-05-20_08:08:18
+  host      : piora1.cm.cluster
+  rank      : 6 (local_rank: 2)
+  exitcode  : 2 (pid: 2773692)
+  error_file: <N/A>
+  traceback : To enable traceback see: https://pytorch.org/docs/stable/elastic/errors.html
+[3]:
+  time      : 2026-05-20_08:08:18
+  host      : piora1.cm.cluster
+  rank      : 7 (local_rank: 3)
+  exitcode  : 2 (pid: 2773695)
+  error_file: <N/A>
+  traceback : To enable traceback see: https://pytorch.org/docs/stable/elastic/errors.html
+------------------------------------------------------------
+Root Cause (first observed failure):
+[0]:
+  time      : 2026-05-20_08:08:18
+  host      : piora1.cm.cluster
+  rank      : 4 (local_rank: 0)
+  exitcode  : 2 (pid: 2773688)
+  error_file: <N/A>
+  traceback : To enable traceback see: https://pytorch.org/docs/stable/elastic/errors.html
+============================================================
+[W520 08:08:18.057138101 TCPStore.cpp:106] [c10d] sendBytes failed on SocketImpl(fd=3, addr=[piora1.cm.cluster]:53066, remote=[piora1.cm.cluster]:29500): Broken pipe
+Exception raised from sendBytes at /pytorch/torch/csrc/distributed/c10d/Utils.hpp:646 (most recent call first):
+frame #0: c10::Error::Error(c10::SourceLocation, std::string) + 0x96 (0x15555436c1b6 in /scratch/sleonard/miniconda3/envs/megatron/lib/python3.11/site-packages/torch/lib/libc10.so)
+frame #1: <unknown function> + 0x6311c1d (0x15553c711c1d in /scratch/sleonard/miniconda3/envs/megatron/lib/python3.11/site-packages/torch/lib/libtorch_cpu.so)
+frame #2: c10d::TCPStore::doWait(c10::ArrayRef<std::string>, std::chrono::duration<long, std::ratio<1l, 1000l> >) + 0x27e (0x15553c70f72e in /scratch/sleonard/miniconda3/envs/megatron/lib/python3.11/site-packages/torch/lib/libtorch_cpu.so)
+frame #3: c10d::TCPStore::doGet(std::string const&) + 0x2a (0x15553c70fb9a in /scratch/sleonard/miniconda3/envs/megatron/lib/python3.11/site-packages/torch/lib/libtorch_cpu.so)
+frame #4: c10d::TCPStore::get(std::string const&) + 0x7a (0x15553c71093a in /scratch/sleonard/miniconda3/envs/megatron/lib/python3.11/site-packages/torch/lib/libtorch_cpu.so)
+frame #5: <unknown function> + 0xe1ce74 (0x15554c41ce74 in /scratch/sleonard/miniconda3/envs/megatron/lib/python3.11/site-packages/torch/lib/libtorch_python.so)
+frame #6: <unknown function> + 0x51a017 (0x15554bb1a017 in /scratch/sleonard/miniconda3/envs/megatron/lib/python3.11/site-packages/torch/lib/libtorch_python.so)
+frame #7: <unknown function> + 0x1fd066 (0x555555751066 in /scratch/sleonard/miniconda3/envs/megatron/bin/python3.11)
+frame #8: _PyObject_MakeTpCall + 0x24b (0x55555572d22b in /scratch/sleonard/miniconda3/envs/megatron/bin/python3.11)
+frame #9: <unknown function> + 0x22cff6 (0x555555780ff6 in /scratch/sleonard/miniconda3/envs/megatron/bin/python3.11)
+frame #10: _PyEval_EvalFrameDefault + 0x478f (0x55555573f6ef in /scratch/sleonard/miniconda3/envs/megatron/bin/python3.11)
+frame #11: _PyFunction_Vectorcall + 0x165 (0x555555761465 in /scratch/sleonard/miniconda3/envs/megatron/bin/python3.11)
+frame #12: _PyEval_EvalFrameDefault + 0x478f (0x55555573f6ef in /scratch/sleonard/miniconda3/envs/megatron/bin/python3.11)
+frame #13: _PyFunction_Vectorcall + 0x165 (0x555555761465 in /scratch/sleonard/miniconda3/envs/megatron/bin/python3.11)
+frame #14: _PyObject_FastCallDictTstate + 0x65 (0x555555731ff5 in /scratch/sleonard/miniconda3/envs/megatron/bin/python3.11)
+frame #15: _PyObject_Call_Prepend + 0xe7 (0x555555769657 in /scratch/sleonard/miniconda3/envs/megatron/bin/python3.11)
+frame #16: <unknown function> + 0x2e81e7 (0x55555583c1e7 in /scratch/sleonard/miniconda3/envs/megatron/bin/python3.11)
+frame #17: PyObject_Call + 0xbe (0x55555576b82e in /scratch/sleonard/miniconda3/envs/megatron/bin/python3.11)
+frame #18: _PyEval_EvalFrameDefault + 0x478f (0x55555573f6ef in /scratch/sleonard/miniconda3/envs/megatron/bin/python3.11)
+frame #19: _PyFunction_Vectorcall + 0x165 (0x555555761465 in /scratch/sleonard/miniconda3/envs/megatron/bin/python3.11)
+frame #20: _PyEval_EvalFrameDefault + 0x478f (0x55555573f6ef in /scratch/sleonard/miniconda3/envs/megatron/bin/python3.11)
+frame #21: <unknown function> + 0x2a3935 (0x5555557f7935 in /scratch/sleonard/miniconda3/envs/megatron/bin/python3.11)
+frame #22: PyEval_EvalCode + 0x9d (0x5555557f707d in /scratch/sleonard/miniconda3/envs/megatron/bin/python3.11)
+frame #23: <unknown function> + 0x2c098a (0x55555581498a in /scratch/sleonard/miniconda3/envs/megatron/bin/python3.11)
+frame #24: <unknown function> + 0x2bc6a3 (0x5555558106a3 in /scratch/sleonard/miniconda3/envs/megatron/bin/python3.11)
+frame #25: <unknown function> + 0x2d1cd0 (0x555555825cd0 in /scratch/sleonard/miniconda3/envs/megatron/bin/python3.11)
+frame #26: _PyRun_SimpleFileObject + 0x1ba (0x5555558252ba in /scratch/sleonard/miniconda3/envs/megatron/bin/python3.11)
+frame #27: _PyRun_AnyFileObject + 0x44 (0x555555824fb4 in /scratch/sleonard/miniconda3/envs/megatron/bin/python3.11)
+frame #28: Py_RunMain + 0x271 (0x55555581f981 in /scratch/sleonard/miniconda3/envs/megatron/bin/python3.11)
+frame #29: Py_BytesMain + 0x37 (0x5555557e6ea7 in /scratch/sleonard/miniconda3/envs/megatron/bin/python3.11)
+frame #30: <unknown function> + 0x29590 (0x155555229590 in /lib64/libc.so.6)
+frame #31: __libc_start_main + 0x80 (0x155555229640 in /lib64/libc.so.6)
+frame #32: _start + 0x2e (0x5555557e6d2e in /scratch/sleonard/miniconda3/envs/megatron/bin/python3.11)
+
+W0520 08:08:18.181000 2773680 site-packages/torch/distributed/elastic/rendezvous/dynamic_rendezvous.py:1284] The node 'piora1.cm.cluster_2773680_0' has failed to shutdown the rendezvous 'none' due to an error of type RendezvousConnectionError.
+[W520 08:08:18.062141124 TCPStore.cpp:106] [c10d] sendBytes failed on SocketImpl(fd=3, addr=[piora1.cm.cluster]:53066, remote=[piora1.cm.cluster]:29500): Broken pipe
+Exception raised from sendBytes at /pytorch/torch/csrc/distributed/c10d/Utils.hpp:646 (most recent call first):
+frame #0: c10::Error::Error(c10::SourceLocation, std::string) + 0x96 (0x15555436c1b6 in /scratch/sleonard/miniconda3/envs/megatron/lib/python3.11/site-packages/torch/lib/libc10.so)
+frame #1: <unknown function> + 0x6311c1d (0x15553c711c1d in /scratch/sleonard/miniconda3/envs/megatron/lib/python3.11/site-packages/torch/lib/libtorch_cpu.so)
+frame #2: c10d::TCPStore::doWait(c10::ArrayRef<std::string>, std::chrono::duration<long, std::ratio<1l, 1000l> >) + 0x27e (0x15553c70f72e in /scratch/sleonard/miniconda3/envs/megatron/lib/python3.11/site-packages/torch/lib/libtorch_cpu.so)
+frame #3: c10d::TCPStore::doGet(std::string const&) + 0x2a (0x15553c70fb9a in /scratch/sleonard/miniconda3/envs/megatron/lib/python3.11/site-packages/torch/lib/libtorch_cpu.so)
+frame #4: c10d::TCPStore::get(std::string const&) + 0x7a (0x15553c71093a in /scratch/sleonard/miniconda3/envs/megatron/lib/python3.11/site-packages/torch/lib/libtorch_cpu.so)
+frame #5: <unknown function> + 0xe1ce74 (0x15554c41ce74 in /scratch/sleonard/miniconda3/envs/megatron/lib/python3.11/site-packages/torch/lib/libtorch_python.so)
+frame #6: <unknown function> + 0x51a017 (0x15554bb1a017 in /scratch/sleonard/miniconda3/envs/megatron/lib/python3.11/site-packages/torch/lib/libtorch_python.so)
+frame #7: <unknown function> + 0x1fd066 (0x555555751066 in /scratch/sleonard/miniconda3/envs/megatron/bin/python3.11)
+frame #8: _PyObject_MakeTpCall + 0x24b (0x55555572d22b in /scratch/sleonard/miniconda3/envs/megatron/bin/python3.11)
+frame #9: <unknown function> + 0x22cff6 (0x555555780ff6 in /scratch/sleonard/miniconda3/envs/megatron/bin/python3.11)
+frame #10: _PyEval_EvalFrameDefault + 0x478f (0x55555573f6ef in /scratch/sleonard/miniconda3/envs/megatron/bin/python3.11)
+frame #11: _PyFunction_Vectorcall + 0x165 (0x555555761465 in /scratch/sleonard/miniconda3/envs/megatron/bin/python3.11)
+frame #12: _PyObject_FastCallDictTstate + 0x65 (0x555555731ff5 in /scratch/sleonard/miniconda3/envs/megatron/bin/python3.11)
+frame #13: _PyObject_Call_Prepend + 0xe7 (0x555555769657 in /scratch/sleonard/miniconda3/envs/megatron/bin/python3.11)
+frame #14: <unknown function> + 0x2e81e7 (0x55555583c1e7 in /scratch/sleonard/miniconda3/envs/megatron/bin/python3.11)
+frame #15: PyObject_Call + 0xbe (0x55555576b82e in /scratch/sleonard/miniconda3/envs/megatron/bin/python3.11)
+frame #16: _PyEval_EvalFrameDefault + 0x478f (0x55555573f6ef in /scratch/sleonard/miniconda3/envs/megatron/bin/python3.11)
+frame #17: _PyFunction_Vectorcall + 0x165 (0x555555761465 in /scratch/sleonard/miniconda3/envs/megatron/bin/python3.11)
+frame #18: _PyEval_EvalFrameDefault + 0x478f (0x55555573f6ef in /scratch/sleonard/miniconda3/envs/megatron/bin/python3.11)
+frame #19: <unknown function> + 0x2a3935 (0x5555557f7935 in /scratch/sleonard/miniconda3/envs/megatron/bin/python3.11)
+frame #20: PyEval_EvalCode + 0x9d (0x5555557f707d in /scratch/sleonard/miniconda3/envs/megatron/bin/python3.11)
+frame #21: <unknown function> + 0x2c098a (0x55555581498a in /scratch/sleonard/miniconda3/envs/megatron/bin/python3.11)
+frame #22: <unknown function> + 0x2bc6a3 (0x5555558106a3 in /scratch/sleonard/miniconda3/envs/megatron/bin/python3.11)
+frame #23: <unknown function> + 0x2d1cd0 (0x555555825cd0 in /scratch/sleonard/miniconda3/envs/megatron/bin/python3.11)
+frame #24: _PyRun_SimpleFileObject + 0x1ba (0x5555558252ba in /scratch/sleonard/miniconda3/envs/megatron/bin/python3.11)
+frame #25: _PyRun_AnyFileObject + 0x44 (0x555555824fb4 in /scratch/sleonard/miniconda3/envs/megatron/bin/python3.11)
+frame #26: Py_RunMain + 0x271 (0x55555581f981 in /scratch/sleonard/miniconda3/envs/megatron/bin/python3.11)
+frame #27: Py_BytesMain + 0x37 (0x5555557e6ea7 in /scratch/sleonard/miniconda3/envs/megatron/bin/python3.11)
+frame #28: <unknown function> + 0x29590 (0x155555229590 in /lib64/libc.so.6)
+frame #29: __libc_start_main + 0x80 (0x155555229640 in /lib64/libc.so.6)
+frame #30: _start + 0x2e (0x5555557e6d2e in /scratch/sleonard/miniconda3/envs/megatron/bin/python3.11)
+
+W0520 08:08:18.186000 2773680 site-packages/torch/distributed/elastic/rendezvous/dynamic_rendezvous.py:1284] The node 'piora1.cm.cluster_2773680_0' has failed to shutdown the rendezvous 'none' due to an error of type RendezvousConnectionError.
+Traceback (most recent call last):
+  File "/scratch/sleonard/miniconda3/envs/megatron/lib/python3.11/site-packages/torch/distributed/elastic/rendezvous/c10d_rendezvous_backend.py", line 117, in _call_store
+    return getattr(self._store, store_op)(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+torch.distributed.DistNetworkError: failed to recv, got 0 bytes
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "/scratch/sleonard/miniconda3/envs/megatron/bin/torchrun", line 6, in <module>
+    sys.exit(main())
+             ^^^^^^
+  File "/scratch/sleonard/miniconda3/envs/megatron/lib/python3.11/site-packages/torch/distributed/elastic/multiprocessing/errors/__init__.py", line 355, in wrapper
+    return f(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^
+  File "/scratch/sleonard/miniconda3/envs/megatron/lib/python3.11/site-packages/torch/distributed/run.py", line 918, in main
+    run(args)
+  File "/scratch/sleonard/miniconda3/envs/megatron/lib/python3.11/site-packages/torch/distributed/run.py", line 909, in run
+    elastic_launch(
+  File "/scratch/sleonard/miniconda3/envs/megatron/lib/python3.11/site-packages/torch/distributed/launcher/api.py", line 138, in __call__
+    return launch_agent(self._config, self._entrypoint, list(args))
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/scratch/sleonard/miniconda3/envs/megatron/lib/python3.11/site-packages/torch/distributed/launcher/api.py", line 260, in launch_agent
+    result = agent.run()
+             ^^^^^^^^^^^
+  File "/scratch/sleonard/miniconda3/envs/megatron/lib/python3.11/site-packages/torch/distributed/elastic/metrics/api.py", line 137, in wrapper
+    result = f(*args, **kwargs)
+             ^^^^^^^^^^^^^^^^^^
+  File "/scratch/sleonard/miniconda3/envs/megatron/lib/python3.11/site-packages/torch/distributed/elastic/agent/server/api.py", line 711, in run
+[W520 08:08:18.063230550 TCPStore.cpp:106] [c10d] sendBytes failed on SocketImpl(fd=3, addr=[piora1.cm.cluster]:53050, remote=[piora1.cm.cluster]:29500): Broken pipe
+Exception raised from sendBytes at /pytorch/torch/csrc/distributed/c10d/Utils.hpp:646 (most recent call first):
+frame #0: c10::Error::Error(c10::SourceLocation, std::string) + 0x96 (0x15555436c1b6 in /scratch/sleonard/miniconda3/envs/megatron/lib/python3.11/site-packages/torch/lib/libc10.so)
+frame #1: <unknown function> + 0x6311c1d (0x15553c711c1d in /scratch/sleonard/miniconda3/envs/megatron/lib/python3.11/site-packages/torch/lib/libtorch_cpu.so)
+frame #2: c10d::TCPStore::doWait(c10::ArrayRef<std::string>, std::chrono::duration<long, std::ratio<1l, 1000l> >) + 0x27e (0x15553c70f72e in /scratch/sleonard/miniconda3/envs/megatron/lib/python3.11/site-packages/torch/lib/libtorch_cpu.so)
+frame #3: c10d::TCPStore::doGet(std::string const&) + 0x2a (0x15553c70fb9a in /scratch/sleonard/miniconda3/envs/megatron/lib/python3.11/site-packages/torch/lib/libtorch_cpu.so)
+frame #4: c10d::TCPStore::get(std::string const&) + 0x7a (0x15553c71093a in /scratch/sleonard/miniconda3/envs/megatron/lib/python3.11/site-packages/torch/lib/libtorch_cpu.so)
+frame #5: <unknown function> + 0xe1ce74 (0x15554c41ce74 in /scratch/sleonard/miniconda3/envs/megatron/lib/python3.11/site-packages/torch/lib/libtorch_python.so)
+frame #6: <unknown function> + 0x51a017 (0x15554bb1a017 in /scratch/sleonard/miniconda3/envs/megatron/lib/python3.11/site-packages/torch/lib/libtorch_python.so)
+frame #7: <unknown function> + 0x1fd066 (0x555555751066 in /scratch/sleonard/miniconda3/envs/megatron/bin/python3.11)
+frame #8: _PyObject_MakeTpCall + 0x24b (0x55555572d22b in /scratch/sleonard/miniconda3/envs/megatron/bin/python3.11)
+frame #9: <unknown function> + 0x22cff6 (0x555555780ff6 in /scratch/sleonard/miniconda3/envs/megatron/bin/python3.11)
+frame #10: _PyEval_EvalFrameDefault + 0x478f (0x55555573f6ef in /scratch/sleonard/miniconda3/envs/megatron/bin/python3.11)
+frame #11: _PyFunction_Vectorcall + 0x165 (0x555555761465 in /scratch/sleonard/miniconda3/envs/megatron/bin/python3.11)
+frame #12: _PyEval_EvalFrameDefault + 0x478f (0x55555573f6ef in /scratch/sleonard/miniconda3/envs/megatron/bin/python3.11)
+frame #13: _PyFunction_Vectorcall + 0x165 (0x555555761465 in /scratch/sleonard/miniconda3/envs/megatron/bin/python3.11)
+frame #14: _PyObject_FastCallDictTstate + 0x65 (0x555555731ff5 in /scratch/sleonard/miniconda3/envs/megatron/bin/python3.11)
+frame #15: _PyObject_Call_Prepend + 0xe7 (0x555555769657 in /scratch/sleonard/miniconda3/envs/megatron/bin/python3.11)
+frame #16: <unknown function> + 0x2e81e7 (0x55555583c1e7 in /scratch/sleonard/miniconda3/envs/megatron/bin/python3.11)
+frame #17: PyObject_Call + 0xbe (0x55555576b82e in /scratch/sleonard/miniconda3/envs/megatron/bin/python3.11)
+frame #18: _PyEval_EvalFrameDefault + 0x478f (0x55555573f6ef in /scratch/sleonard/miniconda3/envs/megatron/bin/python3.11)
+frame #19: _PyFunction_Vectorcall + 0x165 (0x555555761465 in /scratch/sleonard/miniconda3/envs/megatron/bin/python3.11)
+frame #20: _PyEval_EvalFrameDefault + 0x478f (0x55555573f6ef in /scratch/sleonard/miniconda3/envs/megatron/bin/python3.11)
+frame #21: <unknown function> + 0x2a3935 (0x5555557f7935 in /scratch/sleonard/miniconda3/envs/megatron/bin/python3.11)
+frame #22: PyEval_EvalCode + 0x9d (0x5555557f707d in /scratch/sleonard/miniconda3/envs/megatron/bin/python3.11)
+frame #23: <unknown function> + 0x2c098a (0x55555581498a in /scratch/sleonard/miniconda3/envs/megatron/bin/python3.11)
+frame #24: <unknown function> + 0x2bc6a3 (0x5555558106a3 in /scratch/sleonard/miniconda3/envs/megatron/bin/python3.11)
+frame #25: <unknown function> + 0x2d1cd0 (0x555555825cd0 in /scratch/sleonard/miniconda3/envs/megatron/bin/python3.11)
+frame #26: _PyRun_SimpleFileObject + 0x1ba (0x5555558252ba in /scratch/sleonard/miniconda3/envs/megatron/bin/python3.11)
+frame #27: _PyRun_AnyFileObject + 0x44 (0x555555824fb4 in /scratch/sleonard/miniconda3/envs/megatron/bin/python3.11)
+    result = self._invoke_run(role)
+             ^^^^^^^^^^^^^^^^^^^^^^
+  File "/scratch/sleonard/miniconda3/envs/megatron/lib/python3.11/site-packages/torch/distributed/elastic/agent/server/api.py", line 864, in _invoke_run
+frame #28: Py_RunMain + 0x271 (0x55555581f981 in /scratch/sleonard/miniconda3/envs/megatron/bin/python3.11)
+frame #29: Py_BytesMain + 0x37 (0x5555557e6ea7 in /scratch/sleonard/miniconda3/envs/megatron/bin/python3.11)
+frame #30: <unknown function> + 0x29590 (0x155555229590 in /lib64/libc.so.6)
+frame #31: __libc_start_main + 0x80 (0x155555229640 in /lib64/libc.so.6)
+frame #32: _start + 0x2e (0x5555557e6d2e in /scratch/sleonard/miniconda3/envs/megatron/bin/python3.11)
+
+    self._initialize_workers(self._worker_group)
+  File "/scratch/sleonard/miniconda3/envs/megatron/lib/python3.11/site-packages/torch/distributed/elastic/metrics/api.py", line 137, in wrapper
+    result = f(*args, **kwargs)
+             ^^^^^^^^^^^^^^^^^^
+  File "/scratch/sleonard/miniconda3/envs/megatron/lib/python3.11/site-packages/torch/distributed/elastic/agent/server/api.py", line 683, in _initialize_workers
+    self._rendezvous(worker_group)
+  File "/scratch/sleonard/miniconda3/envs/megatron/lib/python3.11/site-packages/torch/distributed/elastic/metrics/api.py", line 137, in wrapper
+    result = f(*args, **kwargs)
+             ^^^^^^^^^^^^^^^^^^
+  File "/scratch/sleonard/miniconda3/envs/megatron/lib/python3.11/site-packages/torch/distributed/elastic/agent/server/api.py", line 500, in _rendezvous
+    rdzv_info = spec.rdzv_handler.next_rendezvous()
+                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/scratch/sleonard/miniconda3/envs/megatron/lib/python3.11/site-packages/torch/distributed/elastic/rendezvous/dynamic_rendezvous.py", line 1162, in next_rendezvous
+    self._op_executor.run(join_op, deadline, self._get_deadline)
+  File "/scratch/sleonard/miniconda3/envs/megatron/lib/python3.11/site-packages/torch/distributed/elastic/rendezvous/dynamic_rendezvous.py", line 648, in run
+    has_set = self._state_holder.sync()
+              ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/scratch/sleonard/miniconda3/envs/megatron/lib/python3.11/site-packages/torch/distributed/elastic/rendezvous/dynamic_rendezvous.py", line 437, in sync
+    get_response = self._backend.get_state()
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/scratch/sleonard/miniconda3/envs/megatron/lib/python3.11/site-packages/torch/distributed/elastic/rendezvous/c10d_rendezvous_backend.py", line 75, in get_state
+    base64_state: bytes = self._call_store("get", self._key)
+                          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/scratch/sleonard/miniconda3/envs/megatron/lib/python3.11/site-packages/torch/distributed/elastic/rendezvous/c10d_rendezvous_backend.py", line 119, in _call_store
+    raise RendezvousConnectionError(
+torch.distributed.elastic.rendezvous.api.RendezvousConnectionError: The connection to the C10d store has failed. See inner exception for details.
+W0520 08:08:18.188000 2773681 site-packages/torch/distributed/elastic/rendezvous/dynamic_rendezvous.py:1284] The node 'piora1.cm.cluster_2773681_0' has failed to shutdown the rendezvous 'none' due to an error of type RendezvousConnectionError.
+[W520 08:08:18.068682091 TCPStore.cpp:106] [c10d] sendBytes failed on SocketImpl(fd=3, addr=[piora1.cm.cluster]:53050, remote=[piora1.cm.cluster]:29500): Broken pipe
+Exception raised from sendBytes at /pytorch/torch/csrc/distributed/c10d/Utils.hpp:646 (most recent call first):
+frame #0: c10::Error::Error(c10::SourceLocation, std::string) + 0x96 (0x15555436c1b6 in /scratch/sleonard/miniconda3/envs/megatron/lib/python3.11/site-packages/torch/lib/libc10.so)
+frame #1: <unknown function> + 0x6311c1d (0x15553c711c1d in /scratch/sleonard/miniconda3/envs/megatron/lib/python3.11/site-packages/torch/lib/libtorch_cpu.so)
+frame #2: c10d::TCPStore::doWait(c10::ArrayRef<std::string>, std::chrono::duration<long, std::ratio<1l, 1000l> >) + 0x27e (0x15553c70f72e in /scratch/sleonard/miniconda3/envs/megatron/lib/python3.11/site-packages/torch/lib/libtorch_cpu.so)
+frame #3: c10d::TCPStore::doGet(std::string const&) + 0x2a (0x15553c70fb9a in /scratch/sleonard/miniconda3/envs/megatron/lib/python3.11/site-packages/torch/lib/libtorch_cpu.so)
+frame #4: c10d::TCPStore::get(std::string const&) + 0x7a (0x15553c71093a in /scratch/sleonard/miniconda3/envs/megatron/lib/python3.11/site-packages/torch/lib/libtorch_cpu.so)
+frame #5: <unknown function> + 0xe1ce74 (0x15554c41ce74 in /scratch/sleonard/miniconda3/envs/megatron/lib/python3.11/site-packages/torch/lib/libtorch_python.so)
+frame #6: <unknown function> + 0x51a017 (0x15554bb1a017 in /scratch/sleonard/miniconda3/envs/megatron/lib/python3.11/site-packages/torch/lib/libtorch_python.so)
+frame #7: <unknown function> + 0x1fd066 (0x555555751066 in /scratch/sleonard/miniconda3/envs/megatron/bin/python3.11)
+frame #8: _PyObject_MakeTpCall + 0x24b (0x55555572d22b in /scratch/sleonard/miniconda3/envs/megatron/bin/python3.11)
+frame #9: <unknown function> + 0x22cff6 (0x555555780ff6 in /scratch/sleonard/miniconda3/envs/megatron/bin/python3.11)
+frame #10: _PyEval_EvalFrameDefault + 0x478f (0x55555573f6ef in /scratch/sleonard/miniconda3/envs/megatron/bin/python3.11)
+frame #11: _PyFunction_Vectorcall + 0x165 (0x555555761465 in /scratch/sleonard/miniconda3/envs/megatron/bin/python3.11)
+frame #12: _PyObject_FastCallDictTstate + 0x65 (0x555555731ff5 in /scratch/sleonard/miniconda3/envs/megatron/bin/python3.11)
+frame #13: _PyObject_Call_Prepend + 0xe7 (0x555555769657 in /scratch/sleonard/miniconda3/envs/megatron/bin/python3.11)
+frame #14: <unknown function> + 0x2e81e7 (0x55555583c1e7 in /scratch/sleonard/miniconda3/envs/megatron/bin/python3.11)
+frame #15: PyObject_Call + 0xbe (0x55555576b82e in /scratch/sleonard/miniconda3/envs/megatron/bin/python3.11)
+frame #16: _PyEval_EvalFrameDefault + 0x478f (0x55555573f6ef in /scratch/sleonard/miniconda3/envs/megatron/bin/python3.11)
+frame #17: _PyFunction_Vectorcall + 0x165 (0x555555761465 in /scratch/sleonard/miniconda3/envs/megatron/bin/python3.11)
+frame #18: _PyEval_EvalFrameDefault + 0x478f (0x55555573f6ef in /scratch/sleonard/miniconda3/envs/megatron/bin/python3.11)
+frame #19: <unknown function> + 0x2a3935 (0x5555557f7935 in /scratch/sleonard/miniconda3/envs/megatron/bin/python3.11)
+frame #20: PyEval_EvalCode + 0x9d (0x5555557f707d in /scratch/sleonard/miniconda3/envs/megatron/bin/python3.11)
+frame #21: <unknown function> + 0x2c098a (0x55555581498a in /scratch/sleonard/miniconda3/envs/megatron/bin/python3.11)
+frame #22: <unknown function> + 0x2bc6a3 (0x5555558106a3 in /scratch/sleonard/miniconda3/envs/megatron/bin/python3.11)
+frame #23: <unknown function> + 0x2d1cd0 (0x555555825cd0 in /scratch/sleonard/miniconda3/envs/megatron/bin/python3.11)
+frame #24: _PyRun_SimpleFileObject + 0x1ba (0x5555558252ba in /scratch/sleonard/miniconda3/envs/megatron/bin/python3.11)
+frame #25: _PyRun_AnyFileObject + 0x44 (0x555555824fb4 in /scratch/sleonard/miniconda3/envs/megatron/bin/python3.11)
+frame #26: Py_RunMain + 0x271 (0x55555581f981 in /scratch/sleonard/miniconda3/envs/megatron/bin/python3.11)
+frame #27: Py_BytesMain + 0x37 (0x5555557e6ea7 in /scratch/sleonard/miniconda3/envs/megatron/bin/python3.11)
+frame #28: <unknown function> + 0x29590 (0x155555229590 in /lib64/libc.so.6)
+frame #29: __libc_start_main + 0x80 (0x155555229640 in /lib64/libc.so.6)
+frame #30: _start + 0x2e (0x5555557e6d2e in /scratch/sleonard/miniconda3/envs/megatron/bin/python3.11)
+
+W0520 08:08:18.192000 2773681 site-packages/torch/distributed/elastic/rendezvous/dynamic_rendezvous.py:1284] The node 'piora1.cm.cluster_2773681_0' has failed to shutdown the rendezvous 'none' due to an error of type RendezvousConnectionError.
+Traceback (most recent call last):
+  File "/scratch/sleonard/miniconda3/envs/megatron/lib/python3.11/site-packages/torch/distributed/elastic/rendezvous/c10d_rendezvous_backend.py", line 117, in _call_store
+    return getattr(self._store, store_op)(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+torch.distributed.DistNetworkError: failed to recv, got 0 bytes
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "/scratch/sleonard/miniconda3/envs/megatron/bin/torchrun", line 6, in <module>
+    sys.exit(main())
+             ^^^^^^
+  File "/scratch/sleonard/miniconda3/envs/megatron/lib/python3.11/site-packages/torch/distributed/elastic/multiprocessing/errors/__init__.py", line 355, in wrapper
+    return f(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^
+  File "/scratch/sleonard/miniconda3/envs/megatron/lib/python3.11/site-packages/torch/distributed/run.py", line 918, in main
+    run(args)
+  File "/scratch/sleonard/miniconda3/envs/megatron/lib/python3.11/site-packages/torch/distributed/run.py", line 909, in run
+    elastic_launch(
+  File "/scratch/sleonard/miniconda3/envs/megatron/lib/python3.11/site-packages/torch/distributed/launcher/api.py", line 138, in __call__
+    return launch_agent(self._config, self._entrypoint, list(args))
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/scratch/sleonard/miniconda3/envs/megatron/lib/python3.11/site-packages/torch/distributed/launcher/api.py", line 260, in launch_agent
+    result = agent.run()
+             ^^^^^^^^^^^
+  File "/scratch/sleonard/miniconda3/envs/megatron/lib/python3.11/site-packages/torch/distributed/elastic/metrics/api.py", line 137, in wrapper
+    result = f(*args, **kwargs)
+             ^^^^^^^^^^^^^^^^^^
+  File "/scratch/sleonard/miniconda3/envs/megatron/lib/python3.11/site-packages/torch/distributed/elastic/agent/server/api.py", line 711, in run
+    result = self._invoke_run(role)
+             ^^^^^^^^^^^^^^^^^^^^^^
+  File "/scratch/sleonard/miniconda3/envs/megatron/lib/python3.11/site-packages/torch/distributed/elastic/agent/server/api.py", line 864, in _invoke_run
+    self._initialize_workers(self._worker_group)
+  File "/scratch/sleonard/miniconda3/envs/megatron/lib/python3.11/site-packages/torch/distributed/elastic/metrics/api.py", line 137, in wrapper
+    result = f(*args, **kwargs)
+             ^^^^^^^^^^^^^^^^^^
+  File "/scratch/sleonard/miniconda3/envs/megatron/lib/python3.11/site-packages/torch/distributed/elastic/agent/server/api.py", line 683, in _initialize_workers
+    self._rendezvous(worker_group)
+  File "/scratch/sleonard/miniconda3/envs/megatron/lib/python3.11/site-packages/torch/distributed/elastic/metrics/api.py", line 137, in wrapper
+    result = f(*args, **kwargs)
+             ^^^^^^^^^^^^^^^^^^
+  File "/scratch/sleonard/miniconda3/envs/megatron/lib/python3.11/site-packages/torch/distributed/elastic/agent/server/api.py", line 500, in _rendezvous
+    rdzv_info = spec.rdzv_handler.next_rendezvous()
+                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/scratch/sleonard/miniconda3/envs/megatron/lib/python3.11/site-packages/torch/distributed/elastic/rendezvous/dynamic_rendezvous.py", line 1162, in next_rendezvous
+    self._op_executor.run(join_op, deadline, self._get_deadline)
+  File "/scratch/sleonard/miniconda3/envs/megatron/lib/python3.11/site-packages/torch/distributed/elastic/rendezvous/dynamic_rendezvous.py", line 648, in run
+    has_set = self._state_holder.sync()
+              ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/scratch/sleonard/miniconda3/envs/megatron/lib/python3.11/site-packages/torch/distributed/elastic/rendezvous/dynamic_rendezvous.py", line 437, in sync
+    get_response = self._backend.get_state()
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/scratch/sleonard/miniconda3/envs/megatron/lib/python3.11/site-packages/torch/distributed/elastic/rendezvous/c10d_rendezvous_backend.py", line 75, in get_state
+    base64_state: bytes = self._call_store("get", self._key)
+                          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/scratch/sleonard/miniconda3/envs/megatron/lib/python3.11/site-packages/torch/distributed/elastic/rendezvous/c10d_rendezvous_backend.py", line 119, in _call_store
+    raise RendezvousConnectionError(
+torch.distributed.elastic.rendezvous.api.RendezvousConnectionError: The connection to the C10d store has failed. See inner exception for details.
+srun: error: piora1: tasks 0-3: Exited with exit code 1
+srun: Terminating StepId=62311.0
+srun: error: piora2: tasks 4-7: Terminated
+srun: Force Terminated StepId=62311.0

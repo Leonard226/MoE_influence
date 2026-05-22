@@ -3,7 +3,7 @@
 #SBATCH --ntasks-per-node=1
 #SBATCH --gres=gpu:4
 #SBATCH --cpus-per-task=4
-#SBATCH --job-name=qwen3-235b-dag
+#SBATCH --job-name=:)
 #SBATCH --output=log.out
 #SBATCH --error=err
 
@@ -63,7 +63,7 @@ for DATASET in c4 math code; do
         --model qwen3-235b-a22b \
         --dataset "$DATASET" \
         --n_prompts 5000 \
-        --B 4 \
+        --B 16 \
         || echo "WARN: dataset=${DATASET} failed; continuing"
     echo "Finished dataset=${DATASET} at $(date)"
     # Brief pause so port 29500 (c10d rendezvous) clears TIME_WAIT before re-bind.

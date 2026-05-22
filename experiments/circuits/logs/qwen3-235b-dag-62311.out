@@ -1,0 +1,1 @@
+MASTER_ADDR=piora1  MASTER_PORT=29500  nodes=piora1 piora2
