@@ -155,7 +155,7 @@ def show_enhanced_layered_graph(g, quantile: float, target: str, model: str, dat
     G = nx.DiGraph()
     pos, labels = {}, {}
 
-    X_SPACING, Y_SPACING = 600, 300
+    X_SPACING, Y_SPACING = 1000, 300
     for node_idx in active_node_indices:
         layer, expert_idx = node_idx // N_EXPERTS, node_idx % N_EXPERTS
         pos[node_idx] = (expert_idx * X_SPACING, -layer * Y_SPACING)
@@ -204,7 +204,7 @@ def show_enhanced_layered_graph(g, quantile: float, target: str, model: str, dat
                            connectionstyle="arc3,rad=0.05", ax=ax, node_size=1100,
                            min_source_margin=15, min_target_margin=18)
 
-    nx.draw_networkx_nodes(G, pos, node_size=1100, node_color='white', edgecolors='black', linewidths=1.2, ax=ax)
+    nx.draw_networkx_nodes(G, pos, node_size=1000, node_color='white', edgecolors='black', linewidths=1.2, ax=ax)
     nx.draw_networkx_labels(G, pos, labels, font_size=7, font_weight='bold', ax=ax)
 
     # --- AXIS & COLORBAR ---
