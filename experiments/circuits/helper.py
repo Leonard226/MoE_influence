@@ -204,7 +204,21 @@ def show_enhanced_layered_graph(g, quantile: float, target: str, model: str, dat
                            connectionstyle="arc3,rad=0.05", ax=ax, node_size=1100,
                            min_source_margin=15, min_target_margin=18)
 
-    nx.draw_networkx_nodes(G, pos, node_size=1000, node_color='white', edgecolors='black', linewidths=1.2, ax=ax)
+    # Split active nodes by super-expert status if the "is_super" vertex
+    # attribute is present (set by the caller before calling this function).
+    # Super-experts are drawn larger with a gold fill and red border so they
+    # stand out from receiver-only nodes (which would only appear because they
+    # receive an edge from some super-expert).
+    if "is_super" in g.vertex_attributes():
+        super_active = [n for n in active_node_indices if g.vs[n]["is_super"]]
+        other_active = [n for n in active_node_indices if not g.vs[n]["is_super"]]
+        nx.draw_networkx_nodes(G, pos, nodelist=other_active, node_size=1000,
+                               node_color='white', edgecolors='black', linewidths=1.2, ax=ax)
+        nx.draw_networkx_nodes(G, pos, nodelist=super_active, node_size=1400,
+                               node_color='gold', edgecolors='red', linewidths=2.5, ax=ax)
+    else:
+        nx.draw_networkx_nodes(G, pos, node_size=1000, node_color='white',
+                               edgecolors='black', linewidths=1.2, ax=ax)
     nx.draw_networkx_labels(G, pos, labels, font_size=7, font_weight='bold', ax=ax)
 
     # --- AXIS & COLORBAR ---
