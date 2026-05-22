@@ -155,7 +155,7 @@ def show_enhanced_layered_graph(g, quantile: float, target: str, model: str, dat
     G = nx.DiGraph()
     pos, labels = {}, {}
 
-    X_SPACING, Y_SPACING = 350, 250
+    X_SPACING, Y_SPACING = 600, 300
     for node_idx in active_node_indices:
         layer, expert_idx = node_idx // N_EXPERTS, node_idx % N_EXPERTS
         pos[node_idx] = (expert_idx * X_SPACING, -layer * Y_SPACING)
