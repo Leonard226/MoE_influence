@@ -120,9 +120,16 @@ def thresholding_routing_graph(dag: dict, target: str, threshold: float) -> ig.G
     return g
 
 
-def show_enhanced_layered_graph(g, quantile: float, target: str, model: str, dataset: str, n_prompts: int) -> None:
+def show_enhanced_layered_graph(g, quantile: float, target: str, model: str, dataset: str, n_prompts: int,
+                                 layer_labels: list | None = None) -> None:
     """Layered DAG visualization. Reads N_LAYERS / N_EXPERTS from the graph's
-    `layer` vertex attribute (set by thresholding_routing_graph / dag_to_igraph)."""
+    `layer` vertex attribute (set by thresholding_routing_graph / dag_to_igraph).
+
+    layer_labels: optional mapping from internal DAG layer index (0..N_LAYERS-1)
+        to the model's actual layer number. Use this when the DAG skips dense
+        layers (e.g. DeepSeek-V2-Lite has dense layer 0, so internal M0 == model
+        layer 1). If None, internal indices are used as-is. Pass dag["moe_layers"].
+    """
     edge_list = g.get_edgelist()
     if not edge_list:
         print("No edges found to plot!")
@@ -140,6 +147,9 @@ def show_enhanced_layered_graph(g, quantile: float, target: str, model: str, dat
     # --- SPARSITY CALCULATIONS ---
     N_LAYERS = max(g.vs["layer"]) + 1
     N_EXPERTS = g.vcount() // N_LAYERS
+    # Map internal DAG layer index -> model layer number used for display.
+    if layer_labels is None:
+        layer_labels = list(range(N_LAYERS))
     TOTAL_POSSIBLE_NODES = N_LAYERS * N_EXPERTS
     # Max possible edges in a layered DAG (Layer i to Layer >i)
     TOTAL_POSSIBLE_EDGES = sum(N_EXPERTS * ((N_LAYERS - 1 - i) * N_EXPERTS) for i in range(N_LAYERS - 1))
@@ -159,7 +169,7 @@ def show_enhanced_layered_graph(g, quantile: float, target: str, model: str, dat
     for node_idx in active_node_indices:
         layer, expert_idx = node_idx // N_EXPERTS, node_idx % N_EXPERTS
         pos[node_idx] = (expert_idx * X_SPACING, -layer * Y_SPACING)
-        labels[node_idx] = f"M{layer}\nE{expert_idx}"
+        labels[node_idx] = f"M{layer_labels[layer]}\nE{expert_idx}"
         G.add_node(node_idx)
 
     # --- COLOR LOGIC ---
@@ -227,7 +237,10 @@ def show_enhanced_layered_graph(g, quantile: float, target: str, model: str, dat
     ax.xaxis.set_major_locator(MultipleLocator(5 * X_SPACING))
     ax.xaxis.set_major_formatter(FuncFormatter(lambda x, p: f"{int(round(x / X_SPACING))}"))
     ax.yaxis.set_major_locator(MultipleLocator(1 * Y_SPACING))
-    ax.yaxis.set_major_formatter(FuncFormatter(lambda x, p: f"{int(round(abs(x) / Y_SPACING))}"))
+    def _layer_tick(x, _p, _ll=layer_labels):
+        idx = int(round(abs(x) / Y_SPACING))
+        return f"{_ll[idx]}" if 0 <= idx < len(_ll) else ""
+    ax.yaxis.set_major_formatter(FuncFormatter(_layer_tick))
 
     sm = plt.cm.ScalarMappable(cmap=cmap, norm=norm)
     sm.set_array([])
