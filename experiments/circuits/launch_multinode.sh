@@ -3,9 +3,8 @@
 #SBATCH --ntasks-per-node=1
 #SBATCH --gres=gpu:4
 #SBATCH --cpus-per-task=4
-#SBATCH --job-name=
+#SBATCH --job-name="CR7"
 #SBATCH --output=log.out
-#SBATCH --error=err
 
 set -euo pipefail
 MODEL="${MODEL:-deepseek-v2}"
@@ -52,7 +51,7 @@ for DATASET in c4 math code; do
     echo "==================================================="
     echo "Starting dataset=${DATASET} at $(date)"
     echo "==================================================="
-    srun --export=ALL \ ${ENV_BIN}/torchrun \
+    srun --export=ALL ${ENV_BIN}/torchrun \
         --nnodes=2 \
         --nproc_per_node=4 \
         --node_rank=$SLURM_NODEID \
