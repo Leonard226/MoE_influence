@@ -154,7 +154,14 @@ def show_enhanced_layered_graph(g, quantile: float, target: str, model: str, dat
     # Max possible edges in a layered DAG (Layer i to Layer >i)
     TOTAL_POSSIBLE_EDGES = sum(N_EXPERTS * ((N_LAYERS - 1 - i) * N_EXPERTS) for i in range(N_LAYERS - 1))
 
-    active_node_indices = [v.index for v in g.vs if v.degree() > 0]
+    # Active = has an incident edge OR is flagged as a super-expert. The latter
+    # ensures super-experts that had all their outgoing edges filtered by the
+    # per-edge threshold still get rendered (as isolated gold nodes).
+    has_is_super = "is_super" in g.vertex_attributes()
+    active_node_indices = [
+        v.index for v in g.vs
+        if v.degree() > 0 or (has_is_super and v["is_super"])
+    ]
     n_nodes_used = len(active_node_indices)
     n_edges_used = g.ecount()
 
@@ -219,7 +226,7 @@ def show_enhanced_layered_graph(g, quantile: float, target: str, model: str, dat
     # Super-experts are drawn larger with a gold fill and red border so they
     # stand out from receiver-only nodes (which would only appear because they
     # receive an edge from some super-expert).
-    if "is_super" in g.vertex_attributes():
+    if has_is_super:
         super_active = [n for n in active_node_indices if g.vs[n]["is_super"]]
         other_active = [n for n in active_node_indices if not g.vs[n]["is_super"]]
         nx.draw_networkx_nodes(G, pos, nodelist=other_active, node_size=1000,
@@ -251,10 +258,13 @@ def show_enhanced_layered_graph(g, quantile: float, target: str, model: str, dat
         spine.set_visible(True)
     plt.grid(True, linestyle='--', alpha=0.15)
 
-    all_x, all_y = [p[0] for p in pos.values()], [p[1] for p in pos.values()]
-    if all_x and all_y:
-        plt.xlim(min(all_x) - (X_SPACING * 1.5), max(all_x) + (X_SPACING * 1.5))
-        plt.ylim(min(all_y) - Y_SPACING, max(all_y) + Y_SPACING)
+    # Always span the full architectural grid: experts 0..N_EXPERTS-1 on x,
+    # layers 0..N_LAYERS-1 on y. Empty rows (layers with no active node) are
+    # intentionally left blank rather than cropped — this makes layer position
+    # readable across models and prevents the viz from misrepresenting where
+    # super-experts sit in the stack.
+    plt.xlim(-X_SPACING * 1.5, (N_EXPERTS - 1) * X_SPACING + X_SPACING * 1.5)
+    plt.ylim(-(N_LAYERS - 1) * Y_SPACING - Y_SPACING, Y_SPACING)
 
     plt.xlabel("Experts e")
     plt.ylabel("Layers l")
