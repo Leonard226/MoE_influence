@@ -3,12 +3,12 @@
 #SBATCH --ntasks-per-node=1
 #SBATCH --gres=gpu:4
 #SBATCH --cpus-per-task=4
-#SBATCH --job-name=:)
+#SBATCH --job-name=
 #SBATCH --output=log.out
 #SBATCH --error=err
 
 set -euo pipefail
-
+MODEL="${MODEL:-deepseek-v2}"
 # Use the megatron env's binaries directly. torchrun's shebang already points at
 # the correct python interpreter inside the env, so no conda activation needed.
 ENV_BIN=/scratch/sleonard/miniconda3/envs/megatron/bin
@@ -52,17 +52,16 @@ for DATASET in c4 math code; do
     echo "==================================================="
     echo "Starting dataset=${DATASET} at $(date)"
     echo "==================================================="
-    srun --kill-on-bad-exit=1 --export=ALL \
-        ${ENV_BIN}/torchrun \
+    srun --export=ALL \ ${ENV_BIN}/torchrun \
         --nnodes=2 \
         --nproc_per_node=4 \
         --node_rank=$SLURM_NODEID \
         --rdzv_backend=c10d \
         --rdzv_endpoint=$MASTER_ADDR:$MASTER_PORT \
         "$SCRIPT_PATH" \
-        --model qwen3-235b-a22b \
+        --model $MODEL \
         --dataset "$DATASET" \
-        --n_prompts 5000 \
+        --n_prompts 1000 \
         --B 16 \
         || echo "WARN: dataset=${DATASET} failed; continuing"
     echo "Finished dataset=${DATASET} at $(date)"

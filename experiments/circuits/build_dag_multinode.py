@@ -1,24 +1,25 @@
-"""Multi-node DAG builder for Qwen3-235B-A22B (~470 GB bf16).
+"""Multi-node DAG builder for large MoE models that exceed single-node memory.
 
-Single-node `build_dag.py` cannot fit Qwen3-235B-A22B on 4x80GB (even at NF4 it
-is tight). This script partitions the 94 decoder layers across 8 ranks (2 nodes
-x 4 GPUs = ~60 GiB / rank, bf16, no quantization) via manual NCCL pipeline.
+Targets models where bf16 weights don't fit on 4×80GB GPUs (320 GiB per node):
+  - Qwen3-235B-A22B (~470 GB bf16, all 94 layers MoE)
+  - DeepSeek-V2     (~472 GB bf16, 60 decoder layers; layer 0 is dense, 1..59 MoE)
 
-Pipeline:
-  Rank 0: embed -> layers[0:12]   -> send hidden_state to rank 1
-  Rank k: recv  -> layers[k*12:(k+1)*12] -> send to rank k+1     (k=1..6)
-  Rank 7: recv  -> layers[84:94]  -> final norm (discarded; we only need hooks)
+Pipeline-parallel forward across 2 nodes × 4 GPUs = 8 ranks. Each rank owns a
+contiguous slice of decoder layers, runs them forward, and sends the hidden
+state to the next rank via NCCL. Hook tensors are gathered to rank 0 for the
+score-decomposition inner loop.
 
-Per-rank hook capture: each rank runs `Qwen3MoeDecoderLayer.forward()` directly
-on its owned layers and collects the four hooks we need:
+Per-rank hook capture: each rank runs `<Model>DecoderLayer.forward()` directly
+on its owned layers and collects four hooks per MoE layer:
     hook_after_res1, hook_after_norm2, hook_selected_experts, hook_expert_weighted_outputs
-Captured hook tensors are sent to rank 0 via dist.gather (per-rank tensors
-shaped [n_owned, bsz, n_tok, ...]; rank 0 concatenates along layer axis).
+For DeepSeek-V2's dense layer 0, MoE hooks are skipped (`mlp_hooks` is empty
+there); only after_res1/after_norm2 are valid for dense layers and we don't
+need them for the score decomposition anyway.
 
 Rank 0 owns the accumulators (APS, ANS, AVG, sq, aarv, arv, padd, prem,
 n_tokens_selected, top-K-by-routing-weight token buffer) and runs the score-
 decomposition inner loop. The router gate and post-attention RMSNorm weights
-from every layer are gathered to rank 0 once at startup (~5 GiB total).
+from every MoE layer are gathered to rank 0 once at startup.
 
 Numerical semantics are identical to `build_dag.py` (modulo cross-rank dtype
 casts and NCCL gather precision; both stay in float32 on rank 0 so it is
@@ -29,7 +30,7 @@ Launch:
 or directly:
     srun ... torchrun --nnodes 2 --nproc_per_node 4 \
         --rdzv_endpoint piora1:29500 build_dag_multinode.py \
-        --dataset c4 --n_prompts 5000 --B 4
+        --model {qwen3-235b-a22b,deepseek-v2} --dataset c4 --n_prompts 5000 --B 4
 """
 import argparse
 import importlib
@@ -50,10 +51,8 @@ with open(os.path.join(ROOT, "config.yaml")) as f:
 output_dir = os.path.join(config["result_path"], "circuits")
 os.makedirs(output_dir, exist_ok=True)
 
-from customized_models.modeling_qwen3_moe_customized import (
-    Qwen3MoeForCausalLM,
-    Qwen3MoeModel,
-)
+from customized_models.modeling_qwen3_moe_customized import Qwen3MoeForCausalLM
+from customized_models.modeling_deepseek_customized import DeepseekV2ForCausalLM
 from transformers import AutoTokenizer
 
 # ---------------------------------------------------------------------------
@@ -65,8 +64,52 @@ DATASETS = {
     "code": ("dataset.code_dataset", "code_dataset_helper"),
 }
 
-# Model registry. Only the multi-node target lives here; single-node models
-# remain in build_dag.py.
+
+# ---------------------------------------------------------------------------
+# Per-model decoder-layer kwargs.
+# ---------------------------------------------------------------------------
+# Qwen3 decoder layers accept position_embeddings (computed by the model's
+# rotary_emb), output_router_logits, and cache_position. DeepSeek-V2 layers
+# don't take any of those — the attention block computes rotary internally
+# from position_ids alone.
+def _layer_kwargs_qwen3(causal_mask, position_ids, position_embeddings):
+    return dict(
+        attention_mask=causal_mask,
+        position_ids=position_ids,
+        past_key_value=None,
+        output_attentions=False,
+        output_router_logits=False,
+        use_cache=False,
+        cache_position=None,
+        position_embeddings=position_embeddings,
+        set_patch=None,
+    )
+
+
+def _layer_kwargs_deepseek(causal_mask, position_ids, position_embeddings):
+    # position_embeddings unused; DeepSeek attention computes rotary internally.
+    return dict(
+        attention_mask=causal_mask,
+        position_ids=position_ids,
+        past_key_value=None,
+        output_attentions=False,
+        use_cache=False,
+        set_patch=None,
+    )
+
+
+# Model registry. Only multi-node targets live here; single-node models stay in
+# build_dag.py. Each entry must specify:
+#   cls                 : the customized ForCausalLM class to instantiate
+#   moe_layers          : decoder-layer indices that are MoE (dense layers are
+#                         in [0, num_hidden_layers) but not in this list)
+#   gate_path           : attrgetter path inside a decoder layer to the router
+#                         gate (e.g. "mlp.gate")
+#   norm_path           : attrgetter path to the post-attention RMSNorm
+#   layer_kwargs_fn     : function mapping (causal_mask, position_ids,
+#                         position_embeddings) -> dict of kwargs for layer.forward()
+#   needs_position_embeddings : whether the layer kwargs include position_embeddings
+#                         (Qwen3 yes, DeepSeek no)
 MODELS = {
     "qwen3-235b-a22b": {
         "id": "Qwen/Qwen3-235B-A22B",
@@ -76,6 +119,22 @@ MODELS = {
         "d_e": 4096,
         "moe_layers": list(range(94)),
         "gate_path": "mlp.gate",
+        "norm_path": "post_attention_layernorm",
+        "layer_kwargs_fn": _layer_kwargs_qwen3,
+        "needs_position_embeddings": True,
+    },
+    "deepseek-v2": {
+        # Same architecture class as V2-Lite, just larger. Layer 0 is dense.
+        "id": "deepseek-ai/DeepSeek-V2",
+        "cls": DeepseekV2ForCausalLM,
+        "n_experts": 160,
+        "top_k": 6,
+        "d_e": 5120,
+        "moe_layers": list(range(1, 60)),  # layer 0 is dense
+        "gate_path": "mlp.gate",
+        "norm_path": "post_attention_layernorm",
+        "layer_kwargs_fn": _layer_kwargs_deepseek,
+        "needs_position_embeddings": False,
     },
 }
 
@@ -123,11 +182,13 @@ def partition_layers(n_total, world_size, rank):
 # ---------------------------------------------------------------------------
 # Per-rank model loading.
 # ---------------------------------------------------------------------------
-def load_partitioned_model(model_id, rank, world_size, local_rank):
-    """Instantiate full Qwen3MoeForCausalLM but only materialize this rank's
+def load_partitioned_model(model_cfg, rank, world_size, local_rank):
+    """Instantiate the full ForCausalLM but only materialize this rank's
     decoder-layer slice (plus embed_tokens on rank 0, final norm on rank
     world_size-1, rotary_emb everywhere). Other modules stay on meta and are
     set to None.
+
+    `model_cfg` is one entry from the MODELS registry (provides `cls` and `id`).
 
     Strategy:
       1. Build empty (meta) skeleton via `init_empty_weights`.
@@ -145,7 +206,9 @@ def load_partitioned_model(model_id, rank, world_size, local_rank):
     from huggingface_hub import snapshot_download
     from safetensors import safe_open
 
-    cfg = Qwen3MoeForCausalLM.config_class.from_pretrained(model_id, trust_remote_code=True)
+    cls = model_cfg["cls"]
+    model_id = model_cfg["id"]
+    cfg = cls.config_class.from_pretrained(model_id, trust_remote_code=True)
     cfg._attn_implementation = "eager"
     cfg.torch_dtype = torch.bfloat16
 
@@ -156,7 +219,7 @@ def load_partitioned_model(model_id, rank, world_size, local_rank):
     rprint(rank, f"[rank {rank}] owns decoder layers {start}..{end-1} ({end-start} layers)")
 
     with init_empty_weights():
-        model = Qwen3MoeForCausalLM(cfg)
+        model = cls(cfg)
 
     gpu = f"cuda:{local_rank}"
 
@@ -243,68 +306,74 @@ def load_partitioned_model(model_id, rank, world_size, local_rank):
 # Hook extraction from a single decoder layer's output.
 # ---------------------------------------------------------------------------
 def call_layer(decoder_layer, hidden_states, causal_mask, position_ids,
-               position_embeddings):
-    """Call a Qwen3MoeDecoderLayer and return (next_hidden, hook_tuple).
+               position_embeddings, layer_kwargs_fn, is_moe):
+    """Call a customized decoder layer and return (next_hidden, hook_tuple).
 
-    hook_tuple = (after_res1, after_norm2, selected_experts, weighted_outputs)
-    matching what the single-node script slices out of hook_dict.
+    hook_tuple = (after_res1, after_norm2, selected_experts, weighted_outputs).
+    For dense layers (is_moe=False), `mlp_hooks` is empty in the my_hooks tuple,
+    so we return None for the MoE-specific hooks.
+
+    layer_kwargs_fn: model-specific function returning the kwargs to pass to
+        decoder_layer.forward() (different for Qwen3 vs DeepSeek — see top of file).
+
+    Hook layout in my_hooks (same for Qwen3 and DeepSeek):
+        layer_hooks = (hook_layer_input, hook_attn_output, hook_after_res1,
+                       hook_after_norm2, hook_mlp_output, hook_layer_output)
+                      = positions 0..5
+        attn_hooks  : positions 6..12 (7 entries, padded with zeros for hooks
+                      not used by all attention variants)
+        mlp_hooks   = (router_logits, hook_selected_experts,
+                       hook_expert_weighted_outputs, hook_routing_weights)
+                      = positions 13..16
     """
-    layer_outputs = decoder_layer(
-        hidden_states,
-        attention_mask=causal_mask,
-        position_ids=position_ids,
-        past_key_value=None,
-        output_attentions=False,
-        output_router_logits=False,
-        use_cache=False,
-        cache_position=None,
-        position_embeddings=position_embeddings,
-        set_patch=None,
-    )
+    kwargs = layer_kwargs_fn(causal_mask, position_ids, position_embeddings)
+    layer_outputs = decoder_layer(hidden_states, **kwargs)
     next_hidden = layer_outputs[0]
     my_hooks = layer_outputs[-1]
-    # Index into the layer_hooks tuple defined in the customized model:
-    #   layer_hooks = (hook_layer_input, hook_attn_output, hook_after_res1,
-    #                  hook_after_norm2, hook_mlp_output, hook_layer_output)
-    #   *attn_hooks  -> 7 entries
-    #   *mlp_hooks   -> (router_logits, hook_selected_experts,
-    #                    hook_expert_weighted_outputs, hook_routing_weights)
-    # layer_hooks[2] = after_res1, layer_hooks[3] = after_norm2.
-    # mlp_hooks starts at offset 6 + 7 = 13. selected_experts is mlp_hooks[1] = 14,
-    # expert_weighted_outputs is mlp_hooks[2] = 15.
     after_res1 = my_hooks[2]
     after_norm2 = my_hooks[3]
-    selected_experts = my_hooks[14]
-    weighted_outputs = my_hooks[15]
+    if is_moe:
+        selected_experts = my_hooks[14]
+        weighted_outputs = my_hooks[15]
+    else:
+        selected_experts = None
+        weighted_outputs = None
     return next_hidden, (after_res1, after_norm2, selected_experts, weighted_outputs)
 
 
 # ---------------------------------------------------------------------------
 # Pipeline forward.
 # ---------------------------------------------------------------------------
-def pipeline_forward(model, cfg, owned, rank, world_size, local_rank,
-                     input_ids, attention_mask):
+def pipeline_forward(model, cfg, model_cfg, owned, owned_moe, rank, world_size,
+                     local_rank, input_ids, attention_mask):
     """Run a single forward pass across the pipeline.
 
     Inputs (input_ids, attention_mask) are already on this rank's GPU. Rank 0
     embeds; intermediate ranks recv/send hidden_state; rank world_size-1 runs
     the final RMSNorm (and discards the result).
 
+    `owned`     is the full list of decoder layer indices this rank runs
+                forward on (may include dense layers).
+    `owned_moe` is the subset of `owned` whose decoder layer is MoE; hooks are
+                only captured for these.
+
     Returns the per-rank hook tensors as a dict with keys:
-        after_res1:        [n_owned, bsz, n_tok, d_e]   (float32, on cuda)
-        after_norm2:       [n_owned, bsz, n_tok, d_e]   (float32, on cuda)
-        selected_experts:  [n_owned, bsz, n_tok, top_k] (long,    on cuda)
-        weighted_outputs:  [n_owned, bsz, n_tok, top_k, d_e] (float32, on cuda)
+        after_res1:        [n_owned_moe, bsz, n_tok, d_e]   (float32, on cuda)
+        after_norm2:       [n_owned_moe, bsz, n_tok, d_e]   (float32, on cuda)
+        selected_experts:  [n_owned_moe, bsz, n_tok, top_k] (long,    on cuda)
+        weighted_outputs:  [n_owned_moe, bsz, n_tok, top_k, d_e] (float32, on cuda)
     All ranks must call this in lock-step (no early return) to keep send/recv
     paired.
     """
     inner = model.model
     bsz, n_tok = input_ids.shape
     gpu = f"cuda:{local_rank}"
+    moe_layers_set = set(model_cfg["moe_layers"])
+    layer_kwargs_fn = model_cfg["layer_kwargs_fn"]
+    needs_position_embeddings = model_cfg["needs_position_embeddings"]
+    top_k = model_cfg["top_k"]
 
     # Position IDs & rotary embeddings — derive locally on every rank.
-    # We need a "fake" hidden_states tensor for shape/dtype only when computing
-    # rotary embeddings. Use embeddings on rank 0, else a zero-shaped tensor.
     if rank == 0:
         hidden_states = inner.embed_tokens(input_ids)
     else:
@@ -320,26 +389,34 @@ def pipeline_forward(model, cfg, owned, rank, world_size, local_rank,
         attention_mask, hidden_states, cache_position,
         past_key_values=None, output_attentions=False,
     )
-    position_embeddings = inner.rotary_emb(hidden_states, position_ids)
+    # Position embeddings: Qwen3 needs them precomputed; DeepSeek attention
+    # computes rotary internally so we skip.
+    if needs_position_embeddings:
+        position_embeddings = inner.rotary_emb(hidden_states, position_ids)
+    else:
+        position_embeddings = None
 
-    # Run owned layers, collecting hooks.
+    # Run owned layers; collect hooks ONLY for MoE layers.
     after_res1_chunks = []
     after_norm2_chunks = []
     selected_chunks = []
     weighted_chunks = []
     for i in owned:
         layer = inner.layers[i]
+        is_moe = i in moe_layers_set
         hidden_states, hooks = call_layer(
-            layer, hidden_states, causal_mask, position_ids, position_embeddings
+            layer, hidden_states, causal_mask, position_ids, position_embeddings,
+            layer_kwargs_fn, is_moe,
         )
+        if not is_moe:
+            continue  # skip hook capture for dense layers
         ar, an, se, wo = hooks
-        # Reshape weighted_outputs from [bsz*n_tok, top_k, hidden] -> [bsz, n_tok, top_k, hidden].
-        # And selected_experts from [bsz*n_tok, top_k] -> [bsz, n_tok, top_k].
+        # Reshape: [bsz*n_tok, top_k, hidden] -> [bsz, n_tok, top_k, hidden]
+        # and [bsz*n_tok, top_k] -> [bsz, n_tok, top_k].
         d_e = cfg.hidden_size
-        top_k = cfg.num_experts_per_tok
         wo = wo.reshape(bsz, n_tok, top_k, d_e)
         se = se.reshape(bsz, n_tok, top_k)
-        # Cast to the dtypes rank 0 expects (float32 for activations, long for selection).
+        # Cast to dtypes rank 0 expects.
         after_res1_chunks.append(ar.detach().to(torch.float32))
         after_norm2_chunks.append(an.detach().to(torch.float32))
         selected_chunks.append(se.detach().to(torch.long))
@@ -347,104 +424,142 @@ def pipeline_forward(model, cfg, owned, rank, world_size, local_rank,
 
     # Send to next rank.
     if rank < world_size - 1:
-        # bf16 contiguous tensor.
         send_buf = hidden_states.contiguous().to(torch.bfloat16)
         dist.send(send_buf, dst=rank + 1)
     else:
         # Last rank — apply final norm and discard.
         _ = inner.norm(hidden_states)
 
-    hooks = {
-        "after_res1":       torch.stack(after_res1_chunks,  dim=0),  # [n_owned, bsz, n_tok, d_e]
-        "after_norm2":      torch.stack(after_norm2_chunks, dim=0),
-        "selected_experts": torch.stack(selected_chunks,    dim=0),
-        "weighted_outputs": torch.stack(weighted_chunks,    dim=0),
-    }
+    if len(after_res1_chunks) > 0:
+        hooks = {
+            "after_res1":       torch.stack(after_res1_chunks,  dim=0),
+            "after_norm2":      torch.stack(after_norm2_chunks, dim=0),
+            "selected_experts": torch.stack(selected_chunks,    dim=0),
+            "weighted_outputs": torch.stack(weighted_chunks,    dim=0),
+        }
+    else:
+        # This rank owns only dense layers — empty hook tensors.
+        d_e = cfg.hidden_size
+        hooks = {
+            "after_res1":       torch.empty((0, bsz, n_tok, d_e),         dtype=torch.float32, device=gpu),
+            "after_norm2":      torch.empty((0, bsz, n_tok, d_e),         dtype=torch.float32, device=gpu),
+            "selected_experts": torch.empty((0, bsz, n_tok, top_k),       dtype=torch.long,    device=gpu),
+            "weighted_outputs": torch.empty((0, bsz, n_tok, top_k, d_e),  dtype=torch.float32, device=gpu),
+        }
     return hooks
 
 
 # ---------------------------------------------------------------------------
 # Gather per-rank hook tensors to rank 0, ordered by layer index.
 # ---------------------------------------------------------------------------
-def gather_hooks(hooks, rank, world_size, n_total_layers, bsz, n_tok,
-                 d_e, top_k, local_rank):
+def _moe_slice(rank_, world_size, n_total_decoder_layers, moe_layers_sorted):
+    """Compute the MoE-layer index range [moe_start, moe_end) owned by `rank_`.
+
+    `moe_layers_sorted` is the sorted list of MoE decoder-layer indices. We
+    partition all decoder layers (dense + MoE) across ranks; each rank's MoE
+    contribution is the subset of its decoder-layer range that lies in
+    moe_layers_sorted. Returns positions in the global MoE-axis (i.e. indices
+    into moe_layers_sorted), not into the full decoder stack.
+    """
+    s_dec, e_dec = partition_layers(n_total_decoder_layers, world_size, rank_)
+    # Count how many MoE layers come before s_dec and how many are in [s_dec, e_dec).
+    moe_start = sum(1 for ml in moe_layers_sorted if ml < s_dec)
+    moe_count = sum(1 for ml in moe_layers_sorted if s_dec <= ml < e_dec)
+    return moe_start, moe_start + moe_count
+
+
+def gather_hooks(hooks, rank, world_size, n_total_decoder_layers,
+                 moe_layers_sorted, bsz, n_tok, d_e, top_k, local_rank):
     """All ranks call this. Returns full hook tensors on rank 0 (None elsewhere).
 
-    Uses point-to-point send/recv: each non-zero rank sends its 4 tensors to
-    rank 0 in deterministic order; rank 0 assembles by stacking along layer
-    axis.
+    Each rank contributed hook tensors of shape [n_owned_moe, ...]. Rank 0
+    assembles a global tensor of shape [n_total_moe, ...] where n_total_moe =
+    len(moe_layers_sorted). Per-rank slot positions are computed via
+    _moe_slice.
     """
+    n_total_moe = len(moe_layers_sorted)
     if rank == 0:
         out = {
-            "after_res1":       torch.empty((n_total_layers, bsz, n_tok, d_e), dtype=torch.float32, device=f"cuda:{local_rank}"),
-            "after_norm2":      torch.empty((n_total_layers, bsz, n_tok, d_e), dtype=torch.float32, device=f"cuda:{local_rank}"),
-            "selected_experts": torch.empty((n_total_layers, bsz, n_tok, top_k), dtype=torch.long, device=f"cuda:{local_rank}"),
-            "weighted_outputs": torch.empty((n_total_layers, bsz, n_tok, top_k, d_e), dtype=torch.float32, device=f"cuda:{local_rank}"),
+            "after_res1":       torch.empty((n_total_moe, bsz, n_tok, d_e), dtype=torch.float32, device=f"cuda:{local_rank}"),
+            "after_norm2":      torch.empty((n_total_moe, bsz, n_tok, d_e), dtype=torch.float32, device=f"cuda:{local_rank}"),
+            "selected_experts": torch.empty((n_total_moe, bsz, n_tok, top_k), dtype=torch.long, device=f"cuda:{local_rank}"),
+            "weighted_outputs": torch.empty((n_total_moe, bsz, n_tok, top_k, d_e), dtype=torch.float32, device=f"cuda:{local_rank}"),
         }
         # Fill rank-0 slice.
-        s0, e0 = partition_layers(n_total_layers, world_size, 0)
-        out["after_res1"][s0:e0]       = hooks["after_res1"]
-        out["after_norm2"][s0:e0]      = hooks["after_norm2"]
-        out["selected_experts"][s0:e0] = hooks["selected_experts"]
-        out["weighted_outputs"][s0:e0] = hooks["weighted_outputs"]
+        s0, e0 = _moe_slice(0, world_size, n_total_decoder_layers, moe_layers_sorted)
+        if e0 > s0:
+            out["after_res1"][s0:e0]       = hooks["after_res1"]
+            out["after_norm2"][s0:e0]      = hooks["after_norm2"]
+            out["selected_experts"][s0:e0] = hooks["selected_experts"]
+            out["weighted_outputs"][s0:e0] = hooks["weighted_outputs"]
         # Recv from other ranks.
         for src in range(1, world_size):
-            s, e = partition_layers(n_total_layers, world_size, src)
-            dist.recv(out["after_res1"][s:e],       src=src)
-            dist.recv(out["after_norm2"][s:e],      src=src)
-            dist.recv(out["selected_experts"][s:e], src=src)
-            dist.recv(out["weighted_outputs"][s:e], src=src)
+            s, e = _moe_slice(src, world_size, n_total_decoder_layers, moe_layers_sorted)
+            if e > s:
+                dist.recv(out["after_res1"][s:e],       src=src)
+                dist.recv(out["after_norm2"][s:e],      src=src)
+                dist.recv(out["selected_experts"][s:e], src=src)
+                dist.recv(out["weighted_outputs"][s:e], src=src)
         return out
     else:
-        dist.send(hooks["after_res1"].contiguous(),       dst=0)
-        dist.send(hooks["after_norm2"].contiguous(),      dst=0)
-        dist.send(hooks["selected_experts"].contiguous(), dst=0)
-        dist.send(hooks["weighted_outputs"].contiguous(), dst=0)
+        if hooks["after_res1"].shape[0] > 0:
+            dist.send(hooks["after_res1"].contiguous(),       dst=0)
+            dist.send(hooks["after_norm2"].contiguous(),      dst=0)
+            dist.send(hooks["selected_experts"].contiguous(), dst=0)
+            dist.send(hooks["weighted_outputs"].contiguous(), dst=0)
         return None
 
 
 # ---------------------------------------------------------------------------
 # Gather router gate weights and RMSNorm weights to rank 0 (once at startup).
 # ---------------------------------------------------------------------------
-def gather_layer_weights(model, owned, rank, world_size, n_total_layers, d_e,
-                         n_experts, local_rank, gate_path, norm_path):
-    """Collect G_recv[R] (router gate) and gamma_recv[R] (post_attn norm) from
-    every layer onto rank 0 in float32.
+def gather_layer_weights(model, owned, rank, world_size, n_total_decoder_layers,
+                         moe_layers_sorted, d_e, n_experts, local_rank,
+                         gate_path, norm_path):
+    """Collect G_recv (router gate) and gamma_recv (post-attn norm) from every
+    MoE layer onto rank 0 in float32. Dense layers are skipped — they don't
+    have a router.
 
-    G_recv shape: [n_layers, n_experts, d_e]
-    gamma_recv shape: [n_layers, d_e]
+    G_recv shape:     [n_moe_layers, n_experts, d_e]
+    gamma_recv shape: [n_moe_layers, d_e]
     """
     inner = model.model
     gpu = f"cuda:{local_rank}"
     gate_of = attrgetter(gate_path)
     norm_of = attrgetter(norm_path)
+    moe_set = set(moe_layers_sorted)
 
-    # Local slices.
-    if owned:
+    # Local slice: only MoE-bearing decoder layers among this rank's owned set.
+    owned_moe = [R for R in owned if R in moe_set]
+    if owned_moe:
         local_G = torch.stack(
-            [gate_of(inner.layers[R]).weight.detach().to(torch.float32) for R in owned]
-        )  # [n_owned, n_experts, d_e]
+            [gate_of(inner.layers[R]).weight.detach().to(torch.float32) for R in owned_moe]
+        )  # [n_owned_moe, n_experts, d_e]
         local_gamma = torch.stack(
-            [norm_of(inner.layers[R]).weight.detach().to(torch.float32) for R in owned]
-        )  # [n_owned, d_e]
+            [norm_of(inner.layers[R]).weight.detach().to(torch.float32) for R in owned_moe]
+        )  # [n_owned_moe, d_e]
     else:
         local_G = torch.empty((0, n_experts, d_e), dtype=torch.float32, device=gpu)
         local_gamma = torch.empty((0, d_e), dtype=torch.float32, device=gpu)
 
     if rank == 0:
-        G_full = torch.empty((n_total_layers, n_experts, d_e), dtype=torch.float32, device=gpu)
-        gamma_full = torch.empty((n_total_layers, d_e), dtype=torch.float32, device=gpu)
-        s0, e0 = partition_layers(n_total_layers, world_size, 0)
-        G_full[s0:e0] = local_G
-        gamma_full[s0:e0] = local_gamma
+        n_total_moe = len(moe_layers_sorted)
+        G_full = torch.empty((n_total_moe, n_experts, d_e), dtype=torch.float32, device=gpu)
+        gamma_full = torch.empty((n_total_moe, d_e), dtype=torch.float32, device=gpu)
+        s0, e0 = _moe_slice(0, world_size, n_total_decoder_layers, moe_layers_sorted)
+        if e0 > s0:
+            G_full[s0:e0] = local_G
+            gamma_full[s0:e0] = local_gamma
         for src in range(1, world_size):
-            s, e = partition_layers(n_total_layers, world_size, src)
-            dist.recv(G_full[s:e], src=src)
-            dist.recv(gamma_full[s:e], src=src)
+            s, e = _moe_slice(src, world_size, n_total_decoder_layers, moe_layers_sorted)
+            if e > s:
+                dist.recv(G_full[s:e], src=src)
+                dist.recv(gamma_full[s:e], src=src)
         return G_full, gamma_full
     else:
-        dist.send(local_G.contiguous(), dst=0)
-        dist.send(local_gamma.contiguous(), dst=0)
+        if local_G.shape[0] > 0:
+            dist.send(local_G.contiguous(), dst=0)
+            dist.send(local_gamma.contiguous(), dst=0)
         return None, None
 
 
@@ -482,23 +597,28 @@ def main():
     # ---- Load model (per-rank slice) ----
     rprint(rank, f"Loading {MODEL_ID} ...")
     t0 = time.time()
-    model, cfg, owned = load_partitioned_model(MODEL_ID, rank, world_size, local_rank)
+    model, cfg, owned = load_partitioned_model(MODEL, rank, world_size, local_rank)
     if dist.is_initialized():
         dist.barrier()
     rprint(rank, f"  loaded in {time.time() - t0:.1f}s")
 
-    # Sanity: registry's N_LAYERS must equal config's num_hidden_layers (all MoE).
-    assert N_LAYERS == cfg.num_hidden_layers, (
-        f"MOE_LAYERS={N_LAYERS} but config has {cfg.num_hidden_layers}; "
-        "Qwen3-235B-A22B is supposed to be all-MoE."
+    N_TOTAL_DECODER_LAYERS = cfg.num_hidden_layers
+    # Sanity: every entry in MOE_LAYERS must be a valid decoder layer index, and
+    # the total decoder count must match the model registry's max-layer + 1
+    # (when all layers are MoE) or the registry's last MoE layer + 1 (when
+    # there are dense layers at the start, e.g. DeepSeek-V2's layer 0).
+    assert max(MOE_LAYERS) < N_TOTAL_DECODER_LAYERS, (
+        f"MOE_LAYERS goes up to {max(MOE_LAYERS)} but model has only "
+        f"{N_TOTAL_DECODER_LAYERS} decoder layers."
     )
 
     # ---- Gather G_recv, gamma_recv to rank 0 ----
     rprint(rank, "Gathering router gate + post-attn norm weights to rank 0 ...")
     t0 = time.time()
     G_recv, gamma_recv = gather_layer_weights(
-        model, owned, rank, world_size, N_LAYERS, D_E, N_EXPERTS, local_rank,
-        gate_path=MODEL["gate_path"], norm_path="post_attention_layernorm",
+        model, owned, rank, world_size, N_TOTAL_DECODER_LAYERS, MOE_LAYERS,
+        D_E, N_EXPERTS, local_rank,
+        gate_path=MODEL["gate_path"], norm_path=MODEL["norm_path"],
     )
     if dist.is_initialized():
         dist.barrier()
@@ -576,15 +696,16 @@ def main():
             bsz_i, n_tok_i = input_ids.shape
 
         # --- Pipeline forward + hook capture ---
+        owned_moe = [i for i in owned if i in set(MOE_LAYERS)]
         hooks = pipeline_forward(
-            model, cfg, owned, rank, world_size, local_rank,
+            model, cfg, MODEL, owned, owned_moe, rank, world_size, local_rank,
             input_ids, attention_mask,
         )
 
         # --- Gather hooks to rank 0 ---
         full_hooks = gather_hooks(
-            hooks, rank, world_size, N_LAYERS, bsz_i, n_tok_i,
-            D_E, TOP_K, local_rank,
+            hooks, rank, world_size, N_TOTAL_DECODER_LAYERS, MOE_LAYERS,
+            bsz_i, n_tok_i, D_E, TOP_K, local_rank,
         )
 
         # --- Rank 0 does the score-decomposition accumulator update ---
