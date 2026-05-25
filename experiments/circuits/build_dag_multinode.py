@@ -99,6 +99,27 @@ def _layer_kwargs_deepseek(causal_mask, position_ids, position_embeddings):
     )
 
 
+# ---------------------------------------------------------------------------
+# Per-model causal-mask builders.
+# ---------------------------------------------------------------------------
+# Qwen3 exposes _update_causal_mask on the inner model (newer transformers
+# API). DeepSeek-V2 uses the older `_prepare_4d_causal_attention_mask`
+# free function from transformers.modeling_attn_mask_utils.
+def _causal_mask_qwen3(inner, attention_mask, hidden_states, cache_position):
+    return inner._update_causal_mask(
+        attention_mask, hidden_states, cache_position,
+        past_key_values=None, output_attentions=False,
+    )
+
+
+def _causal_mask_deepseek(inner, attention_mask, hidden_states, cache_position):
+    from transformers.modeling_attn_mask_utils import _prepare_4d_causal_attention_mask
+    bsz, seq_len = hidden_states.shape[:2]
+    return _prepare_4d_causal_attention_mask(
+        attention_mask, (bsz, seq_len), hidden_states, past_key_values_length=0,
+    )
+
+
 # Model registry. Only multi-node targets live here; single-node models stay in
 # build_dag.py. Each entry must specify:
 #   cls                 : the customized ForCausalLM class to instantiate
@@ -122,6 +143,7 @@ MODELS = {
         "gate_path": "mlp.gate",
         "norm_path": "post_attention_layernorm",
         "layer_kwargs_fn": _layer_kwargs_qwen3,
+        "causal_mask_fn": _causal_mask_qwen3,
         "needs_position_embeddings": True,
     },
     "deepseek-v2": {
@@ -135,6 +157,7 @@ MODELS = {
         "gate_path": "mlp.gate",
         "norm_path": "post_attention_layernorm",
         "layer_kwargs_fn": _layer_kwargs_deepseek,
+        "causal_mask_fn": _causal_mask_deepseek,
         "needs_position_embeddings": False,
     },
 }
@@ -390,10 +413,8 @@ def pipeline_forward(model, cfg, model_cfg, owned, owned_moe, rank, world_size,
 
     position_ids = torch.arange(n_tok, device=gpu).unsqueeze(0).expand(bsz, -1)
     cache_position = torch.arange(n_tok, device=gpu)
-    causal_mask = inner._update_causal_mask(
-        attention_mask, hidden_states, cache_position,
-        past_key_values=None, output_attentions=False,
-    )
+    causal_mask_fn = model_cfg["causal_mask_fn"]
+    causal_mask = causal_mask_fn(inner, attention_mask, hidden_states, cache_position)
     # Position embeddings: Qwen3 needs them precomputed; DeepSeek attention
     # computes rotary internally so we skip.
     if needs_position_embeddings:
