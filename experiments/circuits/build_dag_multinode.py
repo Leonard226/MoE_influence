@@ -37,6 +37,7 @@ import importlib
 import os
 import sys
 import time
+from datetime import timedelta
 from operator import attrgetter
 
 import torch
@@ -145,12 +146,16 @@ def init_dist():
     """Initialize NCCL process group from torchrun env vars.
 
     Falls back to single-process mode (RANK=0, WORLD_SIZE=1) for local debug.
+
+    Timeout: 4h. The default 10 min is far too short for rank-0-only model
+    downloads (DeepSeek-V2 is ~600 GB; non-zero ranks wait at the post-download
+    barrier and would otherwise time out).
     """
     rank = int(os.environ.get("RANK", 0))
     world_size = int(os.environ.get("WORLD_SIZE", 1))
     local_rank = int(os.environ.get("LOCAL_RANK", 0))
     if world_size > 1:
-        dist.init_process_group(backend="nccl")
+        dist.init_process_group(backend="nccl", timeout=timedelta(hours=4))
     torch.cuda.set_device(local_rank)
     return rank, world_size, local_rank
 
