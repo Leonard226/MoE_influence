@@ -65,6 +65,103 @@ def update_topk_per_sender(top_weight, top_prompt, top_pos, top_token,
     top_token.copy_( torch.gather(combined_t,   1, topk.indices))
 
 
+def sparsify_super_vertex(W, vertex_q: float = 0.995,
+                          vertex_floor_frac: float = 0.4,
+                          edge_floor_frac: float = 0.1):
+    """Vertex-first sparsification (SE double-criterion + per-vertex edge floor).
+
+    Stage 1: identify super-vertices by out-strength. A vertex (c, j) is super
+        iff out_strength[c, j] > max(P_q(out_strength), vertex_floor_frac * max).
+    Stage 2: for each super-vertex, keep its outgoing edges with magnitude
+        >= edge_floor_frac * (that vertex's own max outgoing edge). The SE max/10
+        floor applied per-sender (not globally) guarantees every super-vertex
+        contributes at least one visible edge.
+
+    Args:
+        W: [L, N, L, N] edge tensor (sender_layer, sender_expert, recv_layer, recv_expert).
+        vertex_q: percentile used for the vertex-level SE criterion.
+        vertex_floor_frac: fraction of max out-strength used as the vertex floor.
+        edge_floor_frac: fraction of each super-vertex's max outgoing edge.
+
+    Returns:
+        W_filtered: same shape as W, with non-surviving entries zeroed.
+        super_mask: [L, N] bool, True for super-vertices.
+        info: dict of diagnostic stats.
+    """
+    import torch
+    L, N = W.shape[0], W.shape[1]
+    s_idx = torch.arange(L).view(-1, 1, 1, 1)
+    r_idx = torch.arange(L).view(1, 1, -1, 1)
+    fwd = (s_idx < r_idx).expand_as(W)
+    W_abs = torch.abs(W.float())
+
+    # (1) Super-vertex set.
+    out_strength = (W_abs * fwd.float()).sum(dim=(2, 3))                  # [L, N]
+    os_vals = out_strength[out_strength > 1e-9].cpu().numpy()
+    t_vertex = max(float(np.quantile(os_vals, vertex_q)),
+                   float(vertex_floor_frac * os_vals.max()))
+    super_mask = out_strength > t_vertex                                  # [L, N] bool
+
+    # (2) Per-vertex edge floor.
+    W_super = W * super_mask.unsqueeze(-1).unsqueeze(-1)
+    W_super_abs = torch.abs(W_super.float()) * fwd.float()
+    per_sender_max = W_super_abs.flatten(2).max(dim=-1).values            # [L, N]
+    per_sender_thr = per_sender_max * edge_floor_frac
+    keep_mask = (W_super_abs >= per_sender_thr.unsqueeze(-1).unsqueeze(-1)) \
+                & fwd & (W_super_abs > 1e-9)
+    W_filtered = torch.where(keep_mask, W_super, torch.zeros_like(W_super))
+
+    info = {
+        "n_super": int(super_mask.sum().item()),
+        "n_edges_kept": int(keep_mask.sum().item()),
+        "t_vertex": t_vertex,
+        "per_sender_max_min": float(per_sender_max[super_mask].min().item()) if super_mask.any() else 0.0,
+        "per_sender_max_max": float(per_sender_max[super_mask].max().item()) if super_mask.any() else 0.0,
+    }
+    return W_filtered, super_mask, info
+
+
+def sparsify_edges(W, edge_q: float = 0.9999, edge_floor_frac: float = 0.1):
+    """Edge-first sparsification (global SE criterion on edge magnitudes).
+
+    Keep edge iff |W| >= max(P_q(|forward edges|), edge_floor_frac * max(|forward edges|)).
+    No per-vertex consideration; the strongest edges anywhere in the graph
+    survive. Anchors on connections rather than nodes — naturally surfaces
+    chains/cascades.
+
+    Args:
+        W: [L, N, L, N] edge tensor.
+        edge_q: percentile used for the edge-level SE criterion.
+        edge_floor_frac: fraction of global max used as the floor.
+
+    Returns:
+        W_filtered: same shape as W, with non-surviving entries zeroed.
+        info: dict of diagnostic stats.
+    """
+    import torch
+    L = W.shape[0]
+    s_idx = torch.arange(L).view(-1, 1, 1, 1)
+    r_idx = torch.arange(L).view(1, 1, -1, 1)
+    fwd = (s_idx < r_idx).expand_as(W)
+    W_abs = torch.abs(W.float())
+
+    edge_vals = W_abs[fwd]
+    edge_vals = edge_vals[edge_vals > 1e-9].cpu().numpy()
+    t_edge = max(float(np.quantile(edge_vals, edge_q)),
+                 float(edge_floor_frac * edge_vals.max()))
+
+    keep_mask = (W_abs >= t_edge) & fwd
+    W_filtered = torch.where(keep_mask, W, torch.zeros_like(W))
+
+    info = {
+        "n_edges_total": int(edge_vals.size),
+        "n_edges_kept": int(keep_mask.sum().item()),
+        "t_edge": t_edge,
+        "edge_max": float(edge_vals.max()),
+    }
+    return W_filtered, info
+
+
 def get_thresholds(dag: dict, target: str, quantiles: list) -> list:
     import torch
 
