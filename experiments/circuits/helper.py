@@ -350,6 +350,12 @@ def show_enhanced_layered_graph(g, quantile: float, target: str, model: str, dat
         norm = mcolors.Normalize(vmin=cmin, vmax=cmax)
         cbar_label = "Weight Magnitude |w|"
 
+    # Width normalization: use the same fixed range as color when the caller
+    # provides one, so an edge of magnitude X renders at the same thickness in
+    # every model. Falls back to per-graph min/max for backward compatibility.
+    width_min = color_vmin if color_vmin is not None else min_mag
+    width_max = color_vmax if color_vmax is not None else max_mag
+
     edge_colors, edge_widths = [], []
     for e in g.es:
         u, v = e.source, e.target
@@ -359,7 +365,8 @@ def show_enhanced_layered_graph(g, quantile: float, target: str, model: str, dat
         val_for_color = w if target.upper() in ["AVG"] else abs(w)
         edge_colors.append(cmap(norm(val_for_color)))
 
-        w_norm = (abs(w) - min_mag) / (max_mag - min_mag + 1e-9)
+        w_norm = (abs(w) - width_min) / (width_max - width_min + 1e-9)
+        w_norm = max(0.0, min(1.0, w_norm))  # clamp in case |w| sits outside [vmin, vmax]
         edge_widths.append(1.2 + (w_norm * 4.3))
 
     # --- DRAWING ---
