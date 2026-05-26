@@ -128,33 +128,40 @@ def filter_to_paths(g, min_length: int = 2):
     Use this on the edge-first sparsified graph to suppress isolated single
     edges and surface true circuits (chains of sequential routing decisions).
 
-    For min_length=2 (the typical use): an edge u->v is kept iff u has any
-    incoming edge OR v has any outgoing edge in the original graph. Either
-    condition gives a 2-edge path through (u, v):
-        ?->u->v   (incoming + this)
-        u->v->?   (this + outgoing)
-
-    For min_length>=3: iteratively prune edges whose endpoints can no longer
-    reach the required chain length. A simple fixed-point on the same
-    (in-degree, out-degree) test, repeated min_length-1 times, approximates
-    "edge sits in a path of >= min_length total edges". It is conservative
-    (may remove some legitimate participants in the final iteration), but
-    surfaces only the connected backbone of the graph.
+    Algorithm (assumes `g` is a DAG, which our routing graphs are by
+    construction — only forward edges, sender_layer < receiver_layer):
+      1. Topological sort.
+      2. in_path[v]  = longest path (in edges) ending at v.
+      3. out_path[v] = longest path (in edges) starting at v.
+      4. Edge u->v is part of a length-L path iff
+            in_path[u] + 1 + out_path[v] >= min_length.
 
     Preserves all vertex attributes (e.g. 'is_super', 'layer').
     """
-    if min_length < 2:
-        raise ValueError("min_length must be >= 2 (1 would mean unfiltered)")
-    g_curr = g
-    for _ in range(min_length - 1):
-        in_deg = g_curr.indegree()
-        out_deg = g_curr.outdegree()
-        edges_to_keep = [e.index for e in g_curr.es
-                         if in_deg[e.source] > 0 or out_deg[e.target] > 0]
-        if len(edges_to_keep) == g_curr.ecount():
-            break  # fixed point reached
-        g_curr = g_curr.subgraph_edges(edges_to_keep, delete_vertices=False)
-    return g_curr
+    if min_length < 1:
+        raise ValueError("min_length must be >= 1")
+    n = g.vcount()
+    topo = g.topological_sorting()  # forward topological order
+
+    in_path = [0] * n
+    for v in topo:
+        for u in g.predecessors(v):
+            cand = in_path[u] + 1
+            if cand > in_path[v]:
+                in_path[v] = cand
+
+    out_path = [0] * n
+    for v in reversed(topo):
+        for w in g.successors(v):
+            cand = out_path[w] + 1
+            if cand > out_path[v]:
+                out_path[v] = cand
+
+    edges_to_keep = [
+        e.index for e in g.es
+        if in_path[e.source] + 1 + out_path[e.target] >= min_length
+    ]
+    return g.subgraph_edges(edges_to_keep, delete_vertices=False)
 
 
 def sparsify_edges(W, edge_q: float = 0.9999, edge_floor_frac: float = 0.1):
