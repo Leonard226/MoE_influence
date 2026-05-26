@@ -218,14 +218,22 @@ def thresholding_routing_graph(dag: dict, target: str, threshold: float) -> ig.G
 
 
 def show_enhanced_layered_graph(g, quantile: float, target: str, model: str, dataset: str, n_prompts: int,
-                                 layer_labels: list | None = None) -> None:
+                                 layer_labels: list | None = None,
+                                 color_vmin: float | None = None,
+                                 color_vmax: float | None = None) -> None:
     """Layered DAG visualization. Reads N_LAYERS / N_EXPERTS from the graph's
     `layer` vertex attribute (set by thresholding_routing_graph / dag_to_igraph).
 
+    quantile: cosmetic only -- a number printed in the plot title's "Threshold:"
+        line. Has no effect on what gets drawn. Vestigial; pass anything informative.
     layer_labels: optional mapping from internal DAG layer index (0..N_LAYERS-1)
         to the model's actual layer number. Use this when the DAG skips dense
         layers (e.g. DeepSeek-V2-Lite has dense layer 0, so internal M0 == model
         layer 1). If None, internal indices are used as-is. Pass dag["moe_layers"].
+    color_vmin, color_vmax: fix the colorbar to this absolute range so the same
+        edge magnitude looks the same shade across different models. For P_flip
+        pass (0.0, 1.0). If None, defaults to the per-graph min/max magnitude
+        (legacy behavior; makes cross-graph comparison harder).
     """
     edge_list = g.get_edgelist()
     if not edge_list:
@@ -279,13 +287,17 @@ def show_enhanced_layered_graph(g, quantile: float, target: str, model: str, dat
     # --- COLOR LOGIC ---
     if target.upper() in ["AVG"]:
         cmap = plt.cm.RdBu
-        color_lim = max(abs(max_w), abs(min_w))
+        # Signed colormap centered at 0. Caller-provided color_vmax overrides
+        # the per-graph symmetric range so cross-model plots share a scale.
+        color_lim = color_vmax if color_vmax is not None else max(abs(max_w), abs(min_w))
         norm = mcolors.TwoSlopeNorm(vcenter=0, vmin=-color_lim, vmax=color_lim)
         cbar_label = "Inhibition vs Promotion"
     else:
         colors_array = plt.cm.Reds(np.linspace(0.35, 1.0, 256))
         cmap = mcolors.LinearSegmentedColormap.from_list('IntenseReds', colors_array)
-        norm = mcolors.Normalize(vmin=min_mag, vmax=max_mag)
+        cmin = color_vmin if color_vmin is not None else min_mag
+        cmax = color_vmax if color_vmax is not None else max_mag
+        norm = mcolors.Normalize(vmin=cmin, vmax=cmax)
         cbar_label = "Weight Magnitude |w|"
 
     edge_colors, edge_widths = [], []
