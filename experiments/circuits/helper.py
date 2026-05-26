@@ -121,6 +121,42 @@ def sparsify_super_vertex(W, vertex_q: float = 0.995,
     return W_filtered, super_mask, info
 
 
+def filter_to_paths(g, min_length: int = 2):
+    """Return a copy of `g` with only edges that participate in a directed
+    path of length >= `min_length` edges.
+
+    Use this on the edge-first sparsified graph to suppress isolated single
+    edges and surface true circuits (chains of sequential routing decisions).
+
+    For min_length=2 (the typical use): an edge u->v is kept iff u has any
+    incoming edge OR v has any outgoing edge in the original graph. Either
+    condition gives a 2-edge path through (u, v):
+        ?->u->v   (incoming + this)
+        u->v->?   (this + outgoing)
+
+    For min_length>=3: iteratively prune edges whose endpoints can no longer
+    reach the required chain length. A simple fixed-point on the same
+    (in-degree, out-degree) test, repeated min_length-1 times, approximates
+    "edge sits in a path of >= min_length total edges". It is conservative
+    (may remove some legitimate participants in the final iteration), but
+    surfaces only the connected backbone of the graph.
+
+    Preserves all vertex attributes (e.g. 'is_super', 'layer').
+    """
+    if min_length < 2:
+        raise ValueError("min_length must be >= 2 (1 would mean unfiltered)")
+    g_curr = g
+    for _ in range(min_length - 1):
+        in_deg = g_curr.indegree()
+        out_deg = g_curr.outdegree()
+        edges_to_keep = [e.index for e in g_curr.es
+                         if in_deg[e.source] > 0 or out_deg[e.target] > 0]
+        if len(edges_to_keep) == g_curr.ecount():
+            break  # fixed point reached
+        g_curr = g_curr.subgraph_edges(edges_to_keep, delete_vertices=False)
+    return g_curr
+
+
 def sparsify_edges(W, edge_q: float = 0.9999, edge_floor_frac: float = 0.1):
     """Edge-first sparsification (global SE criterion on edge magnitudes).
 
