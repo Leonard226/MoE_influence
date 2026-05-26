@@ -137,6 +137,12 @@ def filter_to_paths(g, min_length: int = 2):
             in_path[u] + 1 + out_path[v] >= min_length.
 
     Preserves all vertex attributes (e.g. 'is_super', 'layer').
+
+    Returns:
+        (g_filtered, max_path_len) where max_path_len is the length (in edges)
+        of the longest path in the *original* graph. Use it as a sanity check
+        when picking min_length — a min_length above max_path_len drops every
+        edge.
     """
     if min_length < 1:
         raise ValueError("min_length must be >= 1")
@@ -161,7 +167,8 @@ def filter_to_paths(g, min_length: int = 2):
         e.index for e in g.es
         if in_path[e.source] + 1 + out_path[e.target] >= min_length
     ]
-    return g.subgraph_edges(edges_to_keep, delete_vertices=False)
+    max_path_len = max(in_path) if in_path else 0
+    return g.subgraph_edges(edges_to_keep, delete_vertices=False), max_path_len
 
 
 def sparsify_edges(W, edge_q: float = 0.9999, edge_floor_frac: float = 0.1):
