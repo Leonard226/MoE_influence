@@ -25,92 +25,170 @@ import torch
 
 
 # ---------------------------------------------------------------------------
-# Token classification (coarse scheme, main.tex Sec 3.6).
+# Token classification (context-aware POS tags on raw text; main.tex Sec 3.6).
+#
+# We tag each prompt with spaCy and look up the POS for each model (sub)token
+# via the HuggingFace tokenizer's offset_mapping. This is model-agnostic (no
+# Ġ/##/▁ heuristics) and resolves homonyms via sentence context (e.g. "run"
+# as noun vs. verb).
 # ---------------------------------------------------------------------------
 
-TOKEN_CLASSES = [
-    "punctuation",
-    "bos_sink",
-    "digit",
-    "determiner",
-    "content",
-    "other",
-]
+TOKEN_CLASSES = ["content", "functional", "punctuation", "numeric", "special"]
 N_CLASSES = len(TOKEN_CLASSES)
 _CLASS_IDX = {name: i for i, name in enumerate(TOKEN_CLASSES)}
 
-_DETERMINERS = {
-    "a", "an", "the",
-    "this", "that", "these", "those",
-    "my", "your", "his", "her", "its", "our", "their",
-    "some", "any", "every", "no", "each", "all", "both", "few", "many",
+# spaCy UPOS -> macro class. INTJ ("oh", "wow") goes to content (semantic);
+# PART ("to", "n't") and AUX ("is", "would") to functional; X / SPACE to special.
+_UPOS_TO_CLASS = {
+    "NOUN":  "content",
+    "PROPN": "content",
+    "VERB":  "content",
+    "ADJ":   "content",
+    "ADV":   "content",
+    "INTJ":  "content",
+    "DET":   "functional",
+    "PRON":  "functional",
+    "ADP":   "functional",
+    "AUX":   "functional",
+    "CCONJ": "functional",
+    "SCONJ": "functional",
+    "CONJ":  "functional",
+    "PART":  "functional",
+    "PUNCT": "punctuation",
+    "SYM":   "punctuation",
+    "NUM":   "numeric",
+    "X":     "special",
+    "SPACE": "special",
 }
 
 
-def classify_token(s: str) -> int:
-    """Map a decoded token string to a TOKEN_CLASSES index."""
-    sl = s.lower().strip()
+def build_token_classification(
+    prompts,
+    tokenizer,
+    *,
+    max_length: int = 32,
+    spacy_model: str = "en_core_web_sm",
+    verbose: bool = False,
+) -> Dict[Tuple[int, int], int]:
+    """Build a (prompt_idx, position) -> class_idx lookup for the given prompts.
 
-    # Special tokens: angle-bracket-enclosed, BOS/EOS markers, full-width pipes
-    # (DeepSeek), underscored sentence markers, etc.
-    if len(sl) >= 3 and sl.startswith("<") and sl.endswith(">"):
-        return _CLASS_IDX["bos_sink"]
-    if ("begin" in sl and "sentence" in sl) or "endoftext" in sl \
-            or "startoftext" in sl or "im_start" in sl or "im_end" in sl:
-        return _CLASS_IDX["bos_sink"]
-    if "｜" in s and ("begin" in sl or "end" in sl):
-        return _CLASS_IDX["bos_sink"]
+    For each prompt we
+        1. tokenize with the model tokenizer (returning character offsets),
+        2. POS-tag the raw text with spaCy,
+        3. for each model (sub)token, look up the spaCy POS covering its char
+           span and map UPOS -> macro class.
 
-    stripped = s.strip()
-    if not stripped or all(not c.isalnum() for c in stripped):
-        return _CLASS_IDX["punctuation"]
-
-    if stripped.lower() in _DETERMINERS:
-        return _CLASS_IDX["determiner"]
-
-    if all(c.isdigit() or c in ".,-+$%" for c in stripped):
-        return _CLASS_IDX["digit"]
-
-    if any(c.isalpha() for c in stripped):
-        return _CLASS_IDX["content"]
-
-    return _CLASS_IDX["other"]
-
-
-def compute_class_histogram(top_token: torch.Tensor, top_weight: torch.Tensor,
-                            tokenizer) -> torch.Tensor:
-    """For each vertex (l, n), return a histogram over TOKEN_CLASSES from the
-    top-B routed tokens. Empty buffers fall back to all-mass-on-"other".
+    Model special tokens (BOS / EOS / pad / ...) and empty-span offsets are
+    classified as "special". Whitespace-only subwords (rare) fall back to
+    "functional".
 
     Args:
-        top_token: [L, N, B] int  -- token ids
-        top_weight: [L, N, B] float -- routing weights (sentinel <0 = unused slot)
-        tokenizer: HF tokenizer (must support `decode([id])`)
+        prompts: list of raw strings, indexed by prompt_idx -- typically the
+            same list `build_dag.py` consumed (re-call the dataset helper with
+            matching args to reproduce it exactly).
+        tokenizer: HuggingFace fast tokenizer (must support
+            `return_offsets_mapping`). Use the model's own tokenizer: the
+            position indices depend on it.
+        max_length: truncation length matching DAG-build time (default 32).
+        spacy_model: spaCy model name. `en_core_web_sm` is fast and adequate
+            for macro-class binning. Run once:
+                python -m spacy download en_core_web_sm
+
+    Returns:
+        dict[(prompt_idx, position) -> int (index into TOKEN_CLASSES)].
+    """
+    import spacy
+    nlp = spacy.load(spacy_model, disable=["parser", "ner", "lemmatizer"])
+
+    special_ids = {int(i) for i in tokenizer.all_special_ids}
+    out: Dict[Tuple[int, int], int] = {}
+    n_unknown = 0
+
+    for pi, prompt in enumerate(prompts):
+        enc = tokenizer(
+            prompt,
+            return_offsets_mapping=True,
+            truncation=True,
+            max_length=max_length,
+            return_attention_mask=False,
+        )
+        ids = enc["input_ids"]
+        offsets = enc["offset_mapping"]
+        doc = nlp(prompt)
+
+        for pos, (tid, (start, end)) in enumerate(zip(ids, offsets)):
+            # Specials: tokenizer's declared special set, or empty char span.
+            if int(tid) in special_ids or end <= start:
+                out[(pi, pos)] = _CLASS_IDX["special"]
+                continue
+
+            tok_text = prompt[start:end]
+            if not tok_text.strip():
+                # Pure-whitespace subword (rare). Treat as functional glue.
+                out[(pi, pos)] = _CLASS_IDX["functional"]
+                continue
+
+            # `alignment_mode="expand"` snaps to whole-word boundaries so
+            # subword pieces inherit the POS of the parent word.
+            span = doc.char_span(start, end, alignment_mode="expand")
+            if span is not None and len(span) >= 1:
+                upos = span[0].pos_
+            else:
+                # Fallback: midpoint scan over spaCy tokens.
+                mid = (start + end) // 2
+                upos = "X"
+                for st in doc:
+                    if st.idx <= mid < st.idx + len(st.text):
+                        upos = st.pos_
+                        break
+
+            cls_name = _UPOS_TO_CLASS.get(upos)
+            if cls_name is None:
+                n_unknown += 1
+                cls_name = "content" if any(c.isalpha() for c in tok_text) else "special"
+            out[(pi, pos)] = _CLASS_IDX[cls_name]
+
+        if verbose and (pi + 1) % 500 == 0:
+            print(f"  classified {pi + 1}/{len(prompts)} prompts", flush=True)
+
+    if verbose and n_unknown:
+        print(f"  {n_unknown} tokens had unmapped UPOS tags (used fallback)", flush=True)
+    return out
+
+
+def compute_class_histogram(
+    top_weight: torch.Tensor,
+    top_prompt: torch.Tensor,
+    top_pos: torch.Tensor,
+    classification: Dict[Tuple[int, int], int],
+) -> torch.Tensor:
+    """For each vertex (l, n), histogram over TOKEN_CLASSES from its top-B
+    routed events. Empty buckets fall back to all-mass-on-"special".
+
+    Args:
+        top_weight: [L, N, B] float -- routing weight (sentinel <0 = unused slot).
+        top_prompt: [L, N, B] int   -- global prompt index.
+        top_pos:    [L, N, B] int   -- position within the prompt.
+        classification: dict from build_token_classification.
 
     Returns:
         [L, N, N_CLASSES] tensor, each row sums to 1.
     """
-    L, N, B = top_token.shape
+    L, N, _ = top_weight.shape
     hist = torch.zeros(L, N, N_CLASSES, dtype=torch.float32)
-    other_idx = _CLASS_IDX["other"]
-
-    # Cache token-id -> class to amortise tokenizer.decode + classify_token.
-    tok2class: Dict[int, int] = {}
+    special_idx = _CLASS_IDX["special"]
 
     for l in range(L):
         for n in range(N):
             mask = top_weight[l, n] > 0
             if not mask.any():
-                hist[l, n, other_idx] = 1.0
+                hist[l, n, special_idx] = 1.0
                 continue
-            ids = top_token[l, n][mask].tolist()
+            prompts = top_prompt[l, n][mask].tolist()
+            positions = top_pos[l, n][mask].tolist()
             counts = torch.zeros(N_CLASSES, dtype=torch.float32)
-            for tid in ids:
-                cls = tok2class.get(tid)
-                if cls is None:
-                    cls = classify_token(tokenizer.decode([tid]))
-                    tok2class[tid] = cls
-                counts[cls] += 1
+            for pi, po in zip(prompts, positions):
+                counts[classification.get((int(pi), int(po)), special_idx)] += 1
             hist[l, n] = counts / counts.sum()
     return hist
 
@@ -166,7 +244,7 @@ def _shortest_path_costs(W_fwd: torch.Tensor, L: int, N: int,
 # ---------------------------------------------------------------------------
 
 def build_triple(dag: Dict[str, Any],
-                 tokenizer=None,
+                 classification: Optional[Dict[Tuple[int, int], int]] = None,
                  *,
                  beta: float = 0.5,
                  edge_threshold: float = 0.0,
@@ -175,10 +253,10 @@ def build_triple(dag: Dict[str, Any],
 
     Args:
         dag: dict produced by build_dag.py; expects keys P_add, P_rem,
-            n_tokens_selected, top_token, top_weight, moe_layers.
-        tokenizer: HuggingFace tokenizer for the model (decodes token ids in
-            top_token). If None, the token-class histogram is set to a uniform
-            "other"-only distribution (P6 contributes nothing).
+            n_tokens_selected, top_weight, top_prompt, top_pos, moe_layers.
+        classification: dict[(prompt_idx, position) -> class_idx] from
+            build_token_classification. If None, the token-class histogram is
+            set to all-mass-on-"special" (P6 contributes nothing).
         beta: mixing weight for the structural cost:
             C = beta * |depth_u - depth_v| + (1 - beta) * d_path / (L - 1).
             beta = 1 skips the (expensive) shortest-path computation.
@@ -223,11 +301,12 @@ def build_triple(dag: Dict[str, Any],
     load = n_tok / layer_mean  # [L, N], ~1 = average
 
     # 5. token-class histogram
-    if tokenizer is not None and "top_token" in dag and "top_weight" in dag:
-        class_hist = compute_class_histogram(dag["top_token"], dag["top_weight"], tokenizer)
+    if classification is not None and "top_prompt" in dag and "top_pos" in dag:
+        class_hist = compute_class_histogram(
+            dag["top_weight"], dag["top_prompt"], dag["top_pos"], classification)
     else:
         class_hist = torch.zeros(L, N, N_CLASSES, dtype=torch.float32)
-        class_hist[..., _CLASS_IDX["other"]] = 1.0
+        class_hist[..., _CLASS_IDX["special"]] = 1.0
 
     F = torch.cat([
         depth.unsqueeze(-1),        # [L, N, 1]
