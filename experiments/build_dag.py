@@ -333,7 +333,7 @@ top_prompt = torch.zeros(TOPK_SHAPE, dtype=torch.int32, device=device)
 top_pos    = torch.zeros(TOPK_SHAPE, dtype=torch.int16, device=device)
 top_token  = torch.zeros(TOPK_SHAPE, dtype=torch.int32, device=device)
 
-from experiments.circuits.helper import update_topk_per_sender
+from experiments.helper import update_topk_per_sender
 
 n_batches = (N_PROMPTS + BSZ - 1) // BSZ
 print(f"Running {n_batches} batches (batch_size={BSZ}, max_tokens={MAX_TOKENS}) ...", flush=True)
