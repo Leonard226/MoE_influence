@@ -340,7 +340,7 @@ def main():
 
     # Task-adaptiveness index
     lines.append("\n=== Per-model task-adaptiveness  (WM - mean CMS-with-others) ===")
-    lines.append(f"  {'Model':<22s}  {'WM':>7s}  {'CMS-others':>11s}  {'WM-CMS':>+8s}  label")
+    lines.append(f"  {'Model':<22s}  {'WM':>7s}  {'CMS-others':>11s}  {'WM-CMS':>8s}  label")
     for mi, m in enumerate(models):
         base = mi * len(tasks)
         wm = wm_per_model[m]
