@@ -1,5 +1,0 @@
-Python: Python 3.11.15  torchrun: /scratch/sleonard/miniconda3/envs/megatron/bin/torchrun
-MASTER_ADDR=piora1  MASTER_PORT=29500  nodes=piora1 piora2  HF_HOME=/scratch/sleonard/.hugging_face
-ERROR: build_dag_multinode.py not found at /scratch/sleonard/MoE_circuits/experiments/circuits/experiments/circuits/build_dag_multinode.py
-       SLURM_SUBMIT_DIR=/scratch/sleonard/MoE_circuits/experiments/circuits
-       Run: sbatch from /scratch/sleonard/MoE_circuits/
