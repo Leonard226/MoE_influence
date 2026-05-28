@@ -40,7 +40,7 @@ from operator import attrgetter
 import torch
 import yaml
 
-ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 
 with open(os.path.join(ROOT, "config.yaml")) as f:
