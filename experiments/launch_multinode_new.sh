@@ -56,10 +56,14 @@ echo "SCRIPT_PATH=$SCRIPT_PATH"
 RESULT_PATH=$(${ENV_BIN}/python -c "import yaml; print(yaml.safe_load(open('${PROJECT_ROOT}/config.yaml'))['result_path'])")
 
 # Models that need multinode, with their HF identifiers (for cache cleanup).
-MODELS=(qwen3-235b-a22b deepseek-v2)
+# DeepSeek-V2 first because its weights are already in cache; running qwen first
+# would mean downloading qwen while deepseek is still on disk (peak = both).
+# After deepseek finishes and its cache is deleted, qwen downloads onto the
+# freed space.
+MODELS=(deepseek-v2 qwen3-235b-a22b)
 declare -A HF_ID=(
-  [qwen3-235b-a22b]="Qwen/Qwen3-235B-A22B"
   [deepseek-v2]="deepseek-ai/DeepSeek-V2"
+  [qwen3-235b-a22b]="Qwen/Qwen3-235B-A22B"
 )
 DATASETS=(wikitext2 gsm8k humaneval pile-arxiv pile-github)
 
