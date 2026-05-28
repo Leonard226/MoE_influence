@@ -60,9 +60,17 @@ from transformers import AutoTokenizer
 # Dataset registry (same as build_dag.py).
 # ---------------------------------------------------------------------------
 DATASETS = {
-    "c4":   ("dataset.c4_dataset",   "c4_dataset_helper"),
-    "math": ("dataset.math_dataset", "open_r1_math_dataset_helper"),
-    "code": ("dataset.code_dataset", "code_dataset_helper"),
+    # Existing (5,000 prompts).
+    "c4":          ("dataset.c4_dataset",          "c4_dataset_helper"),
+    "math":        ("dataset.math_dataset",        "open_r1_math_dataset_helper"),
+    "code":        ("dataset.code_dataset",        "code_dataset_helper"),
+    # New (planned for 1,000 prompts; HumanEval caps at 164). Grouped by
+    # category: natural language, math, code, scientific notation.
+    "wikitext2":   ("dataset.wikitext2_dataset",   "wikitext2_dataset_helper"),
+    "gsm8k":       ("dataset.gsm8k_dataset",       "gsm8k_dataset_helper"),
+    "humaneval":   ("dataset.humaneval_dataset",   "humaneval_dataset_helper"),
+    "pile-arxiv":  ("dataset.pile_arxiv_dataset",  "pile_arxiv_dataset_helper"),
+    "pile-github": ("dataset.pile_github_dataset", "pile_github_dataset_helper"),
 }
 
 
