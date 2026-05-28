@@ -39,6 +39,10 @@ PROJECT_ROOT="${SLURM_SUBMIT_DIR:-$PWD}"
 while [ "$PROJECT_ROOT" != "/" ] && [ ! -f "$PROJECT_ROOT/config.yaml" ]; do
     PROJECT_ROOT="$(dirname "$PROJECT_ROOT")"
 done
+if [ ! -f "$PROJECT_ROOT/config.yaml" ]; then
+    echo "ERROR: cannot find project root (no config.yaml found walking up from ${SLURM_SUBMIT_DIR:-$PWD})" >&2
+    exit 1
+fi
 cd "$PROJECT_ROOT"
 mkdir -p logs
 
