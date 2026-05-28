@@ -53,13 +53,9 @@ if [ ! -f "$PROJECT_ROOT/config.yaml" ]; then
 fi
 echo "PROJECT_ROOT=$PROJECT_ROOT"
 
-# Locate the multinode build script (handle either layout).
-if [ -f "${PROJECT_ROOT}/experiments/build_dag_multinode.py" ]; then
-    SCRIPT_PATH="${PROJECT_ROOT}/experiments/build_dag_multinode.py"
-elif [ -f "${PROJECT_ROOT}/experiments/circuits/build_dag_multinode.py" ]; then
-    SCRIPT_PATH="${PROJECT_ROOT}/experiments/circuits/build_dag_multinode.py"
-else
-    echo "ERROR: build_dag_multinode.py not found under ${PROJECT_ROOT}/experiments/" >&2
+SCRIPT_PATH="${PROJECT_ROOT}/experiments/build_dag_multinode.py"
+if [ ! -f "$SCRIPT_PATH" ]; then
+    echo "ERROR: $SCRIPT_PATH not found" >&2
     exit 1
 fi
 echo "SCRIPT_PATH=$SCRIPT_PATH"

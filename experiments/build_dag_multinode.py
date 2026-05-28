@@ -26,7 +26,7 @@ casts and NCCL gather precision; both stay in float32 on rank 0 so it is
 effectively bit-equal to single-node).
 
 Launch:
-    sbatch experiments/circuits/launch_multinode.sh
+    sbatch experiments/launch_multinode.sh
 or directly:
     srun ... torchrun --nnodes 2 --nproc_per_node 4 \
         --rdzv_endpoint piora1:29500 build_dag_multinode.py \
@@ -688,7 +688,7 @@ def main():
         top_pos    = torch.zeros(TOPK_SHAPE, dtype=torch.int16, device=device0)
         top_token  = torch.zeros(TOPK_SHAPE, dtype=torch.int32, device=device0)
 
-        from experiments.circuits.helper import update_topk_per_sender
+        from experiments.helper import update_topk_per_sender
 
     n_batches = (N_PROMPTS + BSZ - 1) // BSZ
     rprint(rank, f"Running {n_batches} batches (batch_size={BSZ}, max_tokens={MAX_TOKENS}) ...")

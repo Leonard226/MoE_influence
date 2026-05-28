@@ -16,7 +16,7 @@
 
 This file is a copy of transformers v4.52.0 src/transformers/models/dbrx/modeling_dbrx.py
 with hook-injection points added so that the four critical tensors required by
-experiments/circuits/build_dag.py are exposed in a dict returned alongside the
+experiments/build_dag.py are exposed in a dict returned alongside the
 normal forward output:
 
     hook_after_res1            — residual stream after the attention residual add,

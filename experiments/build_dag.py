@@ -23,7 +23,7 @@ Also computed per sender expert:
         tokens "super experts" specialize in.
 
 Usage:
-    python experiments/circuits/build_dag.py --model {olmoe,deepseek-v2-lite} --dataset {c4,math,code} --n-prompts 5000
+    python experiments/build_dag.py --model {olmoe,deepseek-v2-lite} --dataset {c4,math,code} --n-prompts 5000
 
 Output: {result_path}/circuits/dag_{model}_{dataset}.pt
 

@@ -33,7 +33,7 @@ export NCCL_DEBUG=${NCCL_DEBUG:-WARN}
 # so BASH_SOURCE[0] points there — not at the original launch_multinode.sh location.
 # Use SLURM_SUBMIT_DIR (the dir where `sbatch` was invoked) as the project root.
 PROJECT_ROOT="${SLURM_SUBMIT_DIR:-/scratch/sleonard/MoE_circuits}"
-SCRIPT_PATH="${PROJECT_ROOT}/experiments/circuits/build_dag_multinode.py"
+SCRIPT_PATH="${PROJECT_ROOT}/experiments/build_dag_multinode.py"
 
 if [ ! -f "$SCRIPT_PATH" ]; then
     echo "ERROR: build_dag_multinode.py not found at $SCRIPT_PATH" >&2
