@@ -25,7 +25,17 @@
 
 set -u
 
-ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+# Find the project root by walking up from SLURM_SUBMIT_DIR (or $PWD) until we
+# find config.yaml. Robust to both tmux ($0 works) and sbatch (where $0 points
+# at the SLURM spool copy, not the original script).
+ROOT="${SLURM_SUBMIT_DIR:-$PWD}"
+while [ "$ROOT" != "/" ] && [ ! -f "$ROOT/config.yaml" ]; do
+    ROOT="$(dirname "$ROOT")"
+done
+if [ ! -f "$ROOT/config.yaml" ]; then
+    echo "ERROR: cannot find project root (no config.yaml found walking up from ${SLURM_SUBMIT_DIR:-$PWD})" >&2
+    exit 1
+fi
 cd "$ROOT"
 mkdir -p logs
 
