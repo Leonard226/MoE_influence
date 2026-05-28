@@ -1,8 +1,12 @@
 #!/usr/bin/env bash
+#SBATCH --nodelist=piora1
 #SBATCH --gres=gpu:4
 #SBATCH --cpus-per-task=4
 #SBATCH --job-name="build-new"
 #SBATCH --output=logs/build_new_dags_%j.log
+# NOTE: pinned to piora1 (A100 80GB node). Other nodes (piora4, piora5)
+# have V100s and will OOM on the larger models. Job queues until piora1
+# frees up (currently held by the multinode build).
 #
 # Build DAGs for the 5 NEW datasets on 6 single-node-capable MoE models.
 #
