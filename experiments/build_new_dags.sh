@@ -1,8 +1,14 @@
 #!/usr/bin/env bash
+#SBATCH --gres=gpu:4
+#SBATCH --cpus-per-task=4
+#SBATCH --job-name="build-new"
+#SBATCH --output=logs/build_new_dags_%j.log
 #
 # Build DAGs for the 5 NEW datasets on 6 single-node-capable MoE models.
 #
-# Usage:
+# Usage (either works):
+#   sbatch experiments/build_new_dags.sh
+#   # or
 #   tmux new -s build_new
 #   bash experiments/build_new_dags.sh 2>&1 | tee logs/build_new_dags.log
 #   # detach: Ctrl-b d ;  reattach: tmux attach -t build_new
@@ -23,7 +29,7 @@
 # qwen3-235b-a22b and deepseek-v2 need multinode SLURM; handle separately
 # via experiments/launch_multinode_new.sh.
 
-set -u
+set -euo pipefail
 
 # Find the project root by walking up from SLURM_SUBMIT_DIR (or $PWD) until we
 # find config.yaml. Robust to both tmux ($0 works) and sbatch (where $0 points
@@ -39,9 +45,15 @@ fi
 cd "$ROOT"
 mkdir -p logs
 
+# Conda env. sbatch doesn't auto-activate; prepend explicitly so `python`
+# resolves to the megatron env binary in both tmux and sbatch invocations.
+ENV_BIN=/scratch/sleonard/miniconda3/envs/megatron/bin
+export PATH="${ENV_BIN}:${PATH}"
+export LD_LIBRARY_PATH="/scratch/sleonard/miniconda3/envs/megatron/lib:${LD_LIBRARY_PATH:-}"
+
 export HF_HOME="${HF_HOME:-$HOME/.hugging_face}"
 CLEANUP_MODEL_CACHE="${CLEANUP_MODEL_CACHE:-1}"
-RESULT_PATH=$(python -c "import yaml; print(yaml.safe_load(open('config.yaml'))['result_path'])")
+RESULT_PATH=$(${ENV_BIN}/python -c "import yaml; print(yaml.safe_load(open('config.yaml'))['result_path'])")
 
 echo "ROOT=$ROOT"
 echo "HF_HOME=$HF_HOME"
@@ -126,7 +138,7 @@ for m in "${MODELS[@]}"; do
     # to avoid the failure-chain pattern of "every model tries to download,
     # nothing works, scratch fills up". Resubmit later to retry; the
     # skip-if-exists check above resumes correctly.
-    if ! python experiments/build_dag.py \
+    if ! ${ENV_BIN}/python experiments/build_dag.py \
         --model "$m" --dataset "$d" \
         --n_prompts $N_PROMPTS --B "${BSZ[$m]}"; then
       echo "[$i/$TOTAL] ERROR building $m/$d -- ABORTING (resubmit to retry)"
