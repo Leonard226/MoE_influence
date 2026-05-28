@@ -1,18 +1,26 @@
 #!/usr/bin/env bash
 #
-# Build DAGs for the 5 NEW datasets on 7 single-node-capable MoE models.
+# Build DAGs for the 5 NEW datasets on 6 single-node-capable MoE models.
 #
 # Usage:
 #   tmux new -s build_new
 #   bash experiments/build_new_dags.sh 2>&1 | tee logs/build_new_dags.log
 #   # detach: Ctrl-b d ;  reattach: tmux attach -t build_new
 #
-# Resumable: skips (model, dataset) pairs whose output .pt already exists.
-# Memory freed between models: each `python` invocation is its own process,
-# so GPU memory and resident RAM are reclaimed by the OS when it exits. A
-# 5-second sleep is added between runs to let device buffers fully release.
+# IMPORTANT: each model's HuggingFace cache (~/.hugging_face/hub/models--...)
+# is DELETED after all 5 datasets for that model are built. This frees disk
+# space before the next model downloads -- required because the full set of
+# model weights won't fit on /scratch simultaneously. Dataset caches are
+# preserved (they're small and shared across models).
 #
-# DeepSeek-V2 (236B) needs multi-node SLURM allocation; handle separately
+# Set CLEANUP_MODEL_CACHE=0 to disable the per-model cleanup (e.g., for a
+# small-models-only test run where you want to keep weights cached).
+#
+# Resumable: skips (model, dataset) pairs whose output .pt already exists.
+# Memory between model swaps: each `python` invocation is its own process,
+# so GPU memory and resident RAM are reclaimed by the OS when it exits.
+#
+# qwen3-235b-a22b and deepseek-v2 need multinode SLURM; handle separately
 # via experiments/launch_multinode_new.sh.
 
 set -u
@@ -21,13 +29,20 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 mkdir -p logs
 
+export HF_HOME="${HF_HOME:-$HOME/.hugging_face}"
+CLEANUP_MODEL_CACHE="${CLEANUP_MODEL_CACHE:-1}"
 RESULT_PATH=$(python -c "import yaml; print(yaml.safe_load(open('config.yaml'))['result_path'])")
+
+echo "ROOT=$ROOT"
+echo "HF_HOME=$HF_HOME"
+echo "RESULT_PATH=$RESULT_PATH"
+echo "CLEANUP_MODEL_CACHE=$CLEANUP_MODEL_CACHE"
+echo
 
 NEW_DATASETS=(wikitext2 gsm8k humaneval pile-arxiv pile-github)
 N_PROMPTS=1000
 
-# Smallest first so quick wins come early. qwen3-235b-a22b and deepseek-v2
-# are omitted -- both need multinode and are handled by launch_multinode_new.sh.
+# Smallest first so quick wins come early.
 MODELS=(
   olmoe
   phi-3.5-moe
@@ -47,6 +62,31 @@ declare -A BSZ=(
   [qwen3-30b-a3b]=32
   [mixtral-8x22b]=16
 )
+
+# HuggingFace identifier for each model (used to construct cache subdir name).
+declare -A HF_ID=(
+  [olmoe]="allenai/OLMoE-1B-7B-0924"
+  [phi-3.5-moe]="microsoft/Phi-3.5-MoE-instruct"
+  [mixtral-8x7b]="mistralai/Mixtral-8x7B-v0.1"
+  [deepseek-v2-lite]="deepseek-ai/DeepSeek-V2-Lite"
+  [qwen3-30b-a3b]="Qwen/Qwen3-30B-A3B"
+  [mixtral-8x22b]="mistralai/Mixtral-8x22B-v0.1"
+)
+
+cleanup_model_cache() {
+  # Delete $HF_HOME/hub/models--<org>--<name> for the given model.
+  local m="$1"
+  local id="${HF_ID[$m]}"
+  local cache_path="$HF_HOME/hub/models--${id//\//--}"
+  if [[ -d "$cache_path" ]]; then
+    local size
+    size=$(du -sh "$cache_path" 2>/dev/null | awk '{print $1}')
+    echo "  cleanup: rm -rf $cache_path  (${size:-?})"
+    rm -rf "$cache_path"
+  else
+    echo "  cleanup: no cache at $cache_path"
+  fi
+}
 
 TOTAL=$(( ${#MODELS[@]} * ${#NEW_DATASETS[@]} ))
 i=0
@@ -81,6 +121,12 @@ for m in "${MODELS[@]}"; do
     echo "[$i/$TOTAL] $m/$d done in ${dt}s"
     sleep 5  # let GPU memory fully release before next launch
   done
+  echo "------------------------------------------------------------"
+  echo "Finished all datasets for $m at $(date)"
+  if [[ "$CLEANUP_MODEL_CACHE" == "1" ]]; then
+    cleanup_model_cache "$m"
+  fi
+  echo "------------------------------------------------------------"
 done
 
 T_TOTAL=$(( ( $(date +%s) - T_START ) / 60 ))
