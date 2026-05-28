@@ -98,7 +98,12 @@ for MODEL in "${MODELS[@]}"; do
         echo "================================================================"
         echo "Starting ${MODEL}/${DATASET} at $(date)"
         echo "================================================================"
-        srun --export=ALL ${ENV_BIN}/torchrun \
+        # ABORT on any failure (download error, OOM, path-not-found, NCCL,
+        # missing package, etc.) to avoid the failure-chain pattern of
+        # "every model tries to download, nothing works, scratch fills up".
+        # Resubmit later to retry; the skip-if-exists check above resumes
+        # correctly.
+        if ! srun --export=ALL ${ENV_BIN}/torchrun \
             --nnodes=2 \
             --nproc_per_node=4 \
             --node_rank=$SLURM_NODEID \
@@ -108,15 +113,30 @@ for MODEL in "${MODELS[@]}"; do
             --model "$MODEL" \
             --dataset "$DATASET" \
             --n_prompts 1000 \
-            --B 16 \
-            || echo "WARN: ${MODEL}/${DATASET} failed; continuing with next"
+            --B 16
+        then
+            echo "ERROR: ${MODEL}/${DATASET} failed -- ABORTING (resubmit to retry)"
+            exit 1
+        fi
         echo "Finished ${MODEL}/${DATASET} at $(date)"
         sleep 30  # let port 29500 clear TIME_WAIT
     done
     echo "----------------------------------------------------------------"
     echo "Finished all datasets for ${MODEL} at $(date)"
-    if [ "$CLEANUP_MODEL_CACHE" = "1" ]; then
+    # Only clean up the model cache if EVERY expected output file exists.
+    # If anything failed, leave the cache so the resubmit can reuse it
+    # without re-downloading.
+    all_done=1
+    for D_CHECK in "${DATASETS[@]}"; do
+        if [ ! -f "${RESULT_PATH}/circuits/dag_${MODEL}_${D_CHECK}.pt" ]; then
+            all_done=0
+            break
+        fi
+    done
+    if [ "$CLEANUP_MODEL_CACHE" = "1" ] && [ "$all_done" = "1" ]; then
         cleanup_model_cache "$MODEL"
+    elif [ "$CLEANUP_MODEL_CACHE" = "1" ]; then
+        echo "  some ${MODEL} datasets are missing; KEEPING cache (use 'rm -rf' manually if needed)"
     fi
     echo "----------------------------------------------------------------"
 done

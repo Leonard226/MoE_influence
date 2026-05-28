@@ -112,10 +112,15 @@ for m in "${MODELS[@]}"; do
     echo "[$i/$TOTAL] $m/$d  bs=${BSZ[$m]}  (elapsed=${elapsed_min}min)"
     echo "============================================================"
     t0=$(date +%s)
+    # ABORT on any failure (download error, OOM, path-not-found, etc.)
+    # to avoid the failure-chain pattern of "every model tries to download,
+    # nothing works, scratch fills up". Resubmit later to retry; the
+    # skip-if-exists check above resumes correctly.
     if ! python experiments/build_dag.py \
         --model "$m" --dataset "$d" \
         --n_prompts $N_PROMPTS --B "${BSZ[$m]}"; then
-      echo "[$i/$TOTAL] ERROR building $m/$d (continuing with next)"
+      echo "[$i/$TOTAL] ERROR building $m/$d -- ABORTING (resubmit to retry)"
+      exit 1
     fi
     dt=$(( $(date +%s) - t0 ))
     echo "[$i/$TOTAL] $m/$d done in ${dt}s"
@@ -123,8 +128,20 @@ for m in "${MODELS[@]}"; do
   done
   echo "------------------------------------------------------------"
   echo "Finished all datasets for $m at $(date)"
-  if [[ "$CLEANUP_MODEL_CACHE" == "1" ]]; then
+  # Only clean up the model cache if EVERY expected output file exists.
+  # If anything failed, leave the cache so the resubmit can reuse it
+  # without re-downloading.
+  all_done=1
+  for d_check in "${NEW_DATASETS[@]}"; do
+    if [[ ! -f "${RESULT_PATH}/circuits/dag_${m}_${d_check}.pt" ]]; then
+      all_done=0
+      break
+    fi
+  done
+  if [[ "$CLEANUP_MODEL_CACHE" == "1" && "$all_done" == "1" ]]; then
     cleanup_model_cache "$m"
+  elif [[ "$CLEANUP_MODEL_CACHE" == "1" ]]; then
+    echo "  some $m datasets are missing; KEEPING cache (use 'rm -rf' manually if needed)"
   fi
   echo "------------------------------------------------------------"
 done
