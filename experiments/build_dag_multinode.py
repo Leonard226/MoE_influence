@@ -690,6 +690,22 @@ def main():
 
         from experiments.helper import update_topk_per_sender
 
+    # Cap N_PROMPTS to what the loader actually returned (e.g. HumanEval tops
+    # out at 164, fewer after the min_words filter). rank 0 reads len(prompts);
+    # broadcast the actual count to all ranks so n_batches stays consistent.
+    if dist.is_initialized():
+        n_tensor = torch.tensor(
+            [len(prompts) if rank == 0 else 0],
+            dtype=torch.int64, device=f"cuda:{local_rank}",
+        )
+        dist.broadcast(n_tensor, src=0)
+        actual_n = int(n_tensor.item())
+    else:
+        actual_n = len(prompts)
+    if actual_n < N_PROMPTS:
+        rprint(rank, f"  loader returned {actual_n} prompts (requested {N_PROMPTS}); capping N_PROMPTS.")
+        N_PROMPTS = actual_n
+
     n_batches = (N_PROMPTS + BSZ - 1) // BSZ
     rprint(rank, f"Running {n_batches} batches (batch_size={BSZ}, max_tokens={MAX_TOKENS}) ...")
     t_start = time.time()

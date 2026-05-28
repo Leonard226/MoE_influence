@@ -316,6 +316,12 @@ print(f"Loading dataset={args.dataset!r}  ({N_PROMPTS} prompts) ...", flush=True
 t0 = time.time()
 prompts = loader(dataset_len=N_PROMPTS, min_words=MAX_TOKENS)
 print(f"  loaded in {time.time() - t0:.1f}s", flush=True)
+# Cap N_PROMPTS to what the loader actually returned (e.g. HumanEval has only
+# 164 prompts total, fewer after the min_words filter; without this cap the
+# batching loop would slice past the list and pass [] to the tokenizer).
+if len(prompts) < N_PROMPTS:
+    print(f"  loader returned {len(prompts)} prompts (requested {N_PROMPTS}); capping N_PROMPTS.", flush=True)
+    N_PROMPTS = len(prompts)
 
 # ---- Accumulators ----
 # APS/ANS/AVG/sq_accum  : score-based statistics (Var_i = E[S^2] - E[S]^2 at end).
