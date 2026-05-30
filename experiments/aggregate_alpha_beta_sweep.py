@@ -1,11 +1,9 @@
-"""Stitch per-(source, chunk) sweep slices into a full S[src, tgt, α, β] array.
+"""Stitch per-(source, chunk) α × Q sweep slices into a single
+S[src, tgt, α, Q] tensor.
 
-Usage:
-    python experiments/aggregate_alpha_beta_sweep.py
-
-Reads {result_path}/circuits/alpha_beta_sweep/sweep_src*_chunk*.npz files
-and writes the merged S_full.npz to the same directory. Reports any missing
-or failed pairs.
+Reads {result_path}/circuits/alpha_beta_sweep/sweep_src*_chunk*.npz
+files and writes the merged S_full.npz to the same directory. Reports
+any missing or failed pairs.
 """
 import argparse
 import os
@@ -18,7 +16,7 @@ import yaml
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 from experiments.run_alpha_beta_sweep import (
-    MODELS, TASKS, TUPLES, N_TUPLES, ALPHAS, BETAS,
+    MODELS, TASKS, TUPLES, N_TUPLES, ALPHAS, QUANTILES, FIXED_BETA,
 )
 
 with open(os.path.join(ROOT, "config.yaml")) as f:
@@ -36,10 +34,10 @@ def main():
     )
     output_path = args.output or os.path.join(input_dir, "S_full.npz")
 
-    n_a, n_b = len(ALPHAS), len(BETAS)
-    S_full = np.full((N_TUPLES, N_TUPLES, n_a, n_b), np.nan)
+    n_a, n_q = len(ALPHAS), len(QUANTILES)
+    S_full = np.full((N_TUPLES, N_TUPLES, n_a, n_q), np.nan)
 
-    # Diagonal = 1.0 by construction (verified in §3 of the notebook).
+    # Diagonal = 1.0 by construction (a graph compared with itself).
     for i in range(N_TUPLES):
         S_full[i, i, :, :] = 1.0
 
@@ -54,7 +52,7 @@ def main():
         d = np.load(f, allow_pickle=True)
         src = int(d["source_idx"])
         target_indices = d["target_indices"]
-        S_slice = d["S"]  # [n_targets_in_chunk, n_a, n_b]
+        S_slice = d["S"]  # [n_targets_in_chunk, n_a, n_q]
         for local_t, tgt in enumerate(target_indices):
             tgt = int(tgt)
             S_full[src, tgt, :, :] = S_slice[local_t]
@@ -63,13 +61,13 @@ def main():
             if np.any(S_slice[local_t] < 0):
                 n_failed += int(np.sum(S_slice[local_t] < 0))
 
-    n_off_diag_total = N_TUPLES * (N_TUPLES - 1)   # ordered pairs
-    n_off_diag_done = int(np.sum(~np.isnan(S_full)) - N_TUPLES * n_a * n_b)  # subtract diag
+    n_off_diag_total = N_TUPLES * (N_TUPLES - 1)        # ordered pairs
+    n_off_diag_done = int(np.sum(~np.isnan(S_full)) - N_TUPLES * n_a * n_q)
     print(f"Filled {n_filled} (src, tgt) entries from slices.")
-    print(f"S_full has {n_off_diag_done}/{n_off_diag_total * n_a * n_b} non-NaN off-diagonal cells.")
+    print(f"S_full has {n_off_diag_done}/{n_off_diag_total * n_a * n_q} "
+          f"non-NaN off-diagonal cells.")
     n_nan = int(np.isnan(S_full).sum())
     if n_nan:
-        # Identify which (src, tgt) pairs are missing.
         missing_pairs = set()
         for i in range(N_TUPLES):
             for j in range(N_TUPLES):
@@ -90,12 +88,14 @@ def main():
         S=S_full,
         tuples=np.array([f"{m}/{t}" for m, t in TUPLES], dtype=object),
         alphas=np.array(ALPHAS),
-        betas=np.array(BETAS),
+        quantiles=np.array(QUANTILES),
+        fixed_beta=np.float64(FIXED_BETA),
         models=np.array(MODELS, dtype=object),
         tasks=np.array(TASKS, dtype=object),
     )
     print(f"\nSaved: {output_path}")
-    print(f"  S.shape = {S_full.shape}  (src, tgt, alpha, beta)")
+    print(f"  S.shape = {S_full.shape}  (src, tgt, α, Q)")
+    print(f"  α = {ALPHAS}   Q = {QUANTILES}   β = {FIXED_BETA} (fixed)")
 
 
 if __name__ == "__main__":

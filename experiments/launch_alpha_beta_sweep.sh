@@ -1,26 +1,33 @@
 #!/bin/bash
 #SBATCH --array=0-575               # 64 sources × 9 target chunks = 576 work units
 #SBATCH --cpus-per-task=1
-#SBATCH --output=logs/ab_sweep_%A_%a.log
+#SBATCH --nodelist=piora[5-8]       # restrict to piora5..piora8 (CPU-only sweep)
+#SBATCH --output=logs/ab_q_sweep_%A_%a.log
 #
-# Pairwise α × β sweep across all (model, task) tuples. CPU-only (no GPU
-# needed -- FGW is POT/numpy/scipy).
+# Pairwise α × Q quantile sweep across all (model, task) tuples at β = 0.5.
+# CPU-only (no GPU needed -- FGW is POT/numpy/scipy).
 #
 # Submit:
 #   mkdir -p logs
 #   sbatch experiments/launch_alpha_beta_sweep.sh
 #
 # 64 (model, task) sources × 9 target chunks = 576 array tasks.
-# Each task is independent: builds source triples once, sweeps all (α, β)
-# against its target chunk (≈ 7 targets), writes a slice .npz.
+# Each task is independent: per source, builds one (β=0, β=1) component-triple
+# pair PER QUANTILE Q (3 total at Q ∈ {0.9, 0.99, 0.999}). For each target in
+# the chunk it then rebuilds target triples at each Q and computes FGW at
+# α ∈ {0, 0.5, 1}. Writes a slice .npz into
+#     {result_path}/circuits/alpha_beta_sweep_q/
 #
 # Resumable: each task checkpoints after every target; restarting an array
 # task picks up where it left off.
 #
 # After all array tasks finish:
-#   python experiments/aggregate_alpha_beta_sweep.py
-# stitches the slices into one S[src_idx, tgt_idx, alpha_idx, beta_idx]
-# array at {result_path}/circuits/alpha_beta_sweep/S_full.npz.
+#   python experiments/aggregate_alpha_beta_quantile_sweep.py
+# stitches the new slices into S_quantile.npz and additionally produces the
+# unified S_qsweep.npz which combines the new (α, Q) data with the legacy
+# dense (Q=0) reference column sliced from
+#     {result_path}/circuits/alpha_beta_sweep/S_full.npz
+# (the legacy file is read-only — not regenerated, not modified).
 
 set -euo pipefail
 

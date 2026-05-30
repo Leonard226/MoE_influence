@@ -265,53 +265,60 @@ print("\n" + summary_text)
 # ---------------------------------------------------------------------------
 # Plots.
 # ---------------------------------------------------------------------------
-def draw_heatmap(ax, S_slice, title, show_labels=True, fontsize=6):
-    """Draw a 64x64 heatmap with model-block gridlines + within-family same-
-    task cells highlighted with red boxes."""
-    im = ax.imshow(S_slice, cmap="viridis", vmin=0.0, vmax=1.0)
-    ax.set_title(title, fontsize=12)
-    if show_labels:
-        labels = [f"{m}/{t}" for m, t in TUPLES]
-        ax.set_xticks(range(N_TUPLES))
-        ax.set_yticks(range(N_TUPLES))
-        ax.set_xticklabels(labels, rotation=90, fontsize=fontsize)
-        ax.set_yticklabels(labels, fontsize=fontsize)
-    else:
-        ax.set_xticks([])
-        ax.set_yticks([])
-
-    # Model-block gridlines every 8 cells.
-    for k in range(1, len(MODELS)):
-        ax.axhline(k * len(TASKS) - 0.5, color="white", linewidth=0.5, alpha=0.5)
-        ax.axvline(k * len(TASKS) - 0.5, color="white", linewidth=0.5, alpha=0.5)
-
-    # Within-family same-task cells (red boxes).
-    for fam, (m1, m2) in FAMILIES.items():
-        for t in TASKS:
-            i = tuple_idx(m1, t)
-            j = tuple_idx(m2, t)
+def draw_per_task_heatmaps(S_slice, fig_title, fname):
+    """One 8x8 model-model heatmap per task, laid out in a 2x4 grid.
+    Within-family model pairs (Mixtral 7B/22B, DSL/V2, Qwen 30B/235B) are
+    boxed in red in every subplot."""
+    fig, axes = plt.subplots(2, 4, figsize=(20, 10))
+    axes = axes.flatten()
+    im = None
+    for ti, t in enumerate(TASKS):
+        ax = axes[ti]
+        idx = [tuple_idx(m, t) for m in MODELS]
+        sub = S_slice[np.ix_(idx, idx)]
+        im = ax.imshow(sub, cmap="viridis", vmin=0.0, vmax=1.0)
+        ax.set_title(t, fontsize=12, fontweight="bold")
+        ax.set_xticks(range(len(MODELS)))
+        ax.set_yticks(range(len(MODELS)))
+        ax.set_xticklabels(MODELS, rotation=45, ha="right", fontsize=8)
+        # Only label y-axis on the leftmost column; rows are identical across.
+        if ti % 4 == 0:
+            ax.set_yticklabels(MODELS, fontsize=8)
+        else:
+            ax.set_yticklabels([])
+        # Cell-value overlays (S value, 2 d.p.) for readability.
+        for i in range(len(MODELS)):
+            for j in range(len(MODELS)):
+                v = sub[i, j]
+                if not np.isnan(v):
+                    ax.text(j, i, f"{v:.2f}",
+                            ha="center", va="center", fontsize=7,
+                            color="white" if v < 0.6 else "black")
+        # Within-family model pairs (red boxes).
+        for fam, (m1, m2) in FAMILIES.items():
+            i = MODELS.index(m1)
+            j = MODELS.index(m2)
             for (yy, xx) in [(i, j), (j, i)]:
                 ax.add_patch(plt.Rectangle((xx - 0.5, yy - 0.5), 1, 1,
                                            fill=False, edgecolor="red",
-                                           linewidth=1.0))
-    return im
+                                           linewidth=1.5))
+    fig.suptitle(fig_title, fontsize=15, fontweight="bold", y=1.00)
+    fig.colorbar(im, ax=axes.tolist(), shrink=0.7, location="right",
+                 label="S (FGW similarity)")
+    out = os.path.join(OUT_DIR, fname)
+    plt.savefig(out, dpi=130, bbox_inches="tight")
+    plt.close()
+    print(f"  saved {out}")
 
 
-# 1. Three canonical 64x64 heatmaps (separate files).
+# 1. Three canonical per-task heatmap panels (one PNG per (α, β) config).
 for alpha, beta, label, fname in [
     (0.0, 0.5, "α = 0 (pure feature), β = 0.5",   "heatmap_pure_feature.png"),
     (0.5, 0.5, "α = 0.5 (balanced), β = 0.5",     "heatmap_balanced.png"),
     (1.0, 0.5, "α = 1 (pure structure), β = 0.5", "heatmap_pure_structure.png"),
 ]:
-    fig, ax = plt.subplots(figsize=(22, 20))
     sl = S[:, :, alpha_idx(alpha), beta_idx(beta)]
-    im = draw_heatmap(ax, sl, label, show_labels=True)
-    fig.colorbar(im, ax=ax, shrink=0.6)
-    plt.tight_layout()
-    out = os.path.join(OUT_DIR, fname)
-    plt.savefig(out, dpi=120, bbox_inches="tight")
-    plt.close()
-    print(f"  saved {out}")
+    draw_per_task_heatmaps(sl, label, fname)
 
 # 2. 5 x 5 mini-heatmap grid over (α, β).
 fig, axes = plt.subplots(len(ALPHAS), len(BETAS), figsize=(20, 20))
