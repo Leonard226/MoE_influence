@@ -1,33 +1,39 @@
 #!/bin/bash
 #SBATCH --array=0-575               # 64 sources × 9 target chunks = 576 work units
 #SBATCH --cpus-per-task=1
+#SBATCH --mem-per-cpu=24G           # peak per task ~8-12GB for qwen3-235b/dsv2
+                                    # pairs at Q=0.9; 24G gives ~2x headroom and
+                                    # lets SLURM pack heterogeneously so cheap
+                                    # Mixtral chunks aren't artificially throttled.
 #SBATCH --nodelist=piora[5-8]       # restrict to piora5..piora8 (CPU-only sweep)
-#SBATCH --output=logs/ab_q_sweep_%A_%a.log
+#SBATCH --output=logs/ab_sweep_%A_%a.log
 #
-# Pairwise α × Q quantile sweep across all (model, task) tuples at β = 0.5.
-# CPU-only (no GPU needed -- FGW is POT/numpy/scipy).
+# Pairwise α × Q quantile FGW sweep across all (model, task) tuples at fixed
+# β = 0.5. CPU-only (no GPU needed -- FGW is POT/numpy/scipy).
 #
 # Submit:
 #   mkdir -p logs
 #   sbatch experiments/launch_alpha_beta_sweep.sh
 #
 # 64 (model, task) sources × 9 target chunks = 576 array tasks.
-# Each task is independent: per source, builds one (β=0, β=1) component-triple
-# pair PER QUANTILE Q (3 total at Q ∈ {0.9, 0.99, 0.999}). For each target in
-# the chunk it then rebuilds target triples at each Q and computes FGW at
-# α ∈ {0, 0.5, 1}. Writes a slice .npz into
-#     {result_path}/circuits/alpha_beta_sweep_q/
+# Each task is independent. Per source:
+#   - For each Q ∈ {0.9, 0.99, 0.999}: build ONE triple at β = 0.5 with
+#     F + mass from the dense graph and C_path from the Q-sparsified graph
+#     (vertices isolated under the threshold are dropped).
+# Per target in the chunk:
+#   - For each Q: build the target triple the same way.
+#   - For each α ∈ {0, 0.5, 1}: compute FGW(source, target).
+# Writes a slice .npz into
+#     {result_path}/circuits/alpha_beta_sweep/sweep_src{SS}_chunk{CC}.npz
+# of shape (n_targets_in_chunk, 3, 3) indexed (local_target, α_idx, Q_idx).
 #
 # Resumable: each task checkpoints after every target; restarting an array
 # task picks up where it left off.
 #
 # After all array tasks finish:
-#   python experiments/aggregate_alpha_beta_quantile_sweep.py
-# stitches the new slices into S_quantile.npz and additionally produces the
-# unified S_qsweep.npz which combines the new (α, Q) data with the legacy
-# dense (Q=0) reference column sliced from
-#     {result_path}/circuits/alpha_beta_sweep/S_full.npz
-# (the legacy file is read-only — not regenerated, not modified).
+#   python experiments/aggregate_alpha_beta_sweep.py
+# stitches the slices into S_full.npz of shape (64, 64, 3, 3) indexed
+# (src, tgt, α, Q).
 
 set -euo pipefail
 

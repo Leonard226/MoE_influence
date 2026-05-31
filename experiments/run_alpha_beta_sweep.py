@@ -20,7 +20,8 @@ The threshold only modifies the STRUCTURAL cost C_path (the all-pairs
 shortest-path distance on edges with |W| > θ_Q). Vertices that have no
 surviving incident edge in the sparsified graph are dropped (they would
 otherwise contribute only uniform-diameter distance rows = structural
-noise) together with the special-token-dominated vertices.
+noise). No other vertex filter is applied in this baseline; the special-
+token mask used by the legacy dense sweep is OFF here.
 
 β is fixed, so only ONE triple is built per (model, task, Q). The metric
 is CPU-bound (POT + scipy); no GPU needed.
@@ -143,8 +144,10 @@ def build_triple_at_Q(model, task, classification, Q):
                           beta=FIXED_BETA, edge_threshold=threshold)
 
     # Identify vertices isolated in the SPARSIFIED graph (no surviving in-
-    # or out-edge above threshold). This is the ONLY vertex filter.
-    survive = (torch.abs(P_combined) >= threshold) & fwd
+    # or out-edge above threshold). This is the ONLY vertex filter. Strict
+    # `>` matches the edge mask in fgw._shortest_path_costs so a vertex is
+    # "isolated" here iff it contributes zero edges to C_path there.
+    survive = (torch.abs(P_combined) > threshold) & fwd
     out_sparse = survive.sum(dim=(2, 3)).reshape(-1).cpu().numpy()
     in_sparse  = survive.sum(dim=(0, 1)).reshape(-1).cpu().numpy()
     keep_mask = (out_sparse > 0) | (in_sparse > 0)
