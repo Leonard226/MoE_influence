@@ -1,0 +1,45 @@
+[217] source_idx=24  chunk_idx=1
+host=piora5  cpus=1
+/scratch/sleonard/miniconda3/envs/megatron/lib/python3.11/site-packages/torch/cuda/__init__.py:61: FutureWarning: The pynvml package is deprecated. Please install nvidia-ml-py instead. If you did not install pynvml directly, please report this to the maintainers of the package that installed pynvml for you.
+  import pynvml  # type: ignore[import]
+=== α × Q Sweep at β = 0.5 ===
+  source : deepseek-v2/c4 (idx 24)
+  targets: chunk 1/8  -> 7 tuples
+  α      : [0.0, 0.5, 1.0]
+  Q      : [0.9, 0.99, 0.999]
+  cells  : 9 (α × Q) per pair
+  total  : 63 FGW calls
+  output : /scratch/sleonard/MoE_circuits/results/circuits/alpha_beta_sweep/sweep_src24_chunk01.npz
+
+[1/2] Building source triples at each Q ...
+  Q=  0.9: built in   135.5s  n_verts=  9407  θ=0.004411
+  Q= 0.99: built in   173.3s  n_verts=  9294  θ=0.01184
+  Q=0.999: built in    55.8s  n_verts=  6317  θ=0.02642
+
+[2/2] Sweeping 7 targets × 9 (α, Q) cells ...
+
+  [ 1/7] mixtral-8x7b/pile-github ...
+/scratch/sleonard/miniconda3/envs/megatron/lib/python3.11/site-packages/ot/lp/_network_simplex.py:332: UserWarning: numItermax reached before optimality. Try to increase numItermax.
+  result_code_string = check_result(result_code)
+    done in 2256.0s  avg_S=0.6853  (elapsed 37.6min)
+
+  [ 2/7] mixtral-8x22b/c4 ...
+    done in 1217.0s  avg_S=0.7689  (elapsed 57.9min)
+
+  [ 3/7] mixtral-8x22b/math ...
+    done in 2113.7s  avg_S=0.7994  (elapsed 93.1min)
+
+  [ 4/7] mixtral-8x22b/code ...
+    done in 1230.5s  avg_S=0.7852  (elapsed 113.6min)
+
+  [ 5/7] mixtral-8x22b/wikitext2 ...
+    done in 1646.2s  avg_S=0.7503  (elapsed 141.1min)
+
+  [ 6/7] mixtral-8x22b/gsm8k ...
+    done in 1500.5s  avg_S=0.8063  (elapsed 166.1min)
+
+  [ 7/7] mixtral-8x22b/humaneval ...
+    done in 867.7s  avg_S=0.7473  (elapsed 180.5min)
+
+=== Worker done in 180.5 min ===
+Saved: /scratch/sleonard/MoE_circuits/results/circuits/alpha_beta_sweep/sweep_src24_chunk01.npz

@@ -1,0 +1,45 @@
+[223] source_idx=24  chunk_idx=7
+host=piora5  cpus=1
+/scratch/sleonard/miniconda3/envs/megatron/lib/python3.11/site-packages/torch/cuda/__init__.py:61: FutureWarning: The pynvml package is deprecated. Please install nvidia-ml-py instead. If you did not install pynvml directly, please report this to the maintainers of the package that installed pynvml for you.
+  import pynvml  # type: ignore[import]
+=== α × Q Sweep at β = 0.5 ===
+  source : deepseek-v2/c4 (idx 24)
+  targets: chunk 7/8  -> 7 tuples
+  α      : [0.0, 0.5, 1.0]
+  Q      : [0.9, 0.99, 0.999]
+  cells  : 9 (α × Q) per pair
+  total  : 63 FGW calls
+  output : /scratch/sleonard/MoE_circuits/results/circuits/alpha_beta_sweep/sweep_src24_chunk07.npz
+
+[1/2] Building source triples at each Q ...
+  Q=  0.9: built in   191.7s  n_verts=  9407  θ=0.004411
+  Q= 0.99: built in   151.9s  n_verts=  9294  θ=0.01184
+  Q=0.999: built in   100.1s  n_verts=  6317  θ=0.02642
+
+[2/2] Sweeping 7 targets × 9 (α, Q) cells ...
+
+  [ 1/7] olmoe/code ...
+/scratch/sleonard/miniconda3/envs/megatron/lib/python3.11/site-packages/ot/lp/_network_simplex.py:332: UserWarning: numItermax reached before optimality. Try to increase numItermax.
+  result_code_string = check_result(result_code)
+    done in 639.0s  avg_S=0.4824  (elapsed 10.7min)
+
+  [ 2/7] olmoe/wikitext2 ...
+    done in 781.2s  avg_S=0.8005  (elapsed 23.7min)
+
+  [ 3/7] olmoe/gsm8k ...
+    done in 746.5s  avg_S=0.7633  (elapsed 36.1min)
+
+  [ 4/7] olmoe/humaneval ...
+    done in 572.8s  avg_S=0.4345  (elapsed 45.7min)
+
+  [ 5/7] olmoe/pile-arxiv ...
+    done in 880.2s  avg_S=0.7056  (elapsed 60.3min)
+
+  [ 6/7] olmoe/pile-github ...
+    done in 691.9s  avg_S=0.4742  (elapsed 71.9min)
+
+  [ 7/7] phi-3.5-moe/c4 ...
+    done in 652.7s  avg_S=0.7950  (elapsed 82.7min)
+
+=== Worker done in 82.7 min ===
+Saved: /scratch/sleonard/MoE_circuits/results/circuits/alpha_beta_sweep/sweep_src24_chunk07.npz

@@ -1,0 +1,45 @@
+[341] source_idx=37  chunk_idx=8
+host=piora5  cpus=1
+/scratch/sleonard/miniconda3/envs/megatron/lib/python3.11/site-packages/torch/cuda/__init__.py:61: FutureWarning: The pynvml package is deprecated. Please install nvidia-ml-py instead. If you did not install pynvml directly, please report this to the maintainers of the package that installed pynvml for you.
+  import pynvml  # type: ignore[import]
+=== α × Q Sweep at β = 0.5 ===
+  source : qwen3-30b-a3b/humaneval (idx 37)
+  targets: chunk 8/8  -> 7 tuples
+  α      : [0.0, 0.5, 1.0]
+  Q      : [0.9, 0.99, 0.999]
+  cells  : 9 (α × Q) per pair
+  total  : 63 FGW calls
+  output : /scratch/sleonard/MoE_circuits/results/circuits/alpha_beta_sweep/sweep_src37_chunk08.npz
+
+[1/2] Building source triples at each Q ...
+  Q=  0.9: built in    24.1s  n_verts=  5843  θ=0.01866
+  Q= 0.99: built in    14.6s  n_verts=  5155  θ=0.07143
+  Q=0.999: built in    46.9s  n_verts=  2307  θ=0.25
+
+[2/2] Sweeping 7 targets × 9 (α, Q) cells ...
+
+  [ 1/7] phi-3.5-moe/math ...
+/scratch/sleonard/miniconda3/envs/megatron/lib/python3.11/site-packages/ot/lp/_network_simplex.py:332: UserWarning: numItermax reached before optimality. Try to increase numItermax.
+  result_code_string = check_result(result_code)
+    done in 891.3s  avg_S=0.4430  (elapsed 14.9min)
+
+  [ 2/7] phi-3.5-moe/code ...
+    done in 756.4s  avg_S=0.4402  (elapsed 27.5min)
+
+  [ 3/7] phi-3.5-moe/wikitext2 ...
+    done in 1086.4s  avg_S=0.3697  (elapsed 45.6min)
+
+  [ 4/7] phi-3.5-moe/gsm8k ...
+    done in 1171.7s  avg_S=0.4296  (elapsed 65.1min)
+
+  [ 5/7] phi-3.5-moe/humaneval ...
+    done in 1136.4s  avg_S=0.4503  (elapsed 84.0min)
+
+  [ 6/7] phi-3.5-moe/pile-arxiv ...
+    done in 1151.8s  avg_S=0.3878  (elapsed 103.2min)
+
+  [ 7/7] phi-3.5-moe/pile-github ...
+    done in 1539.2s  avg_S=0.4336  (elapsed 128.9min)
+
+=== Worker done in 128.9 min ===
+Saved: /scratch/sleonard/MoE_circuits/results/circuits/alpha_beta_sweep/sweep_src37_chunk08.npz

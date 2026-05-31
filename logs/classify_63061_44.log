@@ -1,0 +1,18 @@
+[44] qwen3-235b-a22b/gsm8k  host=piora1
+/scratch/sleonard/miniconda3/envs/megatron/lib/python3.11/site-packages/torch/cuda/__init__.py:61: FutureWarning: The pynvml package is deprecated. Please install nvidia-ml-py instead. If you did not install pynvml directly, please report this to the maintainers of the package that installed pynvml for you.
+  import pynvml  # type: ignore[import]
+=== build_classifications.py ===
+  cache dir : /scratch/sleonard/MoE_circuits/results/circuits/classifications
+  models    : 1  datasets: 1
+  already   : 0
+  to build  : 1
+
+[1/1] qwen3-235b-a22b/gsm8k  (elapsed=0.0min)
+  loading gsm8k prompts (1000 requested) ...
+len of my_gsm8k_dataset 1000
+  using 1000 prompts
+  loading tokenizer Qwen/Qwen3-235B-A22B ...
+  classifying ...
+  saved /scratch/sleonard/MoE_circuits/results/circuits/classifications/classify_qwen3-235b-a22b_gsm8k.pkl  (32,000 entries, 20.1s)
+
+All done in 0.3 min.

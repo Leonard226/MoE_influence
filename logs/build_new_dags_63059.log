@@ -1,0 +1,708 @@
+ROOT=/scratch/sleonard/MoE_circuits
+HF_HOME=/scratch/sleonard/.hugging_face
+RESULT_PATH=/scratch/sleonard/MoE_circuits/results/
+CLEANUP_MODEL_CACHE=1
+
+Starting at Thu May 28 09:08:53 PM CEST 2026
+Will build 30 (model, dataset) DAGs into /scratch/sleonard/MoE_circuits/results//circuits/
+Models:   olmoe phi-3.5-moe mixtral-8x7b deepseek-v2-lite qwen3-30b-a3b mixtral-8x22b
+Datasets: wikitext2 gsm8k humaneval pile-arxiv pile-github
+Prompts:  1000 each
+
+[1/30] [skip] olmoe/wikitext2  (already exists)
+[2/30] [skip] olmoe/gsm8k  (already exists)
+[3/30] [skip] olmoe/humaneval  (already exists)
+[4/30] [skip] olmoe/pile-arxiv  (already exists)
+[5/30] [skip] olmoe/pile-github  (already exists)
+------------------------------------------------------------
+Finished all datasets for olmoe at Thu May 28 09:08:53 PM CEST 2026
+  cleanup: no cache at /scratch/sleonard/.hugging_face/hub/models--allenai--OLMoE-1B-7B-0924
+------------------------------------------------------------
+[6/30] [skip] phi-3.5-moe/wikitext2  (already exists)
+[7/30] [skip] phi-3.5-moe/gsm8k  (already exists)
+[8/30] [skip] phi-3.5-moe/humaneval  (already exists)
+[9/30] [skip] phi-3.5-moe/pile-arxiv  (already exists)
+[10/30] [skip] phi-3.5-moe/pile-github  (already exists)
+------------------------------------------------------------
+Finished all datasets for phi-3.5-moe at Thu May 28 09:08:53 PM CEST 2026
+  cleanup: no cache at /scratch/sleonard/.hugging_face/hub/models--microsoft--Phi-3.5-MoE-instruct
+------------------------------------------------------------
+[11/30] [skip] mixtral-8x7b/wikitext2  (already exists)
+[12/30] [skip] mixtral-8x7b/gsm8k  (already exists)
+[13/30] [skip] mixtral-8x7b/humaneval  (already exists)
+[14/30] [skip] mixtral-8x7b/pile-arxiv  (already exists)
+[15/30] [skip] mixtral-8x7b/pile-github  (already exists)
+------------------------------------------------------------
+Finished all datasets for mixtral-8x7b at Thu May 28 09:08:53 PM CEST 2026
+  cleanup: no cache at /scratch/sleonard/.hugging_face/hub/models--mistralai--Mixtral-8x7B-v0.1
+------------------------------------------------------------
+============================================================
+[16/30] deepseek-v2-lite/wikitext2  bs=32  (elapsed=0min)
+============================================================
+/scratch/sleonard/miniconda3/envs/megatron/lib/python3.11/site-packages/torch/cuda/__init__.py:61: FutureWarning: The pynvml package is deprecated. Please install nvidia-ml-py instead. If you did not install pynvml directly, please report this to the maintainers of the package that installed pynvml for you.
+  import pynvml  # type: ignore[import]
+🚨 `patching` is part of OlmoeModel.forward's signature, but not documented. Make sure to add it to the docstring of the function in /scratch/sleonard/MoE_circuits/customized_models/modeling_olmoe_customized.py.
+🚨 `patching` is part of OlmoeForCausalLM.forward's signature, but not documented. Make sure to add it to the docstring of the function in /scratch/sleonard/MoE_circuits/customized_models/modeling_olmoe_customized.py.
+🚨 `patching` is part of MixtralModel.forward's signature, but not documented. Make sure to add it to the docstring of the function in /scratch/sleonard/MoE_circuits/customized_models/modeling_mixtral_customized.py.
+🚨 `patching` is part of MixtralForCausalLM.forward's signature, but not documented. Make sure to add it to the docstring of the function in /scratch/sleonard/MoE_circuits/customized_models/modeling_mixtral_customized.py.
+🚨 `patching` is part of Qwen3MoeModel.forward's signature, but not documented. Make sure to add it to the docstring of the function in /scratch/sleonard/MoE_circuits/customized_models/modeling_qwen3_moe_customized.py.
+🚨 `patching` is part of Qwen3MoeForCausalLM.forward's signature, but not documented. Make sure to add it to the docstring of the function in /scratch/sleonard/MoE_circuits/customized_models/modeling_qwen3_moe_customized.py.
+🚨 `patching` is part of PhimoeModel.forward's signature, but not documented. Make sure to add it to the docstring of the function in /scratch/sleonard/MoE_circuits/customized_models/modeling_phimoe_customized.py.
+🚨 `patching` is part of PhimoeForCausalLM.forward's signature, but not documented. Make sure to add it to the docstring of the function in /scratch/sleonard/MoE_circuits/customized_models/modeling_phimoe_customized.py.
+Building DAG for model='deepseek-v2-lite', dataset='wikitext2', 1000 prompts.
+Loading deepseek-ai/DeepSeek-V2-Lite ...
+  torch.cuda.device_count() = 4
+  CUDA_VISIBLE_DEVICES = 0,1,2,3
+DeepseekV2ForCausalLM has generative capabilities, as `prepare_inputs_for_generation` is explicitly defined. However, it doesn't directly inherit from `GenerationMixin`. From 👉v4.50👈 onwards, `PreTrainedModel` will NOT inherit from `GenerationMixin`, and this model will lose the ability to call `generate` and other related functions.
+  - If you're using `trust_remote_code=True`, you can get rid of this warning by loading the model with an auto class. See https://huggingface.co/docs/transformers/en/model_doc/auto#auto-classes
+  - If you are the owner of the model architecture code, please modify your model class such that it inherits from `GenerationMixin` (after `PreTrainedModel`, otherwise you'll get an exception).
+  - If you are not the owner of the model architecture class, please contact the model code owner to update it.
+Loading checkpoint shards:   0%|          | 0/4 [00:00<?, ?it/s]Loading checkpoint shards:  25%|██▌       | 1/4 [00:00<00:00,  5.78it/s]Loading checkpoint shards:  50%|█████     | 2/4 [00:00<00:00,  5.37it/s]Loading checkpoint shards:  75%|███████▌  | 3/4 [00:00<00:00,  5.04it/s]Loading checkpoint shards: 100%|██████████| 4/4 [00:00<00:00,  5.59it/s]Loading checkpoint shards: 100%|██████████| 4/4 [00:00<00:00,  5.48it/s]
+DeepseekV2ForCausalLM has generative capabilities, as `prepare_inputs_for_generation` is explicitly defined. However, it doesn't directly inherit from `GenerationMixin`. From 👉v4.50👈 onwards, `PreTrainedModel` will NOT inherit from `GenerationMixin`, and this model will lose the ability to call `generate` and other related functions.
+  - If you're using `trust_remote_code=True`, you can get rid of this warning by loading the model with an auto class. See https://huggingface.co/docs/transformers/en/model_doc/auto#auto-classes
+  - If you are the owner of the model architecture code, please modify your model class such that it inherits from `GenerationMixin` (after `PreTrainedModel`, otherwise you'll get an exception).
+  - If you are not the owner of the model architecture class, please contact the model code owner to update it.
+DeepseekV2ForCausalLM has generative capabilities, as `prepare_inputs_for_generation` is explicitly defined. However, it doesn't directly inherit from `GenerationMixin`. From 👉v4.50👈 onwards, `PreTrainedModel` will NOT inherit from `GenerationMixin`, and this model will lose the ability to call `generate` and other related functions.
+  - If you're using `trust_remote_code=True`, you can get rid of this warning by loading the model with an auto class. See https://huggingface.co/docs/transformers/en/model_doc/auto#auto-classes
+  - If you are the owner of the model architecture code, please modify your model class such that it inherits from `GenerationMixin` (after `PreTrainedModel`, otherwise you'll get an exception).
+  - If you are not the owner of the model architecture class, please contact the model code owner to update it.
+  loaded in 11.5s
+Loading dataset='wikitext2'  (1000 prompts) ...
+len of my_wikitext2_dataset 1000
+  loaded in 1.6s
+Running 32 batches (batch_size=32, max_tokens=32) ...
+  batch   1/32  elapsed=0.9s  rate=36.6 prompts/s  ETA=26s
+  batch  10/32  elapsed=6.7s  rate=47.6 prompts/s  ETA=14s
+  batch  20/32  elapsed=13.2s  rate=48.5 prompts/s  ETA=7s
+  batch  30/32  elapsed=19.7s  rate=48.8 prompts/s  ETA=1s
+  batch  32/32  elapsed=20.9s  rate=48.9 prompts/s  ETA=-0s
+
+Done in 20.9s.
+
+Saved /scratch/sleonard/MoE_circuits/results/circuits/dag_deepseek-v2-lite_wikitext2.pt
+[16/30] deepseek-v2-lite/wikitext2 done in 48s
+============================================================
+[17/30] deepseek-v2-lite/gsm8k  bs=32  (elapsed=0min)
+============================================================
+/scratch/sleonard/miniconda3/envs/megatron/lib/python3.11/site-packages/torch/cuda/__init__.py:61: FutureWarning: The pynvml package is deprecated. Please install nvidia-ml-py instead. If you did not install pynvml directly, please report this to the maintainers of the package that installed pynvml for you.
+  import pynvml  # type: ignore[import]
+🚨 `patching` is part of OlmoeModel.forward's signature, but not documented. Make sure to add it to the docstring of the function in /scratch/sleonard/MoE_circuits/customized_models/modeling_olmoe_customized.py.
+🚨 `patching` is part of OlmoeForCausalLM.forward's signature, but not documented. Make sure to add it to the docstring of the function in /scratch/sleonard/MoE_circuits/customized_models/modeling_olmoe_customized.py.
+🚨 `patching` is part of MixtralModel.forward's signature, but not documented. Make sure to add it to the docstring of the function in /scratch/sleonard/MoE_circuits/customized_models/modeling_mixtral_customized.py.
+🚨 `patching` is part of MixtralForCausalLM.forward's signature, but not documented. Make sure to add it to the docstring of the function in /scratch/sleonard/MoE_circuits/customized_models/modeling_mixtral_customized.py.
+🚨 `patching` is part of Qwen3MoeModel.forward's signature, but not documented. Make sure to add it to the docstring of the function in /scratch/sleonard/MoE_circuits/customized_models/modeling_qwen3_moe_customized.py.
+🚨 `patching` is part of Qwen3MoeForCausalLM.forward's signature, but not documented. Make sure to add it to the docstring of the function in /scratch/sleonard/MoE_circuits/customized_models/modeling_qwen3_moe_customized.py.
+🚨 `patching` is part of PhimoeModel.forward's signature, but not documented. Make sure to add it to the docstring of the function in /scratch/sleonard/MoE_circuits/customized_models/modeling_phimoe_customized.py.
+🚨 `patching` is part of PhimoeForCausalLM.forward's signature, but not documented. Make sure to add it to the docstring of the function in /scratch/sleonard/MoE_circuits/customized_models/modeling_phimoe_customized.py.
+Building DAG for model='deepseek-v2-lite', dataset='gsm8k', 1000 prompts.
+Loading deepseek-ai/DeepSeek-V2-Lite ...
+  torch.cuda.device_count() = 4
+  CUDA_VISIBLE_DEVICES = 0,1,2,3
+DeepseekV2ForCausalLM has generative capabilities, as `prepare_inputs_for_generation` is explicitly defined. However, it doesn't directly inherit from `GenerationMixin`. From 👉v4.50👈 onwards, `PreTrainedModel` will NOT inherit from `GenerationMixin`, and this model will lose the ability to call `generate` and other related functions.
+  - If you're using `trust_remote_code=True`, you can get rid of this warning by loading the model with an auto class. See https://huggingface.co/docs/transformers/en/model_doc/auto#auto-classes
+  - If you are the owner of the model architecture code, please modify your model class such that it inherits from `GenerationMixin` (after `PreTrainedModel`, otherwise you'll get an exception).
+  - If you are not the owner of the model architecture class, please contact the model code owner to update it.
+Loading checkpoint shards:   0%|          | 0/4 [00:00<?, ?it/s]Loading checkpoint shards:  25%|██▌       | 1/4 [00:00<00:00,  5.77it/s]Loading checkpoint shards:  50%|█████     | 2/4 [00:00<00:00,  5.38it/s]Loading checkpoint shards:  75%|███████▌  | 3/4 [00:00<00:00,  5.05it/s]Loading checkpoint shards: 100%|██████████| 4/4 [00:00<00:00,  5.60it/s]Loading checkpoint shards: 100%|██████████| 4/4 [00:00<00:00,  5.48it/s]
+DeepseekV2ForCausalLM has generative capabilities, as `prepare_inputs_for_generation` is explicitly defined. However, it doesn't directly inherit from `GenerationMixin`. From 👉v4.50👈 onwards, `PreTrainedModel` will NOT inherit from `GenerationMixin`, and this model will lose the ability to call `generate` and other related functions.
+  - If you're using `trust_remote_code=True`, you can get rid of this warning by loading the model with an auto class. See https://huggingface.co/docs/transformers/en/model_doc/auto#auto-classes
+  - If you are the owner of the model architecture code, please modify your model class such that it inherits from `GenerationMixin` (after `PreTrainedModel`, otherwise you'll get an exception).
+  - If you are not the owner of the model architecture class, please contact the model code owner to update it.
+DeepseekV2ForCausalLM has generative capabilities, as `prepare_inputs_for_generation` is explicitly defined. However, it doesn't directly inherit from `GenerationMixin`. From 👉v4.50👈 onwards, `PreTrainedModel` will NOT inherit from `GenerationMixin`, and this model will lose the ability to call `generate` and other related functions.
+  - If you're using `trust_remote_code=True`, you can get rid of this warning by loading the model with an auto class. See https://huggingface.co/docs/transformers/en/model_doc/auto#auto-classes
+  - If you are the owner of the model architecture code, please modify your model class such that it inherits from `GenerationMixin` (after `PreTrainedModel`, otherwise you'll get an exception).
+  - If you are not the owner of the model architecture class, please contact the model code owner to update it.
+  loaded in 11.4s
+Loading dataset='gsm8k'  (1000 prompts) ...
+len of my_gsm8k_dataset 1000
+  loaded in 1.4s
+Running 32 batches (batch_size=32, max_tokens=32) ...
+  batch   1/32  elapsed=0.9s  rate=35.1 prompts/s  ETA=28s
+  batch  10/32  elapsed=6.8s  rate=47.4 prompts/s  ETA=14s
+  batch  20/32  elapsed=13.2s  rate=48.4 prompts/s  ETA=7s
+  batch  30/32  elapsed=19.7s  rate=48.8 prompts/s  ETA=1s
+  batch  32/32  elapsed=20.9s  rate=48.9 prompts/s  ETA=-0s
+
+Done in 20.9s.
+
+Saved /scratch/sleonard/MoE_circuits/results/circuits/dag_deepseek-v2-lite_gsm8k.pt
+[17/30] deepseek-v2-lite/gsm8k done in 48s
+============================================================
+[18/30] deepseek-v2-lite/humaneval  bs=32  (elapsed=1min)
+============================================================
+/scratch/sleonard/miniconda3/envs/megatron/lib/python3.11/site-packages/torch/cuda/__init__.py:61: FutureWarning: The pynvml package is deprecated. Please install nvidia-ml-py instead. If you did not install pynvml directly, please report this to the maintainers of the package that installed pynvml for you.
+  import pynvml  # type: ignore[import]
+🚨 `patching` is part of OlmoeModel.forward's signature, but not documented. Make sure to add it to the docstring of the function in /scratch/sleonard/MoE_circuits/customized_models/modeling_olmoe_customized.py.
+🚨 `patching` is part of OlmoeForCausalLM.forward's signature, but not documented. Make sure to add it to the docstring of the function in /scratch/sleonard/MoE_circuits/customized_models/modeling_olmoe_customized.py.
+🚨 `patching` is part of MixtralModel.forward's signature, but not documented. Make sure to add it to the docstring of the function in /scratch/sleonard/MoE_circuits/customized_models/modeling_mixtral_customized.py.
+🚨 `patching` is part of MixtralForCausalLM.forward's signature, but not documented. Make sure to add it to the docstring of the function in /scratch/sleonard/MoE_circuits/customized_models/modeling_mixtral_customized.py.
+🚨 `patching` is part of Qwen3MoeModel.forward's signature, but not documented. Make sure to add it to the docstring of the function in /scratch/sleonard/MoE_circuits/customized_models/modeling_qwen3_moe_customized.py.
+🚨 `patching` is part of Qwen3MoeForCausalLM.forward's signature, but not documented. Make sure to add it to the docstring of the function in /scratch/sleonard/MoE_circuits/customized_models/modeling_qwen3_moe_customized.py.
+🚨 `patching` is part of PhimoeModel.forward's signature, but not documented. Make sure to add it to the docstring of the function in /scratch/sleonard/MoE_circuits/customized_models/modeling_phimoe_customized.py.
+🚨 `patching` is part of PhimoeForCausalLM.forward's signature, but not documented. Make sure to add it to the docstring of the function in /scratch/sleonard/MoE_circuits/customized_models/modeling_phimoe_customized.py.
+Building DAG for model='deepseek-v2-lite', dataset='humaneval', 1000 prompts.
+Loading deepseek-ai/DeepSeek-V2-Lite ...
+  torch.cuda.device_count() = 4
+  CUDA_VISIBLE_DEVICES = 0,1,2,3
+DeepseekV2ForCausalLM has generative capabilities, as `prepare_inputs_for_generation` is explicitly defined. However, it doesn't directly inherit from `GenerationMixin`. From 👉v4.50👈 onwards, `PreTrainedModel` will NOT inherit from `GenerationMixin`, and this model will lose the ability to call `generate` and other related functions.
+  - If you're using `trust_remote_code=True`, you can get rid of this warning by loading the model with an auto class. See https://huggingface.co/docs/transformers/en/model_doc/auto#auto-classes
+  - If you are the owner of the model architecture code, please modify your model class such that it inherits from `GenerationMixin` (after `PreTrainedModel`, otherwise you'll get an exception).
+  - If you are not the owner of the model architecture class, please contact the model code owner to update it.
+Loading checkpoint shards:   0%|          | 0/4 [00:00<?, ?it/s]Loading checkpoint shards:  25%|██▌       | 1/4 [00:00<00:00,  5.71it/s]Loading checkpoint shards:  50%|█████     | 2/4 [00:00<00:00,  5.36it/s]Loading checkpoint shards:  75%|███████▌  | 3/4 [00:00<00:00,  5.01it/s]Loading checkpoint shards: 100%|██████████| 4/4 [00:00<00:00,  5.54it/s]Loading checkpoint shards: 100%|██████████| 4/4 [00:00<00:00,  5.43it/s]
+DeepseekV2ForCausalLM has generative capabilities, as `prepare_inputs_for_generation` is explicitly defined. However, it doesn't directly inherit from `GenerationMixin`. From 👉v4.50👈 onwards, `PreTrainedModel` will NOT inherit from `GenerationMixin`, and this model will lose the ability to call `generate` and other related functions.
+  - If you're using `trust_remote_code=True`, you can get rid of this warning by loading the model with an auto class. See https://huggingface.co/docs/transformers/en/model_doc/auto#auto-classes
+  - If you are the owner of the model architecture code, please modify your model class such that it inherits from `GenerationMixin` (after `PreTrainedModel`, otherwise you'll get an exception).
+  - If you are not the owner of the model architecture class, please contact the model code owner to update it.
+DeepseekV2ForCausalLM has generative capabilities, as `prepare_inputs_for_generation` is explicitly defined. However, it doesn't directly inherit from `GenerationMixin`. From 👉v4.50👈 onwards, `PreTrainedModel` will NOT inherit from `GenerationMixin`, and this model will lose the ability to call `generate` and other related functions.
+  - If you're using `trust_remote_code=True`, you can get rid of this warning by loading the model with an auto class. See https://huggingface.co/docs/transformers/en/model_doc/auto#auto-classes
+  - If you are the owner of the model architecture code, please modify your model class such that it inherits from `GenerationMixin` (after `PreTrainedModel`, otherwise you'll get an exception).
+  - If you are not the owner of the model architecture class, please contact the model code owner to update it.
+  loaded in 11.5s
+Loading dataset='humaneval'  (1000 prompts) ...
+len of my_humaneval_dataset 141
+  loaded in 1.4s
+  loader returned 141 prompts (requested 1000); capping N_PROMPTS.
+Running 5 batches (batch_size=32, max_tokens=32) ...
+  batch   1/5  elapsed=0.9s  rate=34.6 prompts/s  ETA=3s
+  batch   5/5  elapsed=3.5s  rate=45.6 prompts/s  ETA=-0s
+
+Done in 3.5s.
+
+Saved /scratch/sleonard/MoE_circuits/results/circuits/dag_deepseek-v2-lite_humaneval.pt
+[18/30] deepseek-v2-lite/humaneval done in 29s
+============================================================
+[19/30] deepseek-v2-lite/pile-arxiv  bs=32  (elapsed=2min)
+============================================================
+/scratch/sleonard/miniconda3/envs/megatron/lib/python3.11/site-packages/torch/cuda/__init__.py:61: FutureWarning: The pynvml package is deprecated. Please install nvidia-ml-py instead. If you did not install pynvml directly, please report this to the maintainers of the package that installed pynvml for you.
+  import pynvml  # type: ignore[import]
+🚨 `patching` is part of OlmoeModel.forward's signature, but not documented. Make sure to add it to the docstring of the function in /scratch/sleonard/MoE_circuits/customized_models/modeling_olmoe_customized.py.
+🚨 `patching` is part of OlmoeForCausalLM.forward's signature, but not documented. Make sure to add it to the docstring of the function in /scratch/sleonard/MoE_circuits/customized_models/modeling_olmoe_customized.py.
+🚨 `patching` is part of MixtralModel.forward's signature, but not documented. Make sure to add it to the docstring of the function in /scratch/sleonard/MoE_circuits/customized_models/modeling_mixtral_customized.py.
+🚨 `patching` is part of MixtralForCausalLM.forward's signature, but not documented. Make sure to add it to the docstring of the function in /scratch/sleonard/MoE_circuits/customized_models/modeling_mixtral_customized.py.
+🚨 `patching` is part of Qwen3MoeModel.forward's signature, but not documented. Make sure to add it to the docstring of the function in /scratch/sleonard/MoE_circuits/customized_models/modeling_qwen3_moe_customized.py.
+🚨 `patching` is part of Qwen3MoeForCausalLM.forward's signature, but not documented. Make sure to add it to the docstring of the function in /scratch/sleonard/MoE_circuits/customized_models/modeling_qwen3_moe_customized.py.
+🚨 `patching` is part of PhimoeModel.forward's signature, but not documented. Make sure to add it to the docstring of the function in /scratch/sleonard/MoE_circuits/customized_models/modeling_phimoe_customized.py.
+🚨 `patching` is part of PhimoeForCausalLM.forward's signature, but not documented. Make sure to add it to the docstring of the function in /scratch/sleonard/MoE_circuits/customized_models/modeling_phimoe_customized.py.
+Building DAG for model='deepseek-v2-lite', dataset='pile-arxiv', 1000 prompts.
+Loading deepseek-ai/DeepSeek-V2-Lite ...
+  torch.cuda.device_count() = 4
+  CUDA_VISIBLE_DEVICES = 0,1,2,3
+DeepseekV2ForCausalLM has generative capabilities, as `prepare_inputs_for_generation` is explicitly defined. However, it doesn't directly inherit from `GenerationMixin`. From 👉v4.50👈 onwards, `PreTrainedModel` will NOT inherit from `GenerationMixin`, and this model will lose the ability to call `generate` and other related functions.
+  - If you're using `trust_remote_code=True`, you can get rid of this warning by loading the model with an auto class. See https://huggingface.co/docs/transformers/en/model_doc/auto#auto-classes
+  - If you are the owner of the model architecture code, please modify your model class such that it inherits from `GenerationMixin` (after `PreTrainedModel`, otherwise you'll get an exception).
+  - If you are not the owner of the model architecture class, please contact the model code owner to update it.
+Loading checkpoint shards:   0%|          | 0/4 [00:00<?, ?it/s]Loading checkpoint shards:  25%|██▌       | 1/4 [00:00<00:00,  5.56it/s]Loading checkpoint shards:  50%|█████     | 2/4 [00:00<00:00,  5.31it/s]Loading checkpoint shards:  75%|███████▌  | 3/4 [00:00<00:00,  4.98it/s]Loading checkpoint shards: 100%|██████████| 4/4 [00:00<00:00,  5.53it/s]Loading checkpoint shards: 100%|██████████| 4/4 [00:00<00:00,  5.40it/s]
+DeepseekV2ForCausalLM has generative capabilities, as `prepare_inputs_for_generation` is explicitly defined. However, it doesn't directly inherit from `GenerationMixin`. From 👉v4.50👈 onwards, `PreTrainedModel` will NOT inherit from `GenerationMixin`, and this model will lose the ability to call `generate` and other related functions.
+  - If you're using `trust_remote_code=True`, you can get rid of this warning by loading the model with an auto class. See https://huggingface.co/docs/transformers/en/model_doc/auto#auto-classes
+  - If you are the owner of the model architecture code, please modify your model class such that it inherits from `GenerationMixin` (after `PreTrainedModel`, otherwise you'll get an exception).
+  - If you are not the owner of the model architecture class, please contact the model code owner to update it.
+DeepseekV2ForCausalLM has generative capabilities, as `prepare_inputs_for_generation` is explicitly defined. However, it doesn't directly inherit from `GenerationMixin`. From 👉v4.50👈 onwards, `PreTrainedModel` will NOT inherit from `GenerationMixin`, and this model will lose the ability to call `generate` and other related functions.
+  - If you're using `trust_remote_code=True`, you can get rid of this warning by loading the model with an auto class. See https://huggingface.co/docs/transformers/en/model_doc/auto#auto-classes
+  - If you are the owner of the model architecture code, please modify your model class such that it inherits from `GenerationMixin` (after `PreTrainedModel`, otherwise you'll get an exception).
+  - If you are not the owner of the model architecture class, please contact the model code owner to update it.
+  loaded in 11.5s
+Loading dataset='pile-arxiv'  (1000 prompts) ...
+len of my_pile_arxiv_dataset 1000
+  loaded in 14.9s
+Running 32 batches (batch_size=32, max_tokens=32) ...
+  batch   1/32  elapsed=1.2s  rate=27.1 prompts/s  ETA=36s
+  batch  10/32  elapsed=10.2s  rate=31.3 prompts/s  ETA=22s
+  batch  20/32  elapsed=21.2s  rate=30.2 prompts/s  ETA=12s
+  batch  30/32  elapsed=32.2s  rate=29.9 prompts/s  ETA=1s
+  batch  32/32  elapsed=34.0s  rate=30.2 prompts/s  ETA=-1s
+
+Done in 34.0s.
+
+Saved /scratch/sleonard/MoE_circuits/results/circuits/dag_deepseek-v2-lite_pile-arxiv.pt
+[19/30] deepseek-v2-lite/pile-arxiv done in 75s
+============================================================
+[20/30] deepseek-v2-lite/pile-github  bs=32  (elapsed=3min)
+============================================================
+/scratch/sleonard/miniconda3/envs/megatron/lib/python3.11/site-packages/torch/cuda/__init__.py:61: FutureWarning: The pynvml package is deprecated. Please install nvidia-ml-py instead. If you did not install pynvml directly, please report this to the maintainers of the package that installed pynvml for you.
+  import pynvml  # type: ignore[import]
+🚨 `patching` is part of OlmoeModel.forward's signature, but not documented. Make sure to add it to the docstring of the function in /scratch/sleonard/MoE_circuits/customized_models/modeling_olmoe_customized.py.
+🚨 `patching` is part of OlmoeForCausalLM.forward's signature, but not documented. Make sure to add it to the docstring of the function in /scratch/sleonard/MoE_circuits/customized_models/modeling_olmoe_customized.py.
+🚨 `patching` is part of MixtralModel.forward's signature, but not documented. Make sure to add it to the docstring of the function in /scratch/sleonard/MoE_circuits/customized_models/modeling_mixtral_customized.py.
+🚨 `patching` is part of MixtralForCausalLM.forward's signature, but not documented. Make sure to add it to the docstring of the function in /scratch/sleonard/MoE_circuits/customized_models/modeling_mixtral_customized.py.
+🚨 `patching` is part of Qwen3MoeModel.forward's signature, but not documented. Make sure to add it to the docstring of the function in /scratch/sleonard/MoE_circuits/customized_models/modeling_qwen3_moe_customized.py.
+🚨 `patching` is part of Qwen3MoeForCausalLM.forward's signature, but not documented. Make sure to add it to the docstring of the function in /scratch/sleonard/MoE_circuits/customized_models/modeling_qwen3_moe_customized.py.
+🚨 `patching` is part of PhimoeModel.forward's signature, but not documented. Make sure to add it to the docstring of the function in /scratch/sleonard/MoE_circuits/customized_models/modeling_phimoe_customized.py.
+🚨 `patching` is part of PhimoeForCausalLM.forward's signature, but not documented. Make sure to add it to the docstring of the function in /scratch/sleonard/MoE_circuits/customized_models/modeling_phimoe_customized.py.
+Building DAG for model='deepseek-v2-lite', dataset='pile-github', 1000 prompts.
+Loading deepseek-ai/DeepSeek-V2-Lite ...
+  torch.cuda.device_count() = 4
+  CUDA_VISIBLE_DEVICES = 0,1,2,3
+DeepseekV2ForCausalLM has generative capabilities, as `prepare_inputs_for_generation` is explicitly defined. However, it doesn't directly inherit from `GenerationMixin`. From 👉v4.50👈 onwards, `PreTrainedModel` will NOT inherit from `GenerationMixin`, and this model will lose the ability to call `generate` and other related functions.
+  - If you're using `trust_remote_code=True`, you can get rid of this warning by loading the model with an auto class. See https://huggingface.co/docs/transformers/en/model_doc/auto#auto-classes
+  - If you are the owner of the model architecture code, please modify your model class such that it inherits from `GenerationMixin` (after `PreTrainedModel`, otherwise you'll get an exception).
+  - If you are not the owner of the model architecture class, please contact the model code owner to update it.
+Loading checkpoint shards:   0%|          | 0/4 [00:00<?, ?it/s]Loading checkpoint shards:  25%|██▌       | 1/4 [00:00<00:00,  5.72it/s]Loading checkpoint shards:  50%|█████     | 2/4 [00:00<00:00,  5.39it/s]Loading checkpoint shards:  75%|███████▌  | 3/4 [00:00<00:00,  5.03it/s]Loading checkpoint shards: 100%|██████████| 4/4 [00:00<00:00,  5.57it/s]Loading checkpoint shards: 100%|██████████| 4/4 [00:00<00:00,  5.46it/s]
+DeepseekV2ForCausalLM has generative capabilities, as `prepare_inputs_for_generation` is explicitly defined. However, it doesn't directly inherit from `GenerationMixin`. From 👉v4.50👈 onwards, `PreTrainedModel` will NOT inherit from `GenerationMixin`, and this model will lose the ability to call `generate` and other related functions.
+  - If you're using `trust_remote_code=True`, you can get rid of this warning by loading the model with an auto class. See https://huggingface.co/docs/transformers/en/model_doc/auto#auto-classes
+  - If you are the owner of the model architecture code, please modify your model class such that it inherits from `GenerationMixin` (after `PreTrainedModel`, otherwise you'll get an exception).
+  - If you are not the owner of the model architecture class, please contact the model code owner to update it.
+DeepseekV2ForCausalLM has generative capabilities, as `prepare_inputs_for_generation` is explicitly defined. However, it doesn't directly inherit from `GenerationMixin`. From 👉v4.50👈 onwards, `PreTrainedModel` will NOT inherit from `GenerationMixin`, and this model will lose the ability to call `generate` and other related functions.
+  - If you're using `trust_remote_code=True`, you can get rid of this warning by loading the model with an auto class. See https://huggingface.co/docs/transformers/en/model_doc/auto#auto-classes
+  - If you are the owner of the model architecture code, please modify your model class such that it inherits from `GenerationMixin` (after `PreTrainedModel`, otherwise you'll get an exception).
+  - If you are not the owner of the model architecture class, please contact the model code owner to update it.
+  loaded in 11.5s
+Loading dataset='pile-github'  (1000 prompts) ...
+len of my_pile_github_dataset 1000
+  loaded in 4.5s
+Running 32 batches (batch_size=32, max_tokens=32) ...
+  batch   1/32  elapsed=0.9s  rate=35.4 prompts/s  ETA=27s
+  batch  10/32  elapsed=7.3s  rate=44.0 prompts/s  ETA=15s
+  batch  20/32  elapsed=14.4s  rate=44.4 prompts/s  ETA=8s
+  batch  30/32  elapsed=21.4s  rate=44.8 prompts/s  ETA=1s
+  batch  32/32  elapsed=22.8s  rate=45.0 prompts/s  ETA=-1s
+
+Done in 22.8s.
+
+Saved /scratch/sleonard/MoE_circuits/results/circuits/dag_deepseek-v2-lite_pile-github.pt
+[20/30] deepseek-v2-lite/pile-github done in 54s
+------------------------------------------------------------
+Finished all datasets for deepseek-v2-lite at Thu May 28 09:13:32 PM CEST 2026
+  cleanup: rm -rf /scratch/sleonard/.hugging_face/hub/models--deepseek-ai--DeepSeek-V2-Lite  (30G)
+------------------------------------------------------------
+============================================================
+[21/30] qwen3-30b-a3b/wikitext2  bs=32  (elapsed=4min)
+============================================================
+/scratch/sleonard/miniconda3/envs/megatron/lib/python3.11/site-packages/torch/cuda/__init__.py:61: FutureWarning: The pynvml package is deprecated. Please install nvidia-ml-py instead. If you did not install pynvml directly, please report this to the maintainers of the package that installed pynvml for you.
+  import pynvml  # type: ignore[import]
+🚨 `patching` is part of OlmoeModel.forward's signature, but not documented. Make sure to add it to the docstring of the function in /scratch/sleonard/MoE_circuits/customized_models/modeling_olmoe_customized.py.
+🚨 `patching` is part of OlmoeForCausalLM.forward's signature, but not documented. Make sure to add it to the docstring of the function in /scratch/sleonard/MoE_circuits/customized_models/modeling_olmoe_customized.py.
+🚨 `patching` is part of MixtralModel.forward's signature, but not documented. Make sure to add it to the docstring of the function in /scratch/sleonard/MoE_circuits/customized_models/modeling_mixtral_customized.py.
+🚨 `patching` is part of MixtralForCausalLM.forward's signature, but not documented. Make sure to add it to the docstring of the function in /scratch/sleonard/MoE_circuits/customized_models/modeling_mixtral_customized.py.
+🚨 `patching` is part of Qwen3MoeModel.forward's signature, but not documented. Make sure to add it to the docstring of the function in /scratch/sleonard/MoE_circuits/customized_models/modeling_qwen3_moe_customized.py.
+🚨 `patching` is part of Qwen3MoeForCausalLM.forward's signature, but not documented. Make sure to add it to the docstring of the function in /scratch/sleonard/MoE_circuits/customized_models/modeling_qwen3_moe_customized.py.
+🚨 `patching` is part of PhimoeModel.forward's signature, but not documented. Make sure to add it to the docstring of the function in /scratch/sleonard/MoE_circuits/customized_models/modeling_phimoe_customized.py.
+🚨 `patching` is part of PhimoeForCausalLM.forward's signature, but not documented. Make sure to add it to the docstring of the function in /scratch/sleonard/MoE_circuits/customized_models/modeling_phimoe_customized.py.
+Building DAG for model='qwen3-30b-a3b', dataset='wikitext2', 1000 prompts.
+Loading Qwen/Qwen3-30B-A3B ...
+  torch.cuda.device_count() = 4
+  CUDA_VISIBLE_DEVICES = 0,1,2,3
+  accelerate=1.13.0  transformers=4.52.0
+  building empty model on meta device ...
+The argument `trust_remote_code` is to be used with Auto classes. It has no effect here and is ignored.
+  computed device_map: OrderedDict([('model.embed_tokens', 0), ('model.layers.0', 0), ('model.layers.1', 0), ('model.layers.2', 0), ('model.layers.3', 0), ('model.layers.4', 0), ('model.layers.5', 0), ('model.layers.6', 0), ('model.layers.7', 0), ('model.layers.8', 0), ('model.layers.9', 0), ('model.layers.10', 0), ('model.layers.11', 1), ('model.layers.12', 1), ('model.layers.13', 1), ('model.layers.14', 1), ('model.layers.15', 1), ('model.layers.16', 1), ('model.layers.17', 1), ('model.layers.18', 1), ('model.layers.19', 1), ('model.layers.20', 1), ('model.layers.21', 1), ('model.layers.22', 1), ('model.layers.23', 1), ('model.layers.24', 1), ('model.layers.25', 1), ('model.layers.26', 1), ('model.layers.27', 1), ('model.layers.28', 1), ('model.layers.29', 1), ('model.layers.30', 1), ('model.layers.31', 1), ('model.layers.32', 2), ('model.layers.33', 2), ('model.layers.34', 2), ('model.layers.35', 2), ('model.layers.36', 2), ('model.layers.37', 2), ('model.layers.38', 2), ('model.layers.39', 2), ('model.layers.40', 2), ('model.layers.41', 2), ('model.layers.42', 2), ('model.layers.43', 2), ('model.layers.44', 2), ('model.layers.45', 2), ('model.layers.46', 2), ('model.layers.47', 2), ('model.norm', 2), ('model.rotary_emb', 2), ('lm_head', 2)])
+  loading checkpoint to CPU ...
+Fetching 16 files:   0%|          | 0/16 [00:00<?, ?it/s]Fetching 16 files:   6%|▋         | 1/16 [04:01<1:00:28, 241.87s/it]Fetching 16 files:  12%|█▎        | 2/16 [04:03<23:27, 100.54s/it]  Fetching 16 files:  50%|█████     | 8/16 [04:03<02:13, 16.70s/it] Fetching 16 files:  56%|█████▋    | 9/16 [05:03<02:46, 23.75s/it]Fetching 16 files:  62%|██████▎   | 10/16 [07:16<04:28, 44.71s/it]Fetching 16 files:  75%|███████▌  | 12/16 [07:32<02:07, 31.80s/it]Fetching 16 files:  81%|████████▏ | 13/16 [07:34<01:17, 25.72s/it]Fetching 16 files: 100%|██████████| 16/16 [07:34<00:00, 28.40s/it]
+Loading checkpoint shards:   0%|          | 0/16 [00:00<?, ?it/s]Loading checkpoint shards:   6%|▋         | 1/16 [00:00<00:04,  3.39it/s]Loading checkpoint shards:  12%|█▎        | 2/16 [00:00<00:03,  3.56it/s]Loading checkpoint shards:  19%|█▉        | 3/16 [00:00<00:03,  4.26it/s]Loading checkpoint shards:  25%|██▌       | 4/16 [00:00<00:02,  4.65it/s]Loading checkpoint shards:  31%|███▏      | 5/16 [00:01<00:02,  4.79it/s]Loading checkpoint shards:  38%|███▊      | 6/16 [00:01<00:02,  4.76it/s]Loading checkpoint shards:  44%|████▍     | 7/16 [00:01<00:01,  4.64it/s]Loading checkpoint shards:  50%|█████     | 8/16 [00:01<00:01,  4.48it/s]Loading checkpoint shards:  56%|█████▋    | 9/16 [00:02<00:01,  4.29it/s]Loading checkpoint shards:  62%|██████▎   | 10/16 [00:02<00:01,  4.09it/s]Loading checkpoint shards:  69%|██████▉   | 11/16 [00:02<00:01,  3.90it/s]Loading checkpoint shards:  75%|███████▌  | 12/16 [00:02<00:01,  3.72it/s]Loading checkpoint shards:  81%|████████▏ | 13/16 [00:03<00:00,  3.55it/s]Loading checkpoint shards:  88%|████████▊ | 14/16 [00:03<00:00,  3.39it/s]Loading checkpoint shards:  94%|█████████▍| 15/16 [00:03<00:00,  3.23it/s]Loading checkpoint shards: 100%|██████████| 16/16 [00:03<00:00,  4.07it/s]
+  pre-dispatch first-param device = cpu
+  dispatching to GPUs ...
+  hf_device_map = {'model.embed_tokens': 0, 'model.layers.0': 0, 'model.layers.1': 0, 'model.layers.2': 0, 'model.layers.3': 0, 'model.layers.4': 0, 'model.layers.5': 0, 'model.layers.6': 0, 'model.layers.7': 0, 'model.layers.8': 0, 'model.layers.9': 0, 'model.layers.10': 0, 'model.layers.11': 1, 'model.layers.12': 1, 'model.layers.13': 1, 'model.layers.14': 1, 'model.layers.15': 1, 'model.layers.16': 1, 'model.layers.17': 1, 'model.layers.18': 1, 'model.layers.19': 1, 'model.layers.20': 1, 'model.layers.21': 1, 'model.layers.22': 1, 'model.layers.23': 1, 'model.layers.24': 1, 'model.layers.25': 1, 'model.layers.26': 1, 'model.layers.27': 1, 'model.layers.28': 1, 'model.layers.29': 1, 'model.layers.30': 1, 'model.layers.31': 1, 'model.layers.32': 2, 'model.layers.33': 2, 'model.layers.34': 2, 'model.layers.35': 2, 'model.layers.36': 2, 'model.layers.37': 2, 'model.layers.38': 2, 'model.layers.39': 2, 'model.layers.40': 2, 'model.layers.41': 2, 'model.layers.42': 2, 'model.layers.43': 2, 'model.layers.44': 2, 'model.layers.45': 2, 'model.layers.46': 2, 'model.layers.47': 2, 'model.norm': 2, 'model.rotary_emb': 2, 'lm_head': 2}
+  post-dispatch first-param device = cuda:0
+  loaded in 489.0s
+Loading dataset='wikitext2'  (1000 prompts) ...
+len of my_wikitext2_dataset 1000
+  loaded in 1.7s
+Running 32 batches (batch_size=32, max_tokens=32) ...
+  batch   1/32  elapsed=5.3s  rate=6.0 prompts/s  ETA=161s
+  batch  10/32  elapsed=46.9s  rate=6.8 prompts/s  ETA=100s
+  batch  20/32  elapsed=93.0s  rate=6.9 prompts/s  ETA=52s
+  batch  30/32  elapsed=139.0s  rate=6.9 prompts/s  ETA=6s
+  batch  32/32  elapsed=147.3s  rate=7.0 prompts/s  ETA=-3s
+
+Done in 147.3s.
+
+Saved /scratch/sleonard/MoE_circuits/results/circuits/dag_qwen3-30b-a3b_wikitext2.pt
+[21/30] qwen3-30b-a3b/wikitext2 done in 656s
+============================================================
+[22/30] qwen3-30b-a3b/gsm8k  bs=32  (elapsed=15min)
+============================================================
+/scratch/sleonard/miniconda3/envs/megatron/lib/python3.11/site-packages/torch/cuda/__init__.py:61: FutureWarning: The pynvml package is deprecated. Please install nvidia-ml-py instead. If you did not install pynvml directly, please report this to the maintainers of the package that installed pynvml for you.
+  import pynvml  # type: ignore[import]
+🚨 `patching` is part of OlmoeModel.forward's signature, but not documented. Make sure to add it to the docstring of the function in /scratch/sleonard/MoE_circuits/customized_models/modeling_olmoe_customized.py.
+🚨 `patching` is part of OlmoeForCausalLM.forward's signature, but not documented. Make sure to add it to the docstring of the function in /scratch/sleonard/MoE_circuits/customized_models/modeling_olmoe_customized.py.
+🚨 `patching` is part of MixtralModel.forward's signature, but not documented. Make sure to add it to the docstring of the function in /scratch/sleonard/MoE_circuits/customized_models/modeling_mixtral_customized.py.
+🚨 `patching` is part of MixtralForCausalLM.forward's signature, but not documented. Make sure to add it to the docstring of the function in /scratch/sleonard/MoE_circuits/customized_models/modeling_mixtral_customized.py.
+🚨 `patching` is part of Qwen3MoeModel.forward's signature, but not documented. Make sure to add it to the docstring of the function in /scratch/sleonard/MoE_circuits/customized_models/modeling_qwen3_moe_customized.py.
+🚨 `patching` is part of Qwen3MoeForCausalLM.forward's signature, but not documented. Make sure to add it to the docstring of the function in /scratch/sleonard/MoE_circuits/customized_models/modeling_qwen3_moe_customized.py.
+🚨 `patching` is part of PhimoeModel.forward's signature, but not documented. Make sure to add it to the docstring of the function in /scratch/sleonard/MoE_circuits/customized_models/modeling_phimoe_customized.py.
+🚨 `patching` is part of PhimoeForCausalLM.forward's signature, but not documented. Make sure to add it to the docstring of the function in /scratch/sleonard/MoE_circuits/customized_models/modeling_phimoe_customized.py.
+Building DAG for model='qwen3-30b-a3b', dataset='gsm8k', 1000 prompts.
+Loading Qwen/Qwen3-30B-A3B ...
+  torch.cuda.device_count() = 4
+  CUDA_VISIBLE_DEVICES = 0,1,2,3
+  accelerate=1.13.0  transformers=4.52.0
+  building empty model on meta device ...
+The argument `trust_remote_code` is to be used with Auto classes. It has no effect here and is ignored.
+  computed device_map: OrderedDict([('model.embed_tokens', 0), ('model.layers.0', 0), ('model.layers.1', 0), ('model.layers.2', 0), ('model.layers.3', 0), ('model.layers.4', 0), ('model.layers.5', 0), ('model.layers.6', 0), ('model.layers.7', 0), ('model.layers.8', 0), ('model.layers.9', 0), ('model.layers.10', 0), ('model.layers.11', 1), ('model.layers.12', 1), ('model.layers.13', 1), ('model.layers.14', 1), ('model.layers.15', 1), ('model.layers.16', 1), ('model.layers.17', 1), ('model.layers.18', 1), ('model.layers.19', 1), ('model.layers.20', 1), ('model.layers.21', 1), ('model.layers.22', 1), ('model.layers.23', 1), ('model.layers.24', 1), ('model.layers.25', 1), ('model.layers.26', 1), ('model.layers.27', 1), ('model.layers.28', 1), ('model.layers.29', 1), ('model.layers.30', 1), ('model.layers.31', 1), ('model.layers.32', 2), ('model.layers.33', 2), ('model.layers.34', 2), ('model.layers.35', 2), ('model.layers.36', 2), ('model.layers.37', 2), ('model.layers.38', 2), ('model.layers.39', 2), ('model.layers.40', 2), ('model.layers.41', 2), ('model.layers.42', 2), ('model.layers.43', 2), ('model.layers.44', 2), ('model.layers.45', 2), ('model.layers.46', 2), ('model.layers.47', 2), ('model.norm', 2), ('model.rotary_emb', 2), ('lm_head', 2)])
+  loading checkpoint to CPU ...
+Loading checkpoint shards:   0%|          | 0/16 [00:00<?, ?it/s]Loading checkpoint shards:   6%|▋         | 1/16 [00:00<00:03,  4.86it/s]Loading checkpoint shards:  12%|█▎        | 2/16 [00:00<00:02,  5.64it/s]Loading checkpoint shards:  19%|█▉        | 3/16 [00:00<00:02,  5.71it/s]Loading checkpoint shards:  25%|██▌       | 4/16 [00:00<00:02,  5.59it/s]Loading checkpoint shards:  31%|███▏      | 5/16 [00:00<00:02,  5.38it/s]Loading checkpoint shards:  38%|███▊      | 6/16 [00:01<00:01,  5.14it/s]Loading checkpoint shards:  44%|████▍     | 7/16 [00:01<00:01,  4.88it/s]Loading checkpoint shards:  50%|█████     | 8/16 [00:01<00:01,  4.63it/s]Loading checkpoint shards:  56%|█████▋    | 9/16 [00:01<00:01,  4.38it/s]Loading checkpoint shards:  62%|██████▎   | 10/16 [00:02<00:01,  4.15it/s]Loading checkpoint shards:  69%|██████▉   | 11/16 [00:02<00:01,  3.94it/s]Loading checkpoint shards:  75%|███████▌  | 12/16 [00:02<00:01,  3.75it/s]Loading checkpoint shards:  81%|████████▏ | 13/16 [00:03<00:00,  3.57it/s]Loading checkpoint shards:  88%|████████▊ | 14/16 [00:03<00:00,  3.40it/s]Loading checkpoint shards:  94%|█████████▍| 15/16 [00:03<00:00,  3.25it/s]Loading checkpoint shards: 100%|██████████| 16/16 [00:03<00:00,  4.30it/s]
+  pre-dispatch first-param device = cpu
+  dispatching to GPUs ...
+  hf_device_map = {'model.embed_tokens': 0, 'model.layers.0': 0, 'model.layers.1': 0, 'model.layers.2': 0, 'model.layers.3': 0, 'model.layers.4': 0, 'model.layers.5': 0, 'model.layers.6': 0, 'model.layers.7': 0, 'model.layers.8': 0, 'model.layers.9': 0, 'model.layers.10': 0, 'model.layers.11': 1, 'model.layers.12': 1, 'model.layers.13': 1, 'model.layers.14': 1, 'model.layers.15': 1, 'model.layers.16': 1, 'model.layers.17': 1, 'model.layers.18': 1, 'model.layers.19': 1, 'model.layers.20': 1, 'model.layers.21': 1, 'model.layers.22': 1, 'model.layers.23': 1, 'model.layers.24': 1, 'model.layers.25': 1, 'model.layers.26': 1, 'model.layers.27': 1, 'model.layers.28': 1, 'model.layers.29': 1, 'model.layers.30': 1, 'model.layers.31': 1, 'model.layers.32': 2, 'model.layers.33': 2, 'model.layers.34': 2, 'model.layers.35': 2, 'model.layers.36': 2, 'model.layers.37': 2, 'model.layers.38': 2, 'model.layers.39': 2, 'model.layers.40': 2, 'model.layers.41': 2, 'model.layers.42': 2, 'model.layers.43': 2, 'model.layers.44': 2, 'model.layers.45': 2, 'model.layers.46': 2, 'model.layers.47': 2, 'model.norm': 2, 'model.rotary_emb': 2, 'lm_head': 2}
+  post-dispatch first-param device = cuda:0
+  loaded in 33.7s
+Loading dataset='gsm8k'  (1000 prompts) ...
+len of my_gsm8k_dataset 1000
+  loaded in 1.4s
+Running 32 batches (batch_size=32, max_tokens=32) ...
+  batch   1/32  elapsed=5.3s  rate=6.0 prompts/s  ETA=160s
+  batch  10/32  elapsed=47.1s  rate=6.8 prompts/s  ETA=100s
+  batch  20/32  elapsed=93.6s  rate=6.8 prompts/s  ETA=53s
+  batch  30/32  elapsed=140.0s  rate=6.9 prompts/s  ETA=6s
+  batch  32/32  elapsed=148.4s  rate=6.9 prompts/s  ETA=-3s
+
+Done in 148.4s.
+
+Saved /scratch/sleonard/MoE_circuits/results/circuits/dag_qwen3-30b-a3b_gsm8k.pt
+[22/30] qwen3-30b-a3b/gsm8k done in 201s
+============================================================
+[23/30] qwen3-30b-a3b/humaneval  bs=32  (elapsed=19min)
+============================================================
+/scratch/sleonard/miniconda3/envs/megatron/lib/python3.11/site-packages/torch/cuda/__init__.py:61: FutureWarning: The pynvml package is deprecated. Please install nvidia-ml-py instead. If you did not install pynvml directly, please report this to the maintainers of the package that installed pynvml for you.
+  import pynvml  # type: ignore[import]
+🚨 `patching` is part of OlmoeModel.forward's signature, but not documented. Make sure to add it to the docstring of the function in /scratch/sleonard/MoE_circuits/customized_models/modeling_olmoe_customized.py.
+🚨 `patching` is part of OlmoeForCausalLM.forward's signature, but not documented. Make sure to add it to the docstring of the function in /scratch/sleonard/MoE_circuits/customized_models/modeling_olmoe_customized.py.
+🚨 `patching` is part of MixtralModel.forward's signature, but not documented. Make sure to add it to the docstring of the function in /scratch/sleonard/MoE_circuits/customized_models/modeling_mixtral_customized.py.
+🚨 `patching` is part of MixtralForCausalLM.forward's signature, but not documented. Make sure to add it to the docstring of the function in /scratch/sleonard/MoE_circuits/customized_models/modeling_mixtral_customized.py.
+🚨 `patching` is part of Qwen3MoeModel.forward's signature, but not documented. Make sure to add it to the docstring of the function in /scratch/sleonard/MoE_circuits/customized_models/modeling_qwen3_moe_customized.py.
+🚨 `patching` is part of Qwen3MoeForCausalLM.forward's signature, but not documented. Make sure to add it to the docstring of the function in /scratch/sleonard/MoE_circuits/customized_models/modeling_qwen3_moe_customized.py.
+🚨 `patching` is part of PhimoeModel.forward's signature, but not documented. Make sure to add it to the docstring of the function in /scratch/sleonard/MoE_circuits/customized_models/modeling_phimoe_customized.py.
+🚨 `patching` is part of PhimoeForCausalLM.forward's signature, but not documented. Make sure to add it to the docstring of the function in /scratch/sleonard/MoE_circuits/customized_models/modeling_phimoe_customized.py.
+Building DAG for model='qwen3-30b-a3b', dataset='humaneval', 1000 prompts.
+Loading Qwen/Qwen3-30B-A3B ...
+  torch.cuda.device_count() = 4
+  CUDA_VISIBLE_DEVICES = 0,1,2,3
+  accelerate=1.13.0  transformers=4.52.0
+  building empty model on meta device ...
+The argument `trust_remote_code` is to be used with Auto classes. It has no effect here and is ignored.
+  computed device_map: OrderedDict([('model.embed_tokens', 0), ('model.layers.0', 0), ('model.layers.1', 0), ('model.layers.2', 0), ('model.layers.3', 0), ('model.layers.4', 0), ('model.layers.5', 0), ('model.layers.6', 0), ('model.layers.7', 0), ('model.layers.8', 0), ('model.layers.9', 0), ('model.layers.10', 0), ('model.layers.11', 1), ('model.layers.12', 1), ('model.layers.13', 1), ('model.layers.14', 1), ('model.layers.15', 1), ('model.layers.16', 1), ('model.layers.17', 1), ('model.layers.18', 1), ('model.layers.19', 1), ('model.layers.20', 1), ('model.layers.21', 1), ('model.layers.22', 1), ('model.layers.23', 1), ('model.layers.24', 1), ('model.layers.25', 1), ('model.layers.26', 1), ('model.layers.27', 1), ('model.layers.28', 1), ('model.layers.29', 1), ('model.layers.30', 1), ('model.layers.31', 1), ('model.layers.32', 2), ('model.layers.33', 2), ('model.layers.34', 2), ('model.layers.35', 2), ('model.layers.36', 2), ('model.layers.37', 2), ('model.layers.38', 2), ('model.layers.39', 2), ('model.layers.40', 2), ('model.layers.41', 2), ('model.layers.42', 2), ('model.layers.43', 2), ('model.layers.44', 2), ('model.layers.45', 2), ('model.layers.46', 2), ('model.layers.47', 2), ('model.norm', 2), ('model.rotary_emb', 2), ('lm_head', 2)])
+  loading checkpoint to CPU ...
+Loading checkpoint shards:   0%|          | 0/16 [00:00<?, ?it/s]Loading checkpoint shards:   6%|▋         | 1/16 [00:00<00:03,  4.88it/s]Loading checkpoint shards:  12%|█▎        | 2/16 [00:00<00:02,  5.64it/s]Loading checkpoint shards:  19%|█▉        | 3/16 [00:00<00:02,  5.72it/s]Loading checkpoint shards:  25%|██▌       | 4/16 [00:00<00:02,  5.61it/s]Loading checkpoint shards:  31%|███▏      | 5/16 [00:00<00:02,  5.41it/s]Loading checkpoint shards:  38%|███▊      | 6/16 [00:01<00:01,  5.16it/s]Loading checkpoint shards:  44%|████▍     | 7/16 [00:01<00:01,  4.89it/s]Loading checkpoint shards:  50%|█████     | 8/16 [00:01<00:01,  4.63it/s]Loading checkpoint shards:  56%|█████▋    | 9/16 [00:01<00:01,  4.38it/s]Loading checkpoint shards:  62%|██████▎   | 10/16 [00:02<00:01,  4.14it/s]Loading checkpoint shards:  69%|██████▉   | 11/16 [00:02<00:01,  3.93it/s]Loading checkpoint shards:  75%|███████▌  | 12/16 [00:02<00:01,  3.74it/s]Loading checkpoint shards:  81%|████████▏ | 13/16 [00:03<00:00,  3.56it/s]Loading checkpoint shards:  88%|████████▊ | 14/16 [00:03<00:00,  3.39it/s]Loading checkpoint shards:  94%|█████████▍| 15/16 [00:03<00:00,  3.24it/s]Loading checkpoint shards: 100%|██████████| 16/16 [00:03<00:00,  4.30it/s]
+  pre-dispatch first-param device = cpu
+  dispatching to GPUs ...
+  hf_device_map = {'model.embed_tokens': 0, 'model.layers.0': 0, 'model.layers.1': 0, 'model.layers.2': 0, 'model.layers.3': 0, 'model.layers.4': 0, 'model.layers.5': 0, 'model.layers.6': 0, 'model.layers.7': 0, 'model.layers.8': 0, 'model.layers.9': 0, 'model.layers.10': 0, 'model.layers.11': 1, 'model.layers.12': 1, 'model.layers.13': 1, 'model.layers.14': 1, 'model.layers.15': 1, 'model.layers.16': 1, 'model.layers.17': 1, 'model.layers.18': 1, 'model.layers.19': 1, 'model.layers.20': 1, 'model.layers.21': 1, 'model.layers.22': 1, 'model.layers.23': 1, 'model.layers.24': 1, 'model.layers.25': 1, 'model.layers.26': 1, 'model.layers.27': 1, 'model.layers.28': 1, 'model.layers.29': 1, 'model.layers.30': 1, 'model.layers.31': 1, 'model.layers.32': 2, 'model.layers.33': 2, 'model.layers.34': 2, 'model.layers.35': 2, 'model.layers.36': 2, 'model.layers.37': 2, 'model.layers.38': 2, 'model.layers.39': 2, 'model.layers.40': 2, 'model.layers.41': 2, 'model.layers.42': 2, 'model.layers.43': 2, 'model.layers.44': 2, 'model.layers.45': 2, 'model.layers.46': 2, 'model.layers.47': 2, 'model.norm': 2, 'model.rotary_emb': 2, 'lm_head': 2}
+  post-dispatch first-param device = cuda:0
+  loaded in 33.3s
+Loading dataset='humaneval'  (1000 prompts) ...
+len of my_humaneval_dataset 141
+  loaded in 1.4s
+  loader returned 141 prompts (requested 1000); capping N_PROMPTS.
+Running 5 batches (batch_size=32, max_tokens=32) ...
+  batch   1/5  elapsed=5.3s  rate=6.0 prompts/s  ETA=18s
+  batch   5/5  elapsed=23.3s  rate=6.9 prompts/s  ETA=-3s
+
+Done in 23.3s.
+
+Saved /scratch/sleonard/MoE_circuits/results/circuits/dag_qwen3-30b-a3b_humaneval.pt
+[23/30] qwen3-30b-a3b/humaneval done in 75s
+============================================================
+[24/30] qwen3-30b-a3b/pile-arxiv  bs=32  (elapsed=20min)
+============================================================
+/scratch/sleonard/miniconda3/envs/megatron/lib/python3.11/site-packages/torch/cuda/__init__.py:61: FutureWarning: The pynvml package is deprecated. Please install nvidia-ml-py instead. If you did not install pynvml directly, please report this to the maintainers of the package that installed pynvml for you.
+  import pynvml  # type: ignore[import]
+🚨 `patching` is part of OlmoeModel.forward's signature, but not documented. Make sure to add it to the docstring of the function in /scratch/sleonard/MoE_circuits/customized_models/modeling_olmoe_customized.py.
+🚨 `patching` is part of OlmoeForCausalLM.forward's signature, but not documented. Make sure to add it to the docstring of the function in /scratch/sleonard/MoE_circuits/customized_models/modeling_olmoe_customized.py.
+🚨 `patching` is part of MixtralModel.forward's signature, but not documented. Make sure to add it to the docstring of the function in /scratch/sleonard/MoE_circuits/customized_models/modeling_mixtral_customized.py.
+🚨 `patching` is part of MixtralForCausalLM.forward's signature, but not documented. Make sure to add it to the docstring of the function in /scratch/sleonard/MoE_circuits/customized_models/modeling_mixtral_customized.py.
+🚨 `patching` is part of Qwen3MoeModel.forward's signature, but not documented. Make sure to add it to the docstring of the function in /scratch/sleonard/MoE_circuits/customized_models/modeling_qwen3_moe_customized.py.
+🚨 `patching` is part of Qwen3MoeForCausalLM.forward's signature, but not documented. Make sure to add it to the docstring of the function in /scratch/sleonard/MoE_circuits/customized_models/modeling_qwen3_moe_customized.py.
+🚨 `patching` is part of PhimoeModel.forward's signature, but not documented. Make sure to add it to the docstring of the function in /scratch/sleonard/MoE_circuits/customized_models/modeling_phimoe_customized.py.
+🚨 `patching` is part of PhimoeForCausalLM.forward's signature, but not documented. Make sure to add it to the docstring of the function in /scratch/sleonard/MoE_circuits/customized_models/modeling_phimoe_customized.py.
+Building DAG for model='qwen3-30b-a3b', dataset='pile-arxiv', 1000 prompts.
+Loading Qwen/Qwen3-30B-A3B ...
+  torch.cuda.device_count() = 4
+  CUDA_VISIBLE_DEVICES = 0,1,2,3
+  accelerate=1.13.0  transformers=4.52.0
+  building empty model on meta device ...
+The argument `trust_remote_code` is to be used with Auto classes. It has no effect here and is ignored.
+  computed device_map: OrderedDict([('model.embed_tokens', 0), ('model.layers.0', 0), ('model.layers.1', 0), ('model.layers.2', 0), ('model.layers.3', 0), ('model.layers.4', 0), ('model.layers.5', 0), ('model.layers.6', 0), ('model.layers.7', 0), ('model.layers.8', 0), ('model.layers.9', 0), ('model.layers.10', 0), ('model.layers.11', 1), ('model.layers.12', 1), ('model.layers.13', 1), ('model.layers.14', 1), ('model.layers.15', 1), ('model.layers.16', 1), ('model.layers.17', 1), ('model.layers.18', 1), ('model.layers.19', 1), ('model.layers.20', 1), ('model.layers.21', 1), ('model.layers.22', 1), ('model.layers.23', 1), ('model.layers.24', 1), ('model.layers.25', 1), ('model.layers.26', 1), ('model.layers.27', 1), ('model.layers.28', 1), ('model.layers.29', 1), ('model.layers.30', 1), ('model.layers.31', 1), ('model.layers.32', 2), ('model.layers.33', 2), ('model.layers.34', 2), ('model.layers.35', 2), ('model.layers.36', 2), ('model.layers.37', 2), ('model.layers.38', 2), ('model.layers.39', 2), ('model.layers.40', 2), ('model.layers.41', 2), ('model.layers.42', 2), ('model.layers.43', 2), ('model.layers.44', 2), ('model.layers.45', 2), ('model.layers.46', 2), ('model.layers.47', 2), ('model.norm', 2), ('model.rotary_emb', 2), ('lm_head', 2)])
+  loading checkpoint to CPU ...
+Loading checkpoint shards:   0%|          | 0/16 [00:00<?, ?it/s]Loading checkpoint shards:   6%|▋         | 1/16 [00:00<00:03,  4.92it/s]Loading checkpoint shards:  12%|█▎        | 2/16 [00:00<00:02,  5.67it/s]Loading checkpoint shards:  19%|█▉        | 3/16 [00:00<00:02,  5.75it/s]Loading checkpoint shards:  25%|██▌       | 4/16 [00:00<00:02,  5.61it/s]Loading checkpoint shards:  31%|███▏      | 5/16 [00:00<00:02,  5.41it/s]Loading checkpoint shards:  38%|███▊      | 6/16 [00:01<00:01,  5.15it/s]Loading checkpoint shards:  44%|████▍     | 7/16 [00:01<00:01,  4.89it/s]Loading checkpoint shards:  50%|█████     | 8/16 [00:01<00:01,  4.63it/s]Loading checkpoint shards:  56%|█████▋    | 9/16 [00:01<00:01,  4.38it/s]Loading checkpoint shards:  62%|██████▎   | 10/16 [00:02<00:01,  4.14it/s]Loading checkpoint shards:  69%|██████▉   | 11/16 [00:02<00:01,  3.93it/s]Loading checkpoint shards:  75%|███████▌  | 12/16 [00:02<00:01,  3.73it/s]Loading checkpoint shards:  81%|████████▏ | 13/16 [00:03<00:00,  3.56it/s]Loading checkpoint shards:  88%|████████▊ | 14/16 [00:03<00:00,  3.38it/s]Loading checkpoint shards:  94%|█████████▍| 15/16 [00:03<00:00,  3.23it/s]Loading checkpoint shards: 100%|██████████| 16/16 [00:03<00:00,  4.29it/s]
+  pre-dispatch first-param device = cpu
+  dispatching to GPUs ...
+  hf_device_map = {'model.embed_tokens': 0, 'model.layers.0': 0, 'model.layers.1': 0, 'model.layers.2': 0, 'model.layers.3': 0, 'model.layers.4': 0, 'model.layers.5': 0, 'model.layers.6': 0, 'model.layers.7': 0, 'model.layers.8': 0, 'model.layers.9': 0, 'model.layers.10': 0, 'model.layers.11': 1, 'model.layers.12': 1, 'model.layers.13': 1, 'model.layers.14': 1, 'model.layers.15': 1, 'model.layers.16': 1, 'model.layers.17': 1, 'model.layers.18': 1, 'model.layers.19': 1, 'model.layers.20': 1, 'model.layers.21': 1, 'model.layers.22': 1, 'model.layers.23': 1, 'model.layers.24': 1, 'model.layers.25': 1, 'model.layers.26': 1, 'model.layers.27': 1, 'model.layers.28': 1, 'model.layers.29': 1, 'model.layers.30': 1, 'model.layers.31': 1, 'model.layers.32': 2, 'model.layers.33': 2, 'model.layers.34': 2, 'model.layers.35': 2, 'model.layers.36': 2, 'model.layers.37': 2, 'model.layers.38': 2, 'model.layers.39': 2, 'model.layers.40': 2, 'model.layers.41': 2, 'model.layers.42': 2, 'model.layers.43': 2, 'model.layers.44': 2, 'model.layers.45': 2, 'model.layers.46': 2, 'model.layers.47': 2, 'model.norm': 2, 'model.rotary_emb': 2, 'lm_head': 2}
+  post-dispatch first-param device = cuda:0
+  loaded in 33.4s
+Loading dataset='pile-arxiv'  (1000 prompts) ...
+len of my_pile_arxiv_dataset 1000
+  loaded in 14.6s
+Running 32 batches (batch_size=32, max_tokens=32) ...
+  batch   1/32  elapsed=5.5s  rate=5.8 prompts/s  ETA=166s
+  batch  10/32  elapsed=49.4s  rate=6.5 prompts/s  ETA=105s
+  batch  20/32  elapsed=98.7s  rate=6.5 prompts/s  ETA=56s
+  batch  30/32  elapsed=148.1s  rate=6.5 prompts/s  ETA=6s
+  batch  32/32  elapsed=156.8s  rate=6.5 prompts/s  ETA=-4s
+
+Done in 156.8s.
+
+Saved /scratch/sleonard/MoE_circuits/results/circuits/dag_qwen3-30b-a3b_pile-arxiv.pt
+[24/30] qwen3-30b-a3b/pile-arxiv done in 222s
+============================================================
+[25/30] qwen3-30b-a3b/pile-github  bs=32  (elapsed=24min)
+============================================================
+/scratch/sleonard/miniconda3/envs/megatron/lib/python3.11/site-packages/torch/cuda/__init__.py:61: FutureWarning: The pynvml package is deprecated. Please install nvidia-ml-py instead. If you did not install pynvml directly, please report this to the maintainers of the package that installed pynvml for you.
+  import pynvml  # type: ignore[import]
+🚨 `patching` is part of OlmoeModel.forward's signature, but not documented. Make sure to add it to the docstring of the function in /scratch/sleonard/MoE_circuits/customized_models/modeling_olmoe_customized.py.
+🚨 `patching` is part of OlmoeForCausalLM.forward's signature, but not documented. Make sure to add it to the docstring of the function in /scratch/sleonard/MoE_circuits/customized_models/modeling_olmoe_customized.py.
+🚨 `patching` is part of MixtralModel.forward's signature, but not documented. Make sure to add it to the docstring of the function in /scratch/sleonard/MoE_circuits/customized_models/modeling_mixtral_customized.py.
+🚨 `patching` is part of MixtralForCausalLM.forward's signature, but not documented. Make sure to add it to the docstring of the function in /scratch/sleonard/MoE_circuits/customized_models/modeling_mixtral_customized.py.
+🚨 `patching` is part of Qwen3MoeModel.forward's signature, but not documented. Make sure to add it to the docstring of the function in /scratch/sleonard/MoE_circuits/customized_models/modeling_qwen3_moe_customized.py.
+🚨 `patching` is part of Qwen3MoeForCausalLM.forward's signature, but not documented. Make sure to add it to the docstring of the function in /scratch/sleonard/MoE_circuits/customized_models/modeling_qwen3_moe_customized.py.
+🚨 `patching` is part of PhimoeModel.forward's signature, but not documented. Make sure to add it to the docstring of the function in /scratch/sleonard/MoE_circuits/customized_models/modeling_phimoe_customized.py.
+🚨 `patching` is part of PhimoeForCausalLM.forward's signature, but not documented. Make sure to add it to the docstring of the function in /scratch/sleonard/MoE_circuits/customized_models/modeling_phimoe_customized.py.
+Building DAG for model='qwen3-30b-a3b', dataset='pile-github', 1000 prompts.
+Loading Qwen/Qwen3-30B-A3B ...
+  torch.cuda.device_count() = 4
+  CUDA_VISIBLE_DEVICES = 0,1,2,3
+  accelerate=1.13.0  transformers=4.52.0
+  building empty model on meta device ...
+The argument `trust_remote_code` is to be used with Auto classes. It has no effect here and is ignored.
+  computed device_map: OrderedDict([('model.embed_tokens', 0), ('model.layers.0', 0), ('model.layers.1', 0), ('model.layers.2', 0), ('model.layers.3', 0), ('model.layers.4', 0), ('model.layers.5', 0), ('model.layers.6', 0), ('model.layers.7', 0), ('model.layers.8', 0), ('model.layers.9', 0), ('model.layers.10', 0), ('model.layers.11', 1), ('model.layers.12', 1), ('model.layers.13', 1), ('model.layers.14', 1), ('model.layers.15', 1), ('model.layers.16', 1), ('model.layers.17', 1), ('model.layers.18', 1), ('model.layers.19', 1), ('model.layers.20', 1), ('model.layers.21', 1), ('model.layers.22', 1), ('model.layers.23', 1), ('model.layers.24', 1), ('model.layers.25', 1), ('model.layers.26', 1), ('model.layers.27', 1), ('model.layers.28', 1), ('model.layers.29', 1), ('model.layers.30', 1), ('model.layers.31', 1), ('model.layers.32', 2), ('model.layers.33', 2), ('model.layers.34', 2), ('model.layers.35', 2), ('model.layers.36', 2), ('model.layers.37', 2), ('model.layers.38', 2), ('model.layers.39', 2), ('model.layers.40', 2), ('model.layers.41', 2), ('model.layers.42', 2), ('model.layers.43', 2), ('model.layers.44', 2), ('model.layers.45', 2), ('model.layers.46', 2), ('model.layers.47', 2), ('model.norm', 2), ('model.rotary_emb', 2), ('lm_head', 2)])
+  loading checkpoint to CPU ...
+Loading checkpoint shards:   0%|          | 0/16 [00:00<?, ?it/s]Loading checkpoint shards:   6%|▋         | 1/16 [00:00<00:03,  4.11it/s]Loading checkpoint shards:  12%|█▎        | 2/16 [00:00<00:02,  5.19it/s]Loading checkpoint shards:  19%|█▉        | 3/16 [00:00<00:02,  5.47it/s]Loading checkpoint shards:  25%|██▌       | 4/16 [00:00<00:02,  5.46it/s]Loading checkpoint shards:  31%|███▏      | 5/16 [00:00<00:02,  5.32it/s]Loading checkpoint shards:  38%|███▊      | 6/16 [00:01<00:01,  5.10it/s]Loading checkpoint shards:  44%|████▍     | 7/16 [00:01<00:01,  4.86it/s]Loading checkpoint shards:  50%|█████     | 8/16 [00:01<00:01,  4.62it/s]Loading checkpoint shards:  56%|█████▋    | 9/16 [00:01<00:01,  4.38it/s]Loading checkpoint shards:  62%|██████▎   | 10/16 [00:02<00:01,  4.15it/s]Loading checkpoint shards:  69%|██████▉   | 11/16 [00:02<00:01,  3.93it/s]Loading checkpoint shards:  75%|███████▌  | 12/16 [00:02<00:01,  3.74it/s]Loading checkpoint shards:  81%|████████▏ | 13/16 [00:03<00:00,  3.56it/s]Loading checkpoint shards:  88%|████████▊ | 14/16 [00:03<00:00,  3.39it/s]Loading checkpoint shards:  94%|█████████▍| 15/16 [00:03<00:00,  3.23it/s]Loading checkpoint shards: 100%|██████████| 16/16 [00:03<00:00,  4.26it/s]
+  pre-dispatch first-param device = cpu
+  dispatching to GPUs ...
+  hf_device_map = {'model.embed_tokens': 0, 'model.layers.0': 0, 'model.layers.1': 0, 'model.layers.2': 0, 'model.layers.3': 0, 'model.layers.4': 0, 'model.layers.5': 0, 'model.layers.6': 0, 'model.layers.7': 0, 'model.layers.8': 0, 'model.layers.9': 0, 'model.layers.10': 0, 'model.layers.11': 1, 'model.layers.12': 1, 'model.layers.13': 1, 'model.layers.14': 1, 'model.layers.15': 1, 'model.layers.16': 1, 'model.layers.17': 1, 'model.layers.18': 1, 'model.layers.19': 1, 'model.layers.20': 1, 'model.layers.21': 1, 'model.layers.22': 1, 'model.layers.23': 1, 'model.layers.24': 1, 'model.layers.25': 1, 'model.layers.26': 1, 'model.layers.27': 1, 'model.layers.28': 1, 'model.layers.29': 1, 'model.layers.30': 1, 'model.layers.31': 1, 'model.layers.32': 2, 'model.layers.33': 2, 'model.layers.34': 2, 'model.layers.35': 2, 'model.layers.36': 2, 'model.layers.37': 2, 'model.layers.38': 2, 'model.layers.39': 2, 'model.layers.40': 2, 'model.layers.41': 2, 'model.layers.42': 2, 'model.layers.43': 2, 'model.layers.44': 2, 'model.layers.45': 2, 'model.layers.46': 2, 'model.layers.47': 2, 'model.norm': 2, 'model.rotary_emb': 2, 'lm_head': 2}
+  post-dispatch first-param device = cuda:0
+  loaded in 33.2s
+Loading dataset='pile-github'  (1000 prompts) ...
+len of my_pile_github_dataset 1000
+  loaded in 4.4s
+Running 32 batches (batch_size=32, max_tokens=32) ...
+  batch   1/32  elapsed=5.4s  rate=5.9 prompts/s  ETA=163s
+  batch  10/32  elapsed=47.9s  rate=6.7 prompts/s  ETA=102s
+  batch  20/32  elapsed=95.5s  rate=6.7 prompts/s  ETA=54s
+  batch  30/32  elapsed=143.1s  rate=6.7 prompts/s  ETA=6s
+  batch  32/32  elapsed=151.7s  rate=6.8 prompts/s  ETA=-4s
+
+Done in 151.7s.
+
+Saved /scratch/sleonard/MoE_circuits/results/circuits/dag_qwen3-30b-a3b_pile-github.pt
+[25/30] qwen3-30b-a3b/pile-github done in 206s
+------------------------------------------------------------
+Finished all datasets for qwen3-30b-a3b at Thu May 28 09:36:40 PM CEST 2026
+  cleanup: rm -rf /scratch/sleonard/.hugging_face/hub/models--Qwen--Qwen3-30B-A3B  (57G)
+------------------------------------------------------------
+============================================================
+[26/30] mixtral-8x22b/wikitext2  bs=16  (elapsed=27min)
+============================================================
+/scratch/sleonard/miniconda3/envs/megatron/lib/python3.11/site-packages/torch/cuda/__init__.py:61: FutureWarning: The pynvml package is deprecated. Please install nvidia-ml-py instead. If you did not install pynvml directly, please report this to the maintainers of the package that installed pynvml for you.
+  import pynvml  # type: ignore[import]
+🚨 `patching` is part of OlmoeModel.forward's signature, but not documented. Make sure to add it to the docstring of the function in /scratch/sleonard/MoE_circuits/customized_models/modeling_olmoe_customized.py.
+🚨 `patching` is part of OlmoeForCausalLM.forward's signature, but not documented. Make sure to add it to the docstring of the function in /scratch/sleonard/MoE_circuits/customized_models/modeling_olmoe_customized.py.
+🚨 `patching` is part of MixtralModel.forward's signature, but not documented. Make sure to add it to the docstring of the function in /scratch/sleonard/MoE_circuits/customized_models/modeling_mixtral_customized.py.
+🚨 `patching` is part of MixtralForCausalLM.forward's signature, but not documented. Make sure to add it to the docstring of the function in /scratch/sleonard/MoE_circuits/customized_models/modeling_mixtral_customized.py.
+🚨 `patching` is part of Qwen3MoeModel.forward's signature, but not documented. Make sure to add it to the docstring of the function in /scratch/sleonard/MoE_circuits/customized_models/modeling_qwen3_moe_customized.py.
+🚨 `patching` is part of Qwen3MoeForCausalLM.forward's signature, but not documented. Make sure to add it to the docstring of the function in /scratch/sleonard/MoE_circuits/customized_models/modeling_qwen3_moe_customized.py.
+🚨 `patching` is part of PhimoeModel.forward's signature, but not documented. Make sure to add it to the docstring of the function in /scratch/sleonard/MoE_circuits/customized_models/modeling_phimoe_customized.py.
+🚨 `patching` is part of PhimoeForCausalLM.forward's signature, but not documented. Make sure to add it to the docstring of the function in /scratch/sleonard/MoE_circuits/customized_models/modeling_phimoe_customized.py.
+Building DAG for model='mixtral-8x22b', dataset='wikitext2', 1000 prompts.
+Loading mistralai/Mixtral-8x22B-v0.1 ...
+  torch.cuda.device_count() = 4
+  CUDA_VISIBLE_DEVICES = 0,1,2,3
+  accelerate=1.13.0  transformers=4.52.0
+  building empty model on meta device ...
+The argument `trust_remote_code` is to be used with Auto classes. It has no effect here and is ignored.
+  computed device_map: OrderedDict([('model.embed_tokens', 0), ('model.layers.0', 0), ('model.layers.1', 0), ('model.layers.2', 0), ('model.layers.3', 0), ('model.layers.4', 0), ('model.layers.5', 0), ('model.layers.6', 0), ('model.layers.7', 0), ('model.layers.8', 0), ('model.layers.9', 0), ('model.layers.10', 0), ('model.layers.11', 1), ('model.layers.12', 1), ('model.layers.13', 1), ('model.layers.14', 1), ('model.layers.15', 1), ('model.layers.16', 1), ('model.layers.17', 1), ('model.layers.18', 1), ('model.layers.19', 1), ('model.layers.20', 1), ('model.layers.21', 1), ('model.layers.22', 1), ('model.layers.23', 1), ('model.layers.24', 1), ('model.layers.25', 1), ('model.layers.26', 1), ('model.layers.27', 2), ('model.layers.28', 2), ('model.layers.29', 2), ('model.layers.30', 2), ('model.layers.31', 2), ('model.layers.32', 2), ('model.layers.33', 2), ('model.layers.34', 2), ('model.layers.35', 2), ('model.layers.36', 2), ('model.layers.37', 2), ('model.layers.38', 2), ('model.layers.39', 2), ('model.layers.40', 2), ('model.layers.41', 2), ('model.layers.42', 2), ('model.layers.43', 3), ('model.layers.44', 3), ('model.layers.45', 3), ('model.layers.46', 3), ('model.layers.47', 3), ('model.layers.48', 3), ('model.layers.49', 3), ('model.layers.50', 3), ('model.layers.51', 3), ('model.layers.52', 3), ('model.layers.53', 3), ('model.layers.54', 3), ('model.layers.55', 3), ('model.norm', 3), ('model.rotary_emb', 3), ('lm_head', 3)])
+  loading checkpoint to CPU ...
+Fetching 59 files:   0%|          | 0/59 [00:00<?, ?it/s]Fetching 59 files:   2%|▏         | 1/59 [04:49<4:40:01, 289.68s/it]Fetching 59 files:   3%|▎         | 2/59 [04:56<1:56:53, 123.04s/it]Fetching 59 files:  14%|█▎        | 8/59 [04:56<17:23, 20.45s/it]   Fetching 59 files:  15%|█▌        | 9/59 [09:01<48:04, 57.69s/it]Fetching 59 files:  17%|█▋        | 10/59 [09:38<43:47, 53.62s/it]Fetching 59 files:  25%|██▌       | 15/59 [10:34<21:23, 29.18s/it]Fetching 59 files:  29%|██▉       | 17/59 [11:23<19:33, 27.94s/it]Fetching 59 files:  31%|███       | 18/59 [14:59<38:27, 56.28s/it]Fetching 59 files:  36%|███▌      | 21/59 [15:03<22:02, 34.81s/it]Fetching 59 files:  42%|████▏     | 25/59 [17:47<21:13, 37.44s/it]Fetching 59 files:  44%|████▍     | 26/59 [18:53<22:37, 41.15s/it]Fetching 59 files:  47%|████▋     | 28/59 [19:03<16:09, 31.28s/it]Fetching 59 files:  49%|████▉     | 29/59 [20:19<19:17, 38.57s/it]Fetching 59 files:  51%|█████     | 30/59 [21:00<18:54, 39.11s/it]Fetching 59 files:  54%|█████▍    | 32/59 [21:32<13:55, 30.96s/it]Fetching 59 files:  58%|█████▊    | 34/59 [21:42<09:17, 22.31s/it]Fetching 59 files:  59%|█████▉    | 35/59 [21:52<07:54, 19.78s/it]Fetching 59 files:  61%|██████    | 36/59 [22:48<10:38, 27.77s/it]Fetching 59 files:  63%|██████▎   | 37/59 [24:50<18:15, 49.80s/it]Fetching 59 files:  64%|██████▍   | 38/59 [24:51<13:07, 37.51s/it]Fetching 59 files:  66%|██████▌   | 39/59 [27:04<20:55, 62.79s/it]Fetching 59 files:  71%|███████   | 42/59 [28:34<12:52, 45.45s/it]Fetching 59 files:  76%|███████▋  | 45/59 [30:20<09:34, 41.04s/it]Fetching 59 files:  78%|███████▊  | 46/59 [30:34<07:54, 36.48s/it]Fetching 59 files:  83%|████████▎ | 49/59 [30:54<03:58, 23.87s/it]Fetching 59 files:  85%|████████▍ | 50/59 [31:50<04:22, 29.19s/it]Fetching 59 files:  86%|████████▋ | 51/59 [32:49<04:40, 35.05s/it]Fetching 59 files:  90%|████████▉ | 53/59 [33:15<02:42, 27.16s/it]Fetching 59 files:  92%|█████████▏| 54/59 [34:37<03:11, 38.29s/it]Fetching 59 files:  93%|█████████▎| 55/59 [34:39<02:00, 30.23s/it]Fetching 59 files:  95%|█████████▍| 56/59 [34:40<01:09, 23.02s/it]Fetching 59 files:  97%|█████████▋| 57/59 [34:42<00:35, 17.75s/it]Fetching 59 files: 100%|██████████| 59/59 [34:49<00:00, 11.59s/it]Fetching 59 files: 100%|██████████| 59/59 [34:49<00:00, 35.41s/it]
+Loading checkpoint shards:   0%|          | 0/59 [00:00<?, ?it/s]Loading checkpoint shards:  39%|███▉      | 23/59 [00:00<00:00, 225.32it/s]Loading checkpoint shards:  80%|███████▉  | 47/59 [00:00<00:00, 229.10it/s]Loading checkpoint shards: 100%|██████████| 59/59 [00:00<00:00, 230.81it/s]
+  pre-dispatch first-param device = cpu
+  dispatching to GPUs ...
+  hf_device_map = {'model.embed_tokens': 0, 'model.layers.0': 0, 'model.layers.1': 0, 'model.layers.2': 0, 'model.layers.3': 0, 'model.layers.4': 0, 'model.layers.5': 0, 'model.layers.6': 0, 'model.layers.7': 0, 'model.layers.8': 0, 'model.layers.9': 0, 'model.layers.10': 0, 'model.layers.11': 1, 'model.layers.12': 1, 'model.layers.13': 1, 'model.layers.14': 1, 'model.layers.15': 1, 'model.layers.16': 1, 'model.layers.17': 1, 'model.layers.18': 1, 'model.layers.19': 1, 'model.layers.20': 1, 'model.layers.21': 1, 'model.layers.22': 1, 'model.layers.23': 1, 'model.layers.24': 1, 'model.layers.25': 1, 'model.layers.26': 1, 'model.layers.27': 2, 'model.layers.28': 2, 'model.layers.29': 2, 'model.layers.30': 2, 'model.layers.31': 2, 'model.layers.32': 2, 'model.layers.33': 2, 'model.layers.34': 2, 'model.layers.35': 2, 'model.layers.36': 2, 'model.layers.37': 2, 'model.layers.38': 2, 'model.layers.39': 2, 'model.layers.40': 2, 'model.layers.41': 2, 'model.layers.42': 2, 'model.layers.43': 3, 'model.layers.44': 3, 'model.layers.45': 3, 'model.layers.46': 3, 'model.layers.47': 3, 'model.layers.48': 3, 'model.layers.49': 3, 'model.layers.50': 3, 'model.layers.51': 3, 'model.layers.52': 3, 'model.layers.53': 3, 'model.layers.54': 3, 'model.layers.55': 3, 'model.norm': 3, 'model.rotary_emb': 3, 'lm_head': 3}
+  post-dispatch first-param device = cuda:0
+  loaded in 2134.3s
+Loading dataset='wikitext2'  (1000 prompts) ...
+len of my_wikitext2_dataset 1000
+  loaded in 1.7s
+Running 63 batches (batch_size=16, max_tokens=32) ...
+  batch   1/63  elapsed=3.2s  rate=5.0 prompts/s  ETA=197s
+  batch  10/63  elapsed=25.6s  rate=6.2 prompts/s  ETA=134s
+  batch  20/63  elapsed=50.6s  rate=6.3 prompts/s  ETA=107s
+  batch  30/63  elapsed=76.2s  rate=6.3 prompts/s  ETA=82s
+  batch  40/63  elapsed=101.5s  rate=6.3 prompts/s  ETA=57s
+  batch  50/63  elapsed=126.3s  rate=6.3 prompts/s  ETA=32s
+  batch  60/63  elapsed=151.4s  rate=6.3 prompts/s  ETA=6s
+  batch  63/63  elapsed=158.4s  rate=6.4 prompts/s  ETA=-1s
+
+Done in 158.4s.
+
+Saved /scratch/sleonard/MoE_circuits/results/circuits/dag_mixtral-8x22b_wikitext2.pt
+[26/30] mixtral-8x22b/wikitext2 done in 2316s
+============================================================
+[27/30] mixtral-8x22b/gsm8k  bs=16  (elapsed=66min)
+============================================================
+/scratch/sleonard/miniconda3/envs/megatron/lib/python3.11/site-packages/torch/cuda/__init__.py:61: FutureWarning: The pynvml package is deprecated. Please install nvidia-ml-py instead. If you did not install pynvml directly, please report this to the maintainers of the package that installed pynvml for you.
+  import pynvml  # type: ignore[import]
+🚨 `patching` is part of OlmoeModel.forward's signature, but not documented. Make sure to add it to the docstring of the function in /scratch/sleonard/MoE_circuits/customized_models/modeling_olmoe_customized.py.
+🚨 `patching` is part of OlmoeForCausalLM.forward's signature, but not documented. Make sure to add it to the docstring of the function in /scratch/sleonard/MoE_circuits/customized_models/modeling_olmoe_customized.py.
+🚨 `patching` is part of MixtralModel.forward's signature, but not documented. Make sure to add it to the docstring of the function in /scratch/sleonard/MoE_circuits/customized_models/modeling_mixtral_customized.py.
+🚨 `patching` is part of MixtralForCausalLM.forward's signature, but not documented. Make sure to add it to the docstring of the function in /scratch/sleonard/MoE_circuits/customized_models/modeling_mixtral_customized.py.
+🚨 `patching` is part of Qwen3MoeModel.forward's signature, but not documented. Make sure to add it to the docstring of the function in /scratch/sleonard/MoE_circuits/customized_models/modeling_qwen3_moe_customized.py.
+🚨 `patching` is part of Qwen3MoeForCausalLM.forward's signature, but not documented. Make sure to add it to the docstring of the function in /scratch/sleonard/MoE_circuits/customized_models/modeling_qwen3_moe_customized.py.
+🚨 `patching` is part of PhimoeModel.forward's signature, but not documented. Make sure to add it to the docstring of the function in /scratch/sleonard/MoE_circuits/customized_models/modeling_phimoe_customized.py.
+🚨 `patching` is part of PhimoeForCausalLM.forward's signature, but not documented. Make sure to add it to the docstring of the function in /scratch/sleonard/MoE_circuits/customized_models/modeling_phimoe_customized.py.
+Building DAG for model='mixtral-8x22b', dataset='gsm8k', 1000 prompts.
+Loading mistralai/Mixtral-8x22B-v0.1 ...
+  torch.cuda.device_count() = 4
+  CUDA_VISIBLE_DEVICES = 0,1,2,3
+  accelerate=1.13.0  transformers=4.52.0
+  building empty model on meta device ...
+The argument `trust_remote_code` is to be used with Auto classes. It has no effect here and is ignored.
+  computed device_map: OrderedDict([('model.embed_tokens', 0), ('model.layers.0', 0), ('model.layers.1', 0), ('model.layers.2', 0), ('model.layers.3', 0), ('model.layers.4', 0), ('model.layers.5', 0), ('model.layers.6', 0), ('model.layers.7', 0), ('model.layers.8', 0), ('model.layers.9', 0), ('model.layers.10', 0), ('model.layers.11', 1), ('model.layers.12', 1), ('model.layers.13', 1), ('model.layers.14', 1), ('model.layers.15', 1), ('model.layers.16', 1), ('model.layers.17', 1), ('model.layers.18', 1), ('model.layers.19', 1), ('model.layers.20', 1), ('model.layers.21', 1), ('model.layers.22', 1), ('model.layers.23', 1), ('model.layers.24', 1), ('model.layers.25', 1), ('model.layers.26', 1), ('model.layers.27', 2), ('model.layers.28', 2), ('model.layers.29', 2), ('model.layers.30', 2), ('model.layers.31', 2), ('model.layers.32', 2), ('model.layers.33', 2), ('model.layers.34', 2), ('model.layers.35', 2), ('model.layers.36', 2), ('model.layers.37', 2), ('model.layers.38', 2), ('model.layers.39', 2), ('model.layers.40', 2), ('model.layers.41', 2), ('model.layers.42', 2), ('model.layers.43', 3), ('model.layers.44', 3), ('model.layers.45', 3), ('model.layers.46', 3), ('model.layers.47', 3), ('model.layers.48', 3), ('model.layers.49', 3), ('model.layers.50', 3), ('model.layers.51', 3), ('model.layers.52', 3), ('model.layers.53', 3), ('model.layers.54', 3), ('model.layers.55', 3), ('model.norm', 3), ('model.rotary_emb', 3), ('lm_head', 3)])
+  loading checkpoint to CPU ...
+Loading checkpoint shards:   0%|          | 0/59 [00:00<?, ?it/s]Loading checkpoint shards:  39%|███▉      | 23/59 [00:00<00:00, 227.04it/s]Loading checkpoint shards:  80%|███████▉  | 47/59 [00:00<00:00, 230.31it/s]Loading checkpoint shards: 100%|██████████| 59/59 [00:00<00:00, 232.03it/s]
+  pre-dispatch first-param device = cpu
+  dispatching to GPUs ...
+  hf_device_map = {'model.embed_tokens': 0, 'model.layers.0': 0, 'model.layers.1': 0, 'model.layers.2': 0, 'model.layers.3': 0, 'model.layers.4': 0, 'model.layers.5': 0, 'model.layers.6': 0, 'model.layers.7': 0, 'model.layers.8': 0, 'model.layers.9': 0, 'model.layers.10': 0, 'model.layers.11': 1, 'model.layers.12': 1, 'model.layers.13': 1, 'model.layers.14': 1, 'model.layers.15': 1, 'model.layers.16': 1, 'model.layers.17': 1, 'model.layers.18': 1, 'model.layers.19': 1, 'model.layers.20': 1, 'model.layers.21': 1, 'model.layers.22': 1, 'model.layers.23': 1, 'model.layers.24': 1, 'model.layers.25': 1, 'model.layers.26': 1, 'model.layers.27': 2, 'model.layers.28': 2, 'model.layers.29': 2, 'model.layers.30': 2, 'model.layers.31': 2, 'model.layers.32': 2, 'model.layers.33': 2, 'model.layers.34': 2, 'model.layers.35': 2, 'model.layers.36': 2, 'model.layers.37': 2, 'model.layers.38': 2, 'model.layers.39': 2, 'model.layers.40': 2, 'model.layers.41': 2, 'model.layers.42': 2, 'model.layers.43': 3, 'model.layers.44': 3, 'model.layers.45': 3, 'model.layers.46': 3, 'model.layers.47': 3, 'model.layers.48': 3, 'model.layers.49': 3, 'model.layers.50': 3, 'model.layers.51': 3, 'model.layers.52': 3, 'model.layers.53': 3, 'model.layers.54': 3, 'model.layers.55': 3, 'model.norm': 3, 'model.rotary_emb': 3, 'lm_head': 3}
+  post-dispatch first-param device = cuda:0
+  loaded in 43.8s
+Loading dataset='gsm8k'  (1000 prompts) ...
+len of my_gsm8k_dataset 1000
+  loaded in 1.4s
+Running 63 batches (batch_size=16, max_tokens=32) ...
+  batch   1/63  elapsed=3.2s  rate=5.0 prompts/s  ETA=195s
+  batch  10/63  elapsed=25.9s  rate=6.2 prompts/s  ETA=136s
+  batch  20/63  elapsed=51.0s  rate=6.3 prompts/s  ETA=108s
+  batch  30/63  elapsed=76.0s  rate=6.3 prompts/s  ETA=82s
+  batch  40/63  elapsed=100.9s  rate=6.3 prompts/s  ETA=57s
+  batch  50/63  elapsed=126.0s  rate=6.4 prompts/s  ETA=31s
+  batch  60/63  elapsed=151.1s  rate=6.4 prompts/s  ETA=6s
+  batch  63/63  elapsed=158.2s  rate=6.4 prompts/s  ETA=-1s
+
+Done in 158.2s.
+
+Saved /scratch/sleonard/MoE_circuits/results/circuits/dag_mixtral-8x22b_gsm8k.pt
+[27/30] mixtral-8x22b/gsm8k done in 224s
+============================================================
+[28/30] mixtral-8x22b/humaneval  bs=16  (elapsed=70min)
+============================================================
+/scratch/sleonard/miniconda3/envs/megatron/lib/python3.11/site-packages/torch/cuda/__init__.py:61: FutureWarning: The pynvml package is deprecated. Please install nvidia-ml-py instead. If you did not install pynvml directly, please report this to the maintainers of the package that installed pynvml for you.
+  import pynvml  # type: ignore[import]
+🚨 `patching` is part of OlmoeModel.forward's signature, but not documented. Make sure to add it to the docstring of the function in /scratch/sleonard/MoE_circuits/customized_models/modeling_olmoe_customized.py.
+🚨 `patching` is part of OlmoeForCausalLM.forward's signature, but not documented. Make sure to add it to the docstring of the function in /scratch/sleonard/MoE_circuits/customized_models/modeling_olmoe_customized.py.
+🚨 `patching` is part of MixtralModel.forward's signature, but not documented. Make sure to add it to the docstring of the function in /scratch/sleonard/MoE_circuits/customized_models/modeling_mixtral_customized.py.
+🚨 `patching` is part of MixtralForCausalLM.forward's signature, but not documented. Make sure to add it to the docstring of the function in /scratch/sleonard/MoE_circuits/customized_models/modeling_mixtral_customized.py.
+🚨 `patching` is part of Qwen3MoeModel.forward's signature, but not documented. Make sure to add it to the docstring of the function in /scratch/sleonard/MoE_circuits/customized_models/modeling_qwen3_moe_customized.py.
+🚨 `patching` is part of Qwen3MoeForCausalLM.forward's signature, but not documented. Make sure to add it to the docstring of the function in /scratch/sleonard/MoE_circuits/customized_models/modeling_qwen3_moe_customized.py.
+🚨 `patching` is part of PhimoeModel.forward's signature, but not documented. Make sure to add it to the docstring of the function in /scratch/sleonard/MoE_circuits/customized_models/modeling_phimoe_customized.py.
+🚨 `patching` is part of PhimoeForCausalLM.forward's signature, but not documented. Make sure to add it to the docstring of the function in /scratch/sleonard/MoE_circuits/customized_models/modeling_phimoe_customized.py.
+Building DAG for model='mixtral-8x22b', dataset='humaneval', 1000 prompts.
+Loading mistralai/Mixtral-8x22B-v0.1 ...
+  torch.cuda.device_count() = 4
+  CUDA_VISIBLE_DEVICES = 0,1,2,3
+  accelerate=1.13.0  transformers=4.52.0
+  building empty model on meta device ...
+The argument `trust_remote_code` is to be used with Auto classes. It has no effect here and is ignored.
+  computed device_map: OrderedDict([('model.embed_tokens', 0), ('model.layers.0', 0), ('model.layers.1', 0), ('model.layers.2', 0), ('model.layers.3', 0), ('model.layers.4', 0), ('model.layers.5', 0), ('model.layers.6', 0), ('model.layers.7', 0), ('model.layers.8', 0), ('model.layers.9', 0), ('model.layers.10', 0), ('model.layers.11', 1), ('model.layers.12', 1), ('model.layers.13', 1), ('model.layers.14', 1), ('model.layers.15', 1), ('model.layers.16', 1), ('model.layers.17', 1), ('model.layers.18', 1), ('model.layers.19', 1), ('model.layers.20', 1), ('model.layers.21', 1), ('model.layers.22', 1), ('model.layers.23', 1), ('model.layers.24', 1), ('model.layers.25', 1), ('model.layers.26', 1), ('model.layers.27', 2), ('model.layers.28', 2), ('model.layers.29', 2), ('model.layers.30', 2), ('model.layers.31', 2), ('model.layers.32', 2), ('model.layers.33', 2), ('model.layers.34', 2), ('model.layers.35', 2), ('model.layers.36', 2), ('model.layers.37', 2), ('model.layers.38', 2), ('model.layers.39', 2), ('model.layers.40', 2), ('model.layers.41', 2), ('model.layers.42', 2), ('model.layers.43', 3), ('model.layers.44', 3), ('model.layers.45', 3), ('model.layers.46', 3), ('model.layers.47', 3), ('model.layers.48', 3), ('model.layers.49', 3), ('model.layers.50', 3), ('model.layers.51', 3), ('model.layers.52', 3), ('model.layers.53', 3), ('model.layers.54', 3), ('model.layers.55', 3), ('model.norm', 3), ('model.rotary_emb', 3), ('lm_head', 3)])
+  loading checkpoint to CPU ...
+Loading checkpoint shards:   0%|          | 0/59 [00:00<?, ?it/s]Loading checkpoint shards:  39%|███▉      | 23/59 [00:00<00:00, 227.79it/s]Loading checkpoint shards:  80%|███████▉  | 47/59 [00:00<00:00, 230.39it/s]Loading checkpoint shards: 100%|██████████| 59/59 [00:00<00:00, 232.13it/s]
+  pre-dispatch first-param device = cpu
+  dispatching to GPUs ...
+  hf_device_map = {'model.embed_tokens': 0, 'model.layers.0': 0, 'model.layers.1': 0, 'model.layers.2': 0, 'model.layers.3': 0, 'model.layers.4': 0, 'model.layers.5': 0, 'model.layers.6': 0, 'model.layers.7': 0, 'model.layers.8': 0, 'model.layers.9': 0, 'model.layers.10': 0, 'model.layers.11': 1, 'model.layers.12': 1, 'model.layers.13': 1, 'model.layers.14': 1, 'model.layers.15': 1, 'model.layers.16': 1, 'model.layers.17': 1, 'model.layers.18': 1, 'model.layers.19': 1, 'model.layers.20': 1, 'model.layers.21': 1, 'model.layers.22': 1, 'model.layers.23': 1, 'model.layers.24': 1, 'model.layers.25': 1, 'model.layers.26': 1, 'model.layers.27': 2, 'model.layers.28': 2, 'model.layers.29': 2, 'model.layers.30': 2, 'model.layers.31': 2, 'model.layers.32': 2, 'model.layers.33': 2, 'model.layers.34': 2, 'model.layers.35': 2, 'model.layers.36': 2, 'model.layers.37': 2, 'model.layers.38': 2, 'model.layers.39': 2, 'model.layers.40': 2, 'model.layers.41': 2, 'model.layers.42': 2, 'model.layers.43': 3, 'model.layers.44': 3, 'model.layers.45': 3, 'model.layers.46': 3, 'model.layers.47': 3, 'model.layers.48': 3, 'model.layers.49': 3, 'model.layers.50': 3, 'model.layers.51': 3, 'model.layers.52': 3, 'model.layers.53': 3, 'model.layers.54': 3, 'model.layers.55': 3, 'model.norm': 3, 'model.rotary_emb': 3, 'lm_head': 3}
+  post-dispatch first-param device = cuda:0
+  loaded in 43.5s
+Loading dataset='humaneval'  (1000 prompts) ...
+len of my_humaneval_dataset 141
+  loaded in 1.6s
+  loader returned 141 prompts (requested 1000); capping N_PROMPTS.
+Running 9 batches (batch_size=16, max_tokens=32) ...
+  batch   1/9  elapsed=3.3s  rate=4.9 prompts/s  ETA=26s
+  batch   9/9  elapsed=23.0s  rate=6.3 prompts/s  ETA=-0s
+
+Done in 23.0s.
+
+Saved /scratch/sleonard/MoE_circuits/results/circuits/dag_mixtral-8x22b_humaneval.pt
+[28/30] mixtral-8x22b/humaneval done in 89s
+============================================================
+[29/30] mixtral-8x22b/pile-arxiv  bs=16  (elapsed=71min)
+============================================================
+/scratch/sleonard/miniconda3/envs/megatron/lib/python3.11/site-packages/torch/cuda/__init__.py:61: FutureWarning: The pynvml package is deprecated. Please install nvidia-ml-py instead. If you did not install pynvml directly, please report this to the maintainers of the package that installed pynvml for you.
+  import pynvml  # type: ignore[import]
+🚨 `patching` is part of OlmoeModel.forward's signature, but not documented. Make sure to add it to the docstring of the function in /scratch/sleonard/MoE_circuits/customized_models/modeling_olmoe_customized.py.
+🚨 `patching` is part of OlmoeForCausalLM.forward's signature, but not documented. Make sure to add it to the docstring of the function in /scratch/sleonard/MoE_circuits/customized_models/modeling_olmoe_customized.py.
+🚨 `patching` is part of MixtralModel.forward's signature, but not documented. Make sure to add it to the docstring of the function in /scratch/sleonard/MoE_circuits/customized_models/modeling_mixtral_customized.py.
+🚨 `patching` is part of MixtralForCausalLM.forward's signature, but not documented. Make sure to add it to the docstring of the function in /scratch/sleonard/MoE_circuits/customized_models/modeling_mixtral_customized.py.
+🚨 `patching` is part of Qwen3MoeModel.forward's signature, but not documented. Make sure to add it to the docstring of the function in /scratch/sleonard/MoE_circuits/customized_models/modeling_qwen3_moe_customized.py.
+🚨 `patching` is part of Qwen3MoeForCausalLM.forward's signature, but not documented. Make sure to add it to the docstring of the function in /scratch/sleonard/MoE_circuits/customized_models/modeling_qwen3_moe_customized.py.
+🚨 `patching` is part of PhimoeModel.forward's signature, but not documented. Make sure to add it to the docstring of the function in /scratch/sleonard/MoE_circuits/customized_models/modeling_phimoe_customized.py.
+🚨 `patching` is part of PhimoeForCausalLM.forward's signature, but not documented. Make sure to add it to the docstring of the function in /scratch/sleonard/MoE_circuits/customized_models/modeling_phimoe_customized.py.
+Building DAG for model='mixtral-8x22b', dataset='pile-arxiv', 1000 prompts.
+Loading mistralai/Mixtral-8x22B-v0.1 ...
+  torch.cuda.device_count() = 4
+  CUDA_VISIBLE_DEVICES = 0,1,2,3
+  accelerate=1.13.0  transformers=4.52.0
+  building empty model on meta device ...
+The argument `trust_remote_code` is to be used with Auto classes. It has no effect here and is ignored.
+  computed device_map: OrderedDict([('model.embed_tokens', 0), ('model.layers.0', 0), ('model.layers.1', 0), ('model.layers.2', 0), ('model.layers.3', 0), ('model.layers.4', 0), ('model.layers.5', 0), ('model.layers.6', 0), ('model.layers.7', 0), ('model.layers.8', 0), ('model.layers.9', 0), ('model.layers.10', 0), ('model.layers.11', 1), ('model.layers.12', 1), ('model.layers.13', 1), ('model.layers.14', 1), ('model.layers.15', 1), ('model.layers.16', 1), ('model.layers.17', 1), ('model.layers.18', 1), ('model.layers.19', 1), ('model.layers.20', 1), ('model.layers.21', 1), ('model.layers.22', 1), ('model.layers.23', 1), ('model.layers.24', 1), ('model.layers.25', 1), ('model.layers.26', 1), ('model.layers.27', 2), ('model.layers.28', 2), ('model.layers.29', 2), ('model.layers.30', 2), ('model.layers.31', 2), ('model.layers.32', 2), ('model.layers.33', 2), ('model.layers.34', 2), ('model.layers.35', 2), ('model.layers.36', 2), ('model.layers.37', 2), ('model.layers.38', 2), ('model.layers.39', 2), ('model.layers.40', 2), ('model.layers.41', 2), ('model.layers.42', 2), ('model.layers.43', 3), ('model.layers.44', 3), ('model.layers.45', 3), ('model.layers.46', 3), ('model.layers.47', 3), ('model.layers.48', 3), ('model.layers.49', 3), ('model.layers.50', 3), ('model.layers.51', 3), ('model.layers.52', 3), ('model.layers.53', 3), ('model.layers.54', 3), ('model.layers.55', 3), ('model.norm', 3), ('model.rotary_emb', 3), ('lm_head', 3)])
+  loading checkpoint to CPU ...
+Loading checkpoint shards:   0%|          | 0/59 [00:00<?, ?it/s]Loading checkpoint shards:  39%|███▉      | 23/59 [00:00<00:00, 227.40it/s]Loading checkpoint shards:  80%|███████▉  | 47/59 [00:00<00:00, 231.05it/s]Loading checkpoint shards: 100%|██████████| 59/59 [00:00<00:00, 232.68it/s]
+  pre-dispatch first-param device = cpu
+  dispatching to GPUs ...
+  hf_device_map = {'model.embed_tokens': 0, 'model.layers.0': 0, 'model.layers.1': 0, 'model.layers.2': 0, 'model.layers.3': 0, 'model.layers.4': 0, 'model.layers.5': 0, 'model.layers.6': 0, 'model.layers.7': 0, 'model.layers.8': 0, 'model.layers.9': 0, 'model.layers.10': 0, 'model.layers.11': 1, 'model.layers.12': 1, 'model.layers.13': 1, 'model.layers.14': 1, 'model.layers.15': 1, 'model.layers.16': 1, 'model.layers.17': 1, 'model.layers.18': 1, 'model.layers.19': 1, 'model.layers.20': 1, 'model.layers.21': 1, 'model.layers.22': 1, 'model.layers.23': 1, 'model.layers.24': 1, 'model.layers.25': 1, 'model.layers.26': 1, 'model.layers.27': 2, 'model.layers.28': 2, 'model.layers.29': 2, 'model.layers.30': 2, 'model.layers.31': 2, 'model.layers.32': 2, 'model.layers.33': 2, 'model.layers.34': 2, 'model.layers.35': 2, 'model.layers.36': 2, 'model.layers.37': 2, 'model.layers.38': 2, 'model.layers.39': 2, 'model.layers.40': 2, 'model.layers.41': 2, 'model.layers.42': 2, 'model.layers.43': 3, 'model.layers.44': 3, 'model.layers.45': 3, 'model.layers.46': 3, 'model.layers.47': 3, 'model.layers.48': 3, 'model.layers.49': 3, 'model.layers.50': 3, 'model.layers.51': 3, 'model.layers.52': 3, 'model.layers.53': 3, 'model.layers.54': 3, 'model.layers.55': 3, 'model.norm': 3, 'model.rotary_emb': 3, 'lm_head': 3}
+  post-dispatch first-param device = cuda:0
+  loaded in 43.8s
+Loading dataset='pile-arxiv'  (1000 prompts) ...
+len of my_pile_arxiv_dataset 1000
+  loaded in 15.1s
+Running 63 batches (batch_size=16, max_tokens=32) ...
+  batch   1/63  elapsed=4.3s  rate=3.7 prompts/s  ETA=267s
+  batch  10/63  elapsed=27.9s  rate=5.7 prompts/s  ETA=146s
+  batch  20/63  elapsed=53.5s  rate=6.0 prompts/s  ETA=114s
+  batch  30/63  elapsed=79.8s  rate=6.0 prompts/s  ETA=86s
+  batch  40/63  elapsed=105.5s  rate=6.1 prompts/s  ETA=59s
+  batch  50/63  elapsed=131.5s  rate=6.1 prompts/s  ETA=33s
+  batch  60/63  elapsed=157.4s  rate=6.1 prompts/s  ETA=7s
+  batch  63/63  elapsed=164.6s  rate=6.1 prompts/s  ETA=-1s
+
+Done in 164.6s.
+
+Saved /scratch/sleonard/MoE_circuits/results/circuits/dag_mixtral-8x22b_pile-arxiv.pt
+[29/30] mixtral-8x22b/pile-arxiv done in 244s
+============================================================
+[30/30] mixtral-8x22b/pile-github  bs=16  (elapsed=76min)
+============================================================
+/scratch/sleonard/miniconda3/envs/megatron/lib/python3.11/site-packages/torch/cuda/__init__.py:61: FutureWarning: The pynvml package is deprecated. Please install nvidia-ml-py instead. If you did not install pynvml directly, please report this to the maintainers of the package that installed pynvml for you.
+  import pynvml  # type: ignore[import]
+🚨 `patching` is part of OlmoeModel.forward's signature, but not documented. Make sure to add it to the docstring of the function in /scratch/sleonard/MoE_circuits/customized_models/modeling_olmoe_customized.py.
+🚨 `patching` is part of OlmoeForCausalLM.forward's signature, but not documented. Make sure to add it to the docstring of the function in /scratch/sleonard/MoE_circuits/customized_models/modeling_olmoe_customized.py.
+🚨 `patching` is part of MixtralModel.forward's signature, but not documented. Make sure to add it to the docstring of the function in /scratch/sleonard/MoE_circuits/customized_models/modeling_mixtral_customized.py.
+🚨 `patching` is part of MixtralForCausalLM.forward's signature, but not documented. Make sure to add it to the docstring of the function in /scratch/sleonard/MoE_circuits/customized_models/modeling_mixtral_customized.py.
+🚨 `patching` is part of Qwen3MoeModel.forward's signature, but not documented. Make sure to add it to the docstring of the function in /scratch/sleonard/MoE_circuits/customized_models/modeling_qwen3_moe_customized.py.
+🚨 `patching` is part of Qwen3MoeForCausalLM.forward's signature, but not documented. Make sure to add it to the docstring of the function in /scratch/sleonard/MoE_circuits/customized_models/modeling_qwen3_moe_customized.py.
+🚨 `patching` is part of PhimoeModel.forward's signature, but not documented. Make sure to add it to the docstring of the function in /scratch/sleonard/MoE_circuits/customized_models/modeling_phimoe_customized.py.
+🚨 `patching` is part of PhimoeForCausalLM.forward's signature, but not documented. Make sure to add it to the docstring of the function in /scratch/sleonard/MoE_circuits/customized_models/modeling_phimoe_customized.py.
+Building DAG for model='mixtral-8x22b', dataset='pile-github', 1000 prompts.
+Loading mistralai/Mixtral-8x22B-v0.1 ...
+  torch.cuda.device_count() = 4
+  CUDA_VISIBLE_DEVICES = 0,1,2,3
+  accelerate=1.13.0  transformers=4.52.0
+  building empty model on meta device ...
+The argument `trust_remote_code` is to be used with Auto classes. It has no effect here and is ignored.
+  computed device_map: OrderedDict([('model.embed_tokens', 0), ('model.layers.0', 0), ('model.layers.1', 0), ('model.layers.2', 0), ('model.layers.3', 0), ('model.layers.4', 0), ('model.layers.5', 0), ('model.layers.6', 0), ('model.layers.7', 0), ('model.layers.8', 0), ('model.layers.9', 0), ('model.layers.10', 0), ('model.layers.11', 1), ('model.layers.12', 1), ('model.layers.13', 1), ('model.layers.14', 1), ('model.layers.15', 1), ('model.layers.16', 1), ('model.layers.17', 1), ('model.layers.18', 1), ('model.layers.19', 1), ('model.layers.20', 1), ('model.layers.21', 1), ('model.layers.22', 1), ('model.layers.23', 1), ('model.layers.24', 1), ('model.layers.25', 1), ('model.layers.26', 1), ('model.layers.27', 2), ('model.layers.28', 2), ('model.layers.29', 2), ('model.layers.30', 2), ('model.layers.31', 2), ('model.layers.32', 2), ('model.layers.33', 2), ('model.layers.34', 2), ('model.layers.35', 2), ('model.layers.36', 2), ('model.layers.37', 2), ('model.layers.38', 2), ('model.layers.39', 2), ('model.layers.40', 2), ('model.layers.41', 2), ('model.layers.42', 2), ('model.layers.43', 3), ('model.layers.44', 3), ('model.layers.45', 3), ('model.layers.46', 3), ('model.layers.47', 3), ('model.layers.48', 3), ('model.layers.49', 3), ('model.layers.50', 3), ('model.layers.51', 3), ('model.layers.52', 3), ('model.layers.53', 3), ('model.layers.54', 3), ('model.layers.55', 3), ('model.norm', 3), ('model.rotary_emb', 3), ('lm_head', 3)])
+  loading checkpoint to CPU ...
+Loading checkpoint shards:   0%|          | 0/59 [00:00<?, ?it/s]Loading checkpoint shards:  39%|███▉      | 23/59 [00:00<00:00, 228.03it/s]Loading checkpoint shards:  80%|███████▉  | 47/59 [00:00<00:00, 230.96it/s]Loading checkpoint shards: 100%|██████████| 59/59 [00:00<00:00, 232.74it/s]
+  pre-dispatch first-param device = cpu
+  dispatching to GPUs ...
+  hf_device_map = {'model.embed_tokens': 0, 'model.layers.0': 0, 'model.layers.1': 0, 'model.layers.2': 0, 'model.layers.3': 0, 'model.layers.4': 0, 'model.layers.5': 0, 'model.layers.6': 0, 'model.layers.7': 0, 'model.layers.8': 0, 'model.layers.9': 0, 'model.layers.10': 0, 'model.layers.11': 1, 'model.layers.12': 1, 'model.layers.13': 1, 'model.layers.14': 1, 'model.layers.15': 1, 'model.layers.16': 1, 'model.layers.17': 1, 'model.layers.18': 1, 'model.layers.19': 1, 'model.layers.20': 1, 'model.layers.21': 1, 'model.layers.22': 1, 'model.layers.23': 1, 'model.layers.24': 1, 'model.layers.25': 1, 'model.layers.26': 1, 'model.layers.27': 2, 'model.layers.28': 2, 'model.layers.29': 2, 'model.layers.30': 2, 'model.layers.31': 2, 'model.layers.32': 2, 'model.layers.33': 2, 'model.layers.34': 2, 'model.layers.35': 2, 'model.layers.36': 2, 'model.layers.37': 2, 'model.layers.38': 2, 'model.layers.39': 2, 'model.layers.40': 2, 'model.layers.41': 2, 'model.layers.42': 2, 'model.layers.43': 3, 'model.layers.44': 3, 'model.layers.45': 3, 'model.layers.46': 3, 'model.layers.47': 3, 'model.layers.48': 3, 'model.layers.49': 3, 'model.layers.50': 3, 'model.layers.51': 3, 'model.layers.52': 3, 'model.layers.53': 3, 'model.layers.54': 3, 'model.layers.55': 3, 'model.norm': 3, 'model.rotary_emb': 3, 'lm_head': 3}
+  post-dispatch first-param device = cuda:0
+  loaded in 45.0s
+Loading dataset='pile-github'  (1000 prompts) ...
+len of my_pile_github_dataset 1000
+  loaded in 4.6s
+Running 63 batches (batch_size=16, max_tokens=32) ...
+  batch   1/63  elapsed=3.1s  rate=5.1 prompts/s  ETA=192s
+  batch  10/63  elapsed=26.2s  rate=6.1 prompts/s  ETA=138s
+  batch  20/63  elapsed=51.7s  rate=6.2 prompts/s  ETA=110s
+  batch  30/63  elapsed=77.0s  rate=6.2 prompts/s  ETA=83s
+  batch  40/63  elapsed=102.3s  rate=6.3 prompts/s  ETA=58s
+  batch  50/63  elapsed=127.6s  rate=6.3 prompts/s  ETA=32s
+  batch  60/63  elapsed=152.9s  rate=6.3 prompts/s  ETA=6s
+  batch  63/63  elapsed=159.9s  rate=6.3 prompts/s  ETA=-1s
+
+Done in 159.9s.
+
+Saved /scratch/sleonard/MoE_circuits/results/circuits/dag_mixtral-8x22b_pile-github.pt
+[30/30] mixtral-8x22b/pile-github done in 231s
+------------------------------------------------------------
+Finished all datasets for mixtral-8x22b at Thu May 28 10:28:56 PM CEST 2026
+  cleanup: rm -rf /scratch/sleonard/.hugging_face/hub/models--mistralai--Mixtral-8x22B-v0.1  (262G)
+------------------------------------------------------------
+============================================================
+All done at Thu May 28 10:29:21 PM CEST 2026. Total elapsed: 80 min
+Reminder: qwen3-235b-a22b and deepseek-v2 need multinode SLURM. Run:
+  sbatch experiments/launch_multinode_new.sh
+============================================================

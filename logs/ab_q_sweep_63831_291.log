@@ -1,0 +1,45 @@
+[291] source_idx=32  chunk_idx=3
+host=piora5  cpus=1
+/scratch/sleonard/miniconda3/envs/megatron/lib/python3.11/site-packages/torch/cuda/__init__.py:61: FutureWarning: The pynvml package is deprecated. Please install nvidia-ml-py instead. If you did not install pynvml directly, please report this to the maintainers of the package that installed pynvml for you.
+  import pynvml  # type: ignore[import]
+=== α × Q Sweep at β = 0.5 ===
+  source : qwen3-30b-a3b/c4 (idx 32)
+  targets: chunk 3/8  -> 7 tuples
+  α      : [0.0, 0.5, 1.0]
+  Q      : [0.9, 0.99, 0.999]
+  cells  : 9 (α × Q) per pair
+  total  : 63 FGW calls
+  output : /scratch/sleonard/MoE_circuits/results/circuits/alpha_beta_sweep/sweep_src32_chunk03.npz
+
+[1/2] Building source triples at each Q ...
+  Q=  0.9: built in    98.9s  n_verts=  6139  θ=0.005851
+  Q= 0.99: built in    58.5s  n_verts=  6081  θ=0.01744
+  Q=0.999: built in    31.0s  n_verts=  3814  θ=0.04545
+
+[2/2] Sweeping 7 targets × 9 (α, Q) cells ...
+
+  [ 1/7] deepseek-v2-lite/humaneval ...
+/scratch/sleonard/miniconda3/envs/megatron/lib/python3.11/site-packages/ot/lp/_network_simplex.py:332: UserWarning: numItermax reached before optimality. Try to increase numItermax.
+  result_code_string = check_result(result_code)
+    done in 469.7s  avg_S=0.7784  (elapsed 7.8min)
+
+  [ 2/7] deepseek-v2-lite/pile-arxiv ...
+    done in 465.2s  avg_S=0.7571  (elapsed 15.6min)
+
+  [ 3/7] deepseek-v2-lite/pile-github ...
+    done in 505.2s  avg_S=0.7806  (elapsed 24.0min)
+
+  [ 4/7] deepseek-v2/c4 ...
+    done in 2802.6s  avg_S=0.7712  (elapsed 70.7min)
+
+  [ 5/7] deepseek-v2/math ...
+    done in 2731.8s  avg_S=0.8305  (elapsed 116.2min)
+
+  [ 6/7] deepseek-v2/code ...
+    done in 2912.6s  avg_S=0.8727  (elapsed 164.8min)
+
+  [ 7/7] deepseek-v2/wikitext2 ...
+    done in 2444.2s  avg_S=0.7930  (elapsed 205.5min)
+
+=== Worker done in 205.5 min ===
+Saved: /scratch/sleonard/MoE_circuits/results/circuits/alpha_beta_sweep/sweep_src32_chunk03.npz

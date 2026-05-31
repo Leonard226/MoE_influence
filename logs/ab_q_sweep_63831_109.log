@@ -1,0 +1,43 @@
+[109] source_idx=12  chunk_idx=1
+host=piora5  cpus=1
+/scratch/sleonard/miniconda3/envs/megatron/lib/python3.11/site-packages/torch/cuda/__init__.py:61: FutureWarning: The pynvml package is deprecated. Please install nvidia-ml-py instead. If you did not install pynvml directly, please report this to the maintainers of the package that installed pynvml for you.
+  import pynvml  # type: ignore[import]
+=== α × Q Sweep at β = 0.5 ===
+  source : mixtral-8x22b/gsm8k (idx 12)
+  targets: chunk 1/8  -> 7 tuples
+  α      : [0.0, 0.5, 1.0]
+  Q      : [0.9, 0.99, 0.999]
+  cells  : 9 (α × Q) per pair
+  total  : 63 FGW calls
+  output : /scratch/sleonard/MoE_circuits/results/circuits/alpha_beta_sweep/sweep_src12_chunk01.npz
+
+[1/2] Building source triples at each Q ...
+  Q=  0.9: built in     1.5s  n_verts=   448  θ=0.01887
+  Q= 0.99: built in     0.6s  n_verts=   366  θ=0.04796
+  Q=0.999: built in     0.6s  n_verts=    90  θ=0.1704
+
+[2/2] Sweeping 7 targets × 9 (α, Q) cells ...
+
+  [ 1/7] mixtral-8x7b/pile-github ...
+    done in 7.5s  avg_S=0.7841  (elapsed 0.1min)
+
+  [ 2/7] mixtral-8x22b/c4 ...
+    done in 7.7s  avg_S=0.8901  (elapsed 0.3min)
+
+  [ 3/7] mixtral-8x22b/math ...
+    done in 7.8s  avg_S=0.9329  (elapsed 0.4min)
+
+  [ 4/7] mixtral-8x22b/code ...
+    done in 17.8s  avg_S=0.8629  (elapsed 0.7min)
+
+  [ 5/7] mixtral-8x22b/wikitext2 ...
+    done in 9.8s  avg_S=0.8775  (elapsed 0.8min)
+
+  [ 6/7] mixtral-8x22b/humaneval ...
+    done in 8.7s  avg_S=0.8222  (elapsed 1.0min)
+
+  [ 7/7] mixtral-8x22b/pile-arxiv ...
+    done in 9.2s  avg_S=0.8593  (elapsed 1.1min)
+
+=== Worker done in 1.1 min ===
+Saved: /scratch/sleonard/MoE_circuits/results/circuits/alpha_beta_sweep/sweep_src12_chunk01.npz

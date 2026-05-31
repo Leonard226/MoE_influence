@@ -1,0 +1,43 @@
+[467] source_idx=51  chunk_idx=8
+host=piora5  cpus=1
+/scratch/sleonard/miniconda3/envs/megatron/lib/python3.11/site-packages/torch/cuda/__init__.py:61: FutureWarning: The pynvml package is deprecated. Please install nvidia-ml-py instead. If you did not install pynvml directly, please report this to the maintainers of the package that installed pynvml for you.
+  import pynvml  # type: ignore[import]
+=== α × Q Sweep at β = 0.5 ===
+  source : olmoe/wikitext2 (idx 51)
+  targets: chunk 8/8  -> 7 tuples
+  α      : [0.0, 0.5, 1.0]
+  Q      : [0.9, 0.99, 0.999]
+  cells  : 9 (α × Q) per pair
+  total  : 63 FGW calls
+  output : /scratch/sleonard/MoE_circuits/results/circuits/alpha_beta_sweep/sweep_src51_chunk08.npz
+
+[1/2] Building source triples at each Q ...
+  Q=  0.9: built in     3.2s  n_verts=  1023  θ=0.01006
+  Q= 0.99: built in     2.4s  n_verts=   960  θ=0.02835
+  Q=0.999: built in     2.1s  n_verts=   308  θ=0.08788
+
+[2/2] Sweeping 7 targets × 9 (α, Q) cells ...
+
+  [ 1/7] phi-3.5-moe/math ...
+    done in 35.7s  avg_S=0.7969  (elapsed 0.6min)
+
+  [ 2/7] phi-3.5-moe/code ...
+    done in 47.2s  avg_S=0.7078  (elapsed 1.4min)
+
+  [ 3/7] phi-3.5-moe/wikitext2 ...
+    done in 81.4s  avg_S=0.8281  (elapsed 2.7min)
+
+  [ 4/7] phi-3.5-moe/gsm8k ...
+    done in 43.8s  avg_S=0.8010  (elapsed 3.5min)
+
+  [ 5/7] phi-3.5-moe/humaneval ...
+    done in 26.2s  avg_S=0.7274  (elapsed 3.9min)
+
+  [ 6/7] phi-3.5-moe/pile-arxiv ...
+    done in 34.7s  avg_S=0.8207  (elapsed 4.5min)
+
+  [ 7/7] phi-3.5-moe/pile-github ...
+    done in 44.9s  avg_S=0.7526  (elapsed 5.2min)
+
+=== Worker done in 5.2 min ===
+Saved: /scratch/sleonard/MoE_circuits/results/circuits/alpha_beta_sweep/sweep_src51_chunk08.npz

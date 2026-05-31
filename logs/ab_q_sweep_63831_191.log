@@ -1,0 +1,43 @@
+[191] source_idx=21  chunk_idx=2
+host=piora5  cpus=1
+/scratch/sleonard/miniconda3/envs/megatron/lib/python3.11/site-packages/torch/cuda/__init__.py:61: FutureWarning: The pynvml package is deprecated. Please install nvidia-ml-py instead. If you did not install pynvml directly, please report this to the maintainers of the package that installed pynvml for you.
+  import pynvml  # type: ignore[import]
+=== α × Q Sweep at β = 0.5 ===
+  source : deepseek-v2-lite/humaneval (idx 21)
+  targets: chunk 2/8  -> 7 tuples
+  α      : [0.0, 0.5, 1.0]
+  Q      : [0.9, 0.99, 0.999]
+  cells  : 9 (α × Q) per pair
+  total  : 63 FGW calls
+  output : /scratch/sleonard/MoE_circuits/results/circuits/alpha_beta_sweep/sweep_src21_chunk02.npz
+
+[1/2] Building source triples at each Q ...
+  Q=  0.9: built in     3.6s  n_verts=  1664  θ=0.0159
+  Q= 0.99: built in     3.1s  n_verts=  1400  θ=0.05089
+  Q=0.999: built in     3.1s  n_verts=   386  θ=0.1629
+
+[2/2] Sweeping 7 targets × 9 (α, Q) cells ...
+
+  [ 1/7] mixtral-8x22b/pile-arxiv ...
+    done in 66.6s  avg_S=0.5736  (elapsed 1.1min)
+
+  [ 2/7] mixtral-8x22b/pile-github ...
+    done in 77.1s  avg_S=0.5898  (elapsed 2.4min)
+
+  [ 3/7] deepseek-v2-lite/c4 ...
+    done in 481.1s  avg_S=0.6597  (elapsed 10.4min)
+
+  [ 4/7] deepseek-v2-lite/math ...
+    done in 486.7s  avg_S=0.8480  (elapsed 18.5min)
+
+  [ 5/7] deepseek-v2-lite/code ...
+    done in 387.3s  avg_S=0.8476  (elapsed 25.0min)
+
+  [ 6/7] deepseek-v2-lite/wikitext2 ...
+    done in 598.1s  avg_S=0.6891  (elapsed 35.0min)
+
+  [ 7/7] deepseek-v2-lite/gsm8k ...
+    done in 323.1s  avg_S=0.8057  (elapsed 40.3min)
+
+=== Worker done in 40.3 min ===
+Saved: /scratch/sleonard/MoE_circuits/results/circuits/alpha_beta_sweep/sweep_src21_chunk02.npz

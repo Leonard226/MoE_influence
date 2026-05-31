@@ -1,0 +1,18 @@
+[61] phi-3.5-moe/humaneval  host=piora1
+/scratch/sleonard/miniconda3/envs/megatron/lib/python3.11/site-packages/torch/cuda/__init__.py:61: FutureWarning: The pynvml package is deprecated. Please install nvidia-ml-py instead. If you did not install pynvml directly, please report this to the maintainers of the package that installed pynvml for you.
+  import pynvml  # type: ignore[import]
+=== build_classifications.py ===
+  cache dir : /scratch/sleonard/MoE_circuits/results/circuits/classifications
+  models    : 1  datasets: 1
+  already   : 0
+  to build  : 1
+
+[1/1] phi-3.5-moe/humaneval  (elapsed=0.0min)
+  loading humaneval prompts (1000 requested) ...
+len of my_humaneval_dataset 141
+  using 141 prompts
+  loading tokenizer microsoft/Phi-3.5-MoE-instruct ...
+  classifying ...
+  saved /scratch/sleonard/MoE_circuits/results/circuits/classifications/classify_phi-3.5-moe_humaneval.pkl  (4,512 entries, 10.7s)
+
+All done in 0.2 min.
