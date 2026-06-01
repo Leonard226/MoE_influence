@@ -85,7 +85,7 @@ def _subset_triple(triple, keep_mask):
     )
 
 
-def _edge_quantile_threshold(W_combined: torch.Tensor, Q: float) -> float:
+def _edge_quantile_threshold(W_combined, Q: float) -> float:
     """Q-quantile of |W| over forward edges only (sender_layer < receiver_layer).
     Returns the absolute weight threshold to pass to the masking step."""
     L = W_combined.shape[0]
