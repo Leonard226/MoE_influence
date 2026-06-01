@@ -5,7 +5,7 @@
                                     # pairs at Q=0.9; 24G gives ~2x headroom and
                                     # lets SLURM pack heterogeneously so cheap
                                     # Mixtral chunks aren't artificially throttled.
-#SBATCH --nodelist=piora[5-8]       # restrict to piora5..piora8 (CPU-only sweep)
+#SBATCH --nodelist=piora[1-2]       # restrict to piora5..piora8 (CPU-only sweep)
 #SBATCH --output=logs/ab_sweep_%A_%a.log
 #
 # Pairwise α × Q quantile FGW sweep across all (model, task) tuples at fixed
