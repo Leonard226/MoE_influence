@@ -244,10 +244,14 @@ def main():
                      dtype=object))
 
     # --- Per-target loop ---
+    # Checkpointing is per-Q (not per-target): we _save() after every Q value
+    # finishes within a target, so an OOM mid-target only loses the in-progress
+    # Q (≤ 1/3 of a target's work) instead of the whole target row.
     print(f"\n[2/2] Sweeping {n_tgts} targets × {n_cells} (α, Q) cells ...", flush=True)
     t_start = time.time()
     for local_t, tgt_global_idx in enumerate(target_indices):
-        if not np.isnan(S_mat[local_t, 0, 0]):
+        # Skip target only if EVERY (α, Q) cell is already filled.
+        if not np.isnan(S_mat[local_t, :, :]).any():
             continue
         tgt_model, tgt_task = TUPLES[tgt_global_idx]
         print(f"\n  [{local_t + 1:2d}/{n_tgts}] {tgt_model}/{tgt_task} ...", flush=True)
@@ -262,11 +266,16 @@ def main():
             continue
 
         for qi, Q in enumerate(QUANTILES):
+            # Per-Q resume: skip this Q if its α-column is already fully filled
+            # from a previous run.
+            if not np.isnan(S_mat[local_t, :, qi]).any():
+                continue
             try:
                 tgt_tri, _ = build_triple_at_Q(tgt_model, tgt_task, tgt_class, Q)
             except FileNotFoundError as e:
                 print(f"    [WARN] missing DAG at Q={Q}: {e}")
                 S_mat[local_t, :, qi] = -1.0
+                _save()
                 continue
 
             src_tri = src_triples_by_Q[Q]
@@ -279,6 +288,7 @@ def main():
                     S = -1.0
                 S_mat[local_t, ai, qi] = S
             del tgt_tri
+            _save()   # checkpoint after each Q finishes for this target
 
         dt = time.time() - t_tgt
         avg_s = float(np.nanmean(np.where(S_mat[local_t] >= 0, S_mat[local_t], np.nan)))
@@ -286,7 +296,6 @@ def main():
         print(f"    done in {dt:.1f}s  avg_S={avg_s:.4f}  "
               f"(elapsed {elapsed_min:.1f}min)", flush=True)
 
-        _save()
         del tgt_class
 
     print(f"\n=== Worker done in {(time.time() - t_start) / 60:.1f} min ===")
