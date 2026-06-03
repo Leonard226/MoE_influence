@@ -683,7 +683,11 @@ def main():
         def _hook(_module, _inp, output):
             if output.numel() == 0:
                 return
-            m = output.detach().abs().amax().to(target.dtype)
+            # Defense in depth: each rank in multinode owns its slice and the
+            # expert/target should already be co-located, but tensor-parallel
+            # layouts inside a rank can still split a layer across multiple
+            # cuda devices. Move the scalar to act_accum's device before max.
+            m = output.detach().abs().amax().to(device=target.device, dtype=target.dtype)
             target[L_idx, N_idx] = torch.maximum(target[L_idx, N_idx], m)
         return _hook
     layers_owned = model.model.layers

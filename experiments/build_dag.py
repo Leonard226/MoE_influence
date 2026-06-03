@@ -385,7 +385,11 @@ def _make_down_proj_hook(L_idx, N_idx, target):
     def _hook(_module, _inp, output):
         if output.numel() == 0:
             return
-        m = output.detach().abs().amax().to(target.dtype)
+        # multi_gpu=True models (Mixtral, Phi, Qwen3-30B, …) are sharded across
+        # GPUs via accelerate; the hook fires on the expert's local device while
+        # act_accum lives on cuda:0. Move the scalar to the accumulator's device
+        # (and dtype) before the elementwise max.
+        m = output.detach().abs().amax().to(device=target.device, dtype=target.dtype)
         target[L_idx, N_idx] = torch.maximum(target[L_idx, N_idx], m)
     return _hook
 for _L_idx, _R in enumerate(MOE_LAYERS):
