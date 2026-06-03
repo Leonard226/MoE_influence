@@ -7,11 +7,12 @@
 #SBATCH --output=logs/build_multinode_new.log
 #
 # Build DAGs for the multinode-only models (qwen3-235b-a22b, deepseek-v2)
-# on the 5 NEW datasets. Submit:
+# on ALL 8 datasets at n_prompts=500 (the post-rebuild schema with the
+# W_softmax family + Su et al. `act` per-vertex feature). Submit overnight:
 #   sbatch experiments/launch_multinode_new.sh
 #
 # IMPORTANT: each model's HuggingFace cache ($HF_HOME/hub/models--...) is
-# DELETED after all 5 datasets for that model are built. This frees disk
+# DELETED after all 8 datasets for that model are built. This frees disk
 # space before the next model downloads -- required because the full set
 # of model weights won't fit on /scratch simultaneously. Dataset caches
 # are preserved.
@@ -72,7 +73,7 @@ declare -A HF_ID=(
   [deepseek-v2]="deepseek-ai/DeepSeek-V2"
   [qwen3-235b-a22b]="Qwen/Qwen3-235B-A22B"
 )
-DATASETS=(wikitext2 gsm8k humaneval pile-arxiv pile-github)
+DATASETS=(c4 math code wikitext2 gsm8k humaneval pile-arxiv pile-github)
 
 cleanup_model_cache() {
   local m="$1"
@@ -112,7 +113,7 @@ for MODEL in "${MODELS[@]}"; do
             "$SCRIPT_PATH" \
             --model "$MODEL" \
             --dataset "$DATASET" \
-            --n_prompts 1000 \
+            --n_prompts 500 \
             --B 16
         then
             echo "ERROR: ${MODEL}/${DATASET} failed -- ABORTING (resubmit to retry)"

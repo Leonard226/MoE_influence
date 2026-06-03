@@ -72,17 +72,24 @@ echo "RESULT_PATH=$RESULT_PATH"
 echo "CLEANUP_MODEL_CACHE=$CLEANUP_MODEL_CACHE"
 echo
 
-# PILOT: rebuild every (model, dataset) DAG with the new edge-weight schema
-# (W_softmax family as primary, plus the Su et al. `act` per-vertex feature).
-# Pilot covers only Mixtral-8x7B and DeepSeek-V2-Lite across ALL 8 datasets.
-# Restore the full MODELS list after pilot validates the metric correlation
-# against the legacy P_flip edge weight (cf. compare_edge_metrics.py).
+# Post-pilot full single-node rebuild with the new edge-weight schema
+# (W_softmax family + Su et al. `act` feature) across all 8 datasets at 500
+# prompts. Mixtral-8x7B and DeepSeek-V2-Lite are already done from the pilot
+# and will be skipped by the [skip] check below. Multinode models
+# (qwen3-235b-a22b, deepseek-v2) run separately via launch_multinode_new.sh.
 NEW_DATASETS=(c4 math code wikitext2 gsm8k humaneval pile-arxiv pile-github)
 N_PROMPTS=500
 
+# Smallest first so quick wins land early; the heavier (mixtral-8x22b,
+# qwen3-30b-a3b) come at the end. mixtral-8x7b + deepseek-v2-lite are kept in
+# the list as a no-op safety net — the skip-if-exists guard takes them out.
 MODELS=(
+  olmoe
+  phi-3.5-moe
   mixtral-8x7b
   deepseek-v2-lite
+  qwen3-30b-a3b
+  mixtral-8x22b
 )
 
 # Batch size per model. mixtral-8x22b is the only "large" model in this list;
