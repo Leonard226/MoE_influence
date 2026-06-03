@@ -266,10 +266,8 @@ print("\n" + summary_text)
 # Plots: nine per-(α, Q) heatmaps, each a 2×4 grid of per-task 8×8 model heatmaps.
 # ---------------------------------------------------------------------------
 def draw_per_task_heatmaps(S_slice, fig_title, fname):
-    """One 8×8 model-model heatmap per task, laid out in a 2×4 grid.
-    Within-family model pairs (Mixtral 7B/22B, DSL/V2, Qwen 30B/235B) are
-    boxed in red in every subplot."""
-    fig, axes = plt.subplots(2, 4, figsize=(20, 10))
+    """One 8×8 model-model heatmap per task, laid out in a 2×4 grid."""
+    fig, axes = plt.subplots(2, 4, figsize=(20, 9))
     axes = axes.flatten()
     im = None
     for ti, t in enumerate(TASKS):
@@ -294,19 +292,22 @@ def draw_per_task_heatmaps(S_slice, fig_title, fname):
                     ax.text(j, i, f"{v:.2f}",
                             ha="center", va="center", fontsize=7,
                             color="white" if v < 0.6 else "black")
-        # Within-family model pairs (red boxes).
-        for m1, m2 in FAMILIES.values():
-            i = MODELS.index(m1)
-            j = MODELS.index(m2)
-            for (yy, xx) in [(i, j), (j, i)]:
-                ax.add_patch(plt.Rectangle((xx - 0.5, yy - 0.5), 1, 1,
-                                           fill=False, edgecolor="red",
-                                           linewidth=1.5))
-    fig.suptitle(fig_title, fontsize=15, fontweight="bold", y=1.00)
-    fig.colorbar(im, ax=axes.tolist(), shrink=0.7, location="right",
-                 label="S (FGW similarity)")
+    # Title position has to compensate for bbox_inches='tight': the trim
+    # removes more whitespace on the right (past the colorbar) than on the
+    # left (where y-tick labels are flush against the figure edge), so the
+    # visual centre of the trimmed PDF sits slightly LEFT of the original
+    # figure centre x=0.5. x=0.49 puts the title at the visible centre.
+    fig.suptitle(fig_title, fontsize=15, fontweight="bold",
+                 x=0.43, y=0.96, ha="center")
+    fig.subplots_adjust(top=0.88, bottom=0.10, left=0.06, right=0.92,
+                        wspace=0.25, hspace=0.40)
+    cbar = fig.colorbar(im, ax=axes.tolist(), shrink=0.7, location="right")
+    cbar.set_label("FGW similarity (higher means greater similarity)",
+                   fontsize=13)
     out = os.path.join(OUT_DIR, fname)
-    plt.savefig(out, dpi=130, bbox_inches="tight")
+    # bbox_inches='tight' trims the empty right margin after the colorbar.
+    # y=0.96 keeps the suptitle inside the bbox so it's preserved by the trim.
+    plt.savefig(out, bbox_inches="tight", pad_inches=0.15)
     plt.close()
     print(f"  saved {out}")
 
@@ -320,10 +321,9 @@ def _q_tag(q):
 for alpha in ALPHAS:
     for Q in QUANTILES:
         sl = S[:, :, alpha_idx(alpha), q_idx(Q)]
-        label_name = ALPHA_LABEL.get(alpha, f"α={alpha}")
-        title = (f"α = {alpha} ({label_name}),  Q = {Q},  "
-                 f"β = {FIXED_BETA} (fixed)")
-        fname = f"heatmap_a{alpha:g}_Q{_q_tag(Q)}.png"
+        title = (f"Cross-model FGW similarity\n"
+                 f"α = {alpha}, Q = {Q}, β = {FIXED_BETA}")
+        fname = f"heatmap_a{alpha:g}_Q{_q_tag(Q)}.pdf"
         draw_per_task_heatmaps(sl, title, fname)
 
 print(f"\nAll outputs in: {OUT_DIR}")

@@ -16,10 +16,16 @@ For DeepSeek-V2's dense layer 0, MoE hooks are skipped (`mlp_hooks` is empty
 there); only after_res1/after_norm2 are valid for dense layers and we don't
 need them for the score decomposition anyway.
 
-Rank 0 owns the accumulators (APS, ANS, AVG, sq, aarv, arv, padd, prem,
-n_tokens_selected, top-K-by-routing-weight token buffer) and runs the score-
-decomposition inner loop. The router gate and post-attention RMSNorm weights
-from every MoE layer are gathered to rank 0 once at startup.
+Rank 0 owns the score-decomposition accumulators (APS, ANS, aarv, padd, prem,
+wsm/wsm_sq/wsm_signed for the softmax-mass perturbation family, n_tokens_selected,
+top-K-by-routing-weight token buffer) and runs the inner loop. The router gate
+and post-attention RMSNorm weights from every MoE layer are gathered to rank 0
+once at startup.
+
+Per-vertex `act` (Su et al. activation magnitude) is the only quantity that
+spans ranks: hooks are registered on EVERY rank for the experts it owns, each
+rank maintains a local act_accum, and a `dist.reduce(op=MAX)` to rank 0
+unions them before save.
 
 Numerical semantics are identical to `build_dag.py` (modulo cross-rank dtype
 casts and NCCL gather precision; both stay in float32 on rank 0 so it is
@@ -150,6 +156,8 @@ MODELS = {
         "moe_layers": list(range(94)),
         "gate_path": "mlp.gate",
         "norm_path": "post_attention_layernorm",
+        "experts_path": "mlp.experts",
+        "down_proj_attr": "down_proj",
         "layer_kwargs_fn": _layer_kwargs_qwen3,
         "causal_mask_fn": _causal_mask_qwen3,
         "needs_position_embeddings": True,
@@ -164,6 +172,8 @@ MODELS = {
         "moe_layers": list(range(1, 60)),  # layer 0 is dense
         "gate_path": "mlp.gate",
         "norm_path": "post_attention_layernorm",
+        "experts_path": "mlp.experts",
+        "down_proj_attr": "down_proj",
         "layer_kwargs_fn": _layer_kwargs_deepseek,
         "causal_mask_fn": _causal_mask_deepseek,
         "needs_position_embeddings": False,
@@ -604,7 +614,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--model", choices=list(MODELS), default="qwen3-235b-a22b")
     parser.add_argument("--dataset", choices=list(DATASETS), default="c4")
-    parser.add_argument("--n_prompts", type=int, default=5000)
+    parser.add_argument("--n_prompts", type=int, default=500)
     parser.add_argument("--B", type=int, default=4)
     args = parser.parse_args()
 
@@ -658,6 +668,36 @@ def main():
         dist.barrier()
     rprint(rank, f"  gathered in {time.time() - t0:.1f}s")
 
+    # ---- Per-vertex activation-magnitude accumulator + hooks (every rank) ----
+    # Each rank owns a slice of decoder layers; only experts on this rank fire
+    # in forward. We allocate act_accum on every rank, register hooks for the
+    # experts in this rank's owned MoE layers, and reduce-MAX onto rank 0
+    # before save.
+    device_local = f"cuda:{local_rank}"
+    act_accum = torch.zeros((N_LAYERS, N_EXPERTS), dtype=torch.float32, device=device_local)
+    experts_of_module = attrgetter(MODEL["experts_path"])
+    down_proj_attr = MODEL["down_proj_attr"]
+    moe_set = set(MOE_LAYERS)
+    _down_proj_hooks = []
+    def _make_down_proj_hook(L_idx, N_idx, target):
+        def _hook(_module, _inp, output):
+            if output.numel() == 0:
+                return
+            m = output.detach().abs().amax().to(target.dtype)
+            target[L_idx, N_idx] = torch.maximum(target[L_idx, N_idx], m)
+        return _hook
+    layers_owned = model.model.layers
+    for _R in owned:
+        if _R not in moe_set:
+            continue
+        _L_idx = MOE_LAYERS.index(_R)
+        _experts = experts_of_module(layers_owned[_R])
+        for _N_idx, _expert_mod in enumerate(_experts):
+            _dp = getattr(_expert_mod, down_proj_attr)
+            _h = _dp.register_forward_hook(_make_down_proj_hook(_L_idx, _N_idx, act_accum))
+            _down_proj_hooks.append(_h)
+    rprint(rank, f"  registered {len(_down_proj_hooks)} down_proj hooks on owned layers")
+
     # ---- Tokenizer + dataset (rank 0 only) ----
     if rank == 0:
         tokenizer = AutoTokenizer.from_pretrained(MODEL_ID, trust_remote_code=True)
@@ -671,14 +711,14 @@ def main():
         # ---- Accumulators ----
         device0 = f"cuda:{local_rank}"
         SHAPE = (N_LAYERS, N_EXPERTS, N_LAYERS, N_EXPERTS)
-        APS_accum  = torch.zeros(SHAPE, dtype=torch.float32, device=device0)
-        ANS_accum  = torch.zeros(SHAPE, dtype=torch.float32, device=device0)
-        AVG_accum  = torch.zeros(SHAPE, dtype=torch.float32, device=device0)
-        sq_accum   = torch.zeros(SHAPE, dtype=torch.float32, device=device0)
-        aarv_accum = torch.zeros(SHAPE, dtype=torch.float32, device=device0)
-        arv_accum  = torch.zeros(SHAPE, dtype=torch.float32, device=device0)
-        padd_accum = torch.zeros(SHAPE, dtype=torch.float32, device=device0)
-        prem_accum = torch.zeros(SHAPE, dtype=torch.float32, device=device0)
+        APS_accum        = torch.zeros(SHAPE, dtype=torch.float32, device=device0)
+        ANS_accum        = torch.zeros(SHAPE, dtype=torch.float32, device=device0)
+        aarv_accum       = torch.zeros(SHAPE, dtype=torch.float32, device=device0)
+        padd_accum       = torch.zeros(SHAPE, dtype=torch.float32, device=device0)
+        prem_accum       = torch.zeros(SHAPE, dtype=torch.float32, device=device0)
+        wsm_accum        = torch.zeros(SHAPE, dtype=torch.float32, device=device0)
+        wsm_sq_accum     = torch.zeros(SHAPE, dtype=torch.float32, device=device0)
+        wsm_signed_accum = torch.zeros(SHAPE, dtype=torch.float32, device=device0)
         n_tokens_selected = torch.zeros((N_LAYERS, N_EXPERTS), dtype=torch.long, device=device0)
 
         # Per-sender top-K-by-routing-weight token buffer. Empty slots: weight = -1.
@@ -827,12 +867,9 @@ def main():
 
                     scores_pos = scores.clamp(min=0.0)
                     scores_neg = scores.clamp(max=0.0)
-                    scores_sq = scores * scores
                     sel_flat = sel_S.flatten()
                     APS_accum[S, :, R, :].index_add_(0, sel_flat, scores_pos.flatten(0, 1))
                     ANS_accum[S, :, R, :].index_add_(0, sel_flat, scores_neg.flatten(0, 1))
-                    AVG_accum[S, :, R, :].index_add_(0, sel_flat, scores.flatten(0, 1))
-                    sq_accum[S, :, R, :].index_add_(0, sel_flat, scores_sq.flatten(0, 1))
 
                     pert_score = orig_score[:, R, :].unsqueeze(1) - scores         # [bt, k, n_experts]
                     pert_sorted = torch.argsort(pert_score, dim=-1, descending=True)
@@ -842,21 +879,39 @@ def main():
                         torch.arange(N_EXPERTS, device=device0).expand_as(pert_sorted),
                     )
                     orig_rank_R = orig_rank_of[:, R, :].unsqueeze(1).expand_as(pert_rank_of)
-                    arv  = (orig_rank_R.float() - pert_rank_of.float())                     # signed
-                    aarv = arv.abs()
+                    aarv = (orig_rank_R.float() - pert_rank_of.float()).abs()
                     in_topk_orig = (orig_rank_R <= TOP_K - 1)
                     in_topk_pert = (pert_rank_of <= TOP_K - 1)
                     padd = (~in_topk_orig &  in_topk_pert).float()
                     prem = ( in_topk_orig & ~in_topk_pert).float()
 
                     aarv_accum[S, :, R, :].index_add_(0, sel_flat, aarv.flatten(0, 1))
-                    arv_accum [S, :, R, :].index_add_(0, sel_flat, arv .flatten(0, 1))
                     padd_accum[S, :, R, :].index_add_(0, sel_flat, padd.flatten(0, 1))
                     prem_accum[S, :, R, :].index_add_(0, sel_flat, prem.flatten(0, 1))
 
-                    del ln_bar, scores, scores_pos, scores_neg, scores_sq
+                    # ---- Softmax-mass perturbation (W_softmax family) ----
+                    # See build_dag.py for the derivation; same formula here.
+                    p_orig_R = torch.zeros((bt, N_EXPERTS), dtype=torch.float32, device=device0)
+                    p_orig_R.scatter_(-1, sel[:, R, :], routing_weight[:, R, :])
+                    p_orig_R = p_orig_R.unsqueeze(1).expand(bt, TOP_K, N_EXPERTS)
+
+                    pert_softmax_all = torch.softmax(pert_score, dim=-1)
+                    pert_topk_idx    = pert_sorted[:, :, :TOP_K]
+                    pert_topk_vals   = torch.gather(pert_softmax_all, dim=-1, index=pert_topk_idx)
+                    pert_topk_vals   = pert_topk_vals / pert_topk_vals.sum(dim=-1, keepdim=True)
+                    p_pert = torch.zeros_like(pert_softmax_all)
+                    p_pert.scatter_(-1, pert_topk_idx, pert_topk_vals)
+                    del pert_softmax_all, pert_topk_idx, pert_topk_vals
+
+                    delta = p_orig_R - p_pert
+                    wsm_accum       [S, :, R, :].index_add_(0, sel_flat, delta.abs().flatten(0, 1))
+                    wsm_sq_accum    [S, :, R, :].index_add_(0, sel_flat, (delta * delta).flatten(0, 1))
+                    wsm_signed_accum[S, :, R, :].index_add_(0, sel_flat, (-delta).flatten(0, 1))
+
+                    del ln_bar, scores, scores_pos, scores_neg
                     del pert_score, pert_sorted, pert_rank_of, orig_rank_R
-                    del arv, aarv, in_topk_orig, in_topk_pert, padd, prem
+                    del aarv, in_topk_orig, in_topk_pert, padd, prem
+                    del p_orig_R, p_pert, delta
 
             del full_hooks, after_res1, after_norm2, selected, weighted_out
             del omega, sel, rms_sq, rms_inv, after_norm2_r
@@ -879,44 +934,56 @@ def main():
 
     rprint(rank, f"\nDone in {time.time() - t_start:.1f}s.\n")
 
+    # ---- Tear down forward hooks and union act_accum across ranks ----
+    for _h in _down_proj_hooks:
+        _h.remove()
+    if dist.is_initialized():
+        # MAX-reduce act_accum onto rank 0. Each rank's act_accum has zeros for
+        # layers it doesn't own; under MAX with a non-zero global maximum those
+        # zeros are inert. Rank 0 then holds the global L_∞-over-tokens-routed.
+        dist.reduce(act_accum, dst=0, op=dist.ReduceOp.MAX)
+        dist.barrier()
+
     # ---- Normalize + save (rank 0 only) ----
     if rank == 0:
         count_safe = n_tokens_selected.clamp(min=1).to(torch.float32)
         denom = count_safe.view(N_LAYERS, N_EXPERTS, 1, 1)
         zero_mask = (n_tokens_selected == 0).view(N_LAYERS, N_EXPERTS, 1, 1)
 
-        APS = (APS_accum / denom).masked_fill(zero_mask, 0.0)
-        ANS = (ANS_accum / denom).masked_fill(zero_mask, 0.0)
-        AVG = (AVG_accum / denom).masked_fill(zero_mask, 0.0)
-        AVG_sq = (sq_accum / denom).masked_fill(zero_mask, 0.0)
-        VAR = (AVG_sq - AVG * AVG).clamp(min=0.0)
-        del AVG_sq
+        APS   = (APS_accum  / denom).masked_fill(zero_mask, 0.0)
+        ANS   = (ANS_accum  / denom).masked_fill(zero_mask, 0.0)
         AARV  = (aarv_accum / denom).masked_fill(zero_mask, 0.0)
-        ARV   = (arv_accum  / denom).masked_fill(zero_mask, 0.0)
         P_add = (padd_accum / denom).masked_fill(zero_mask, 0.0)
         P_rem = (prem_accum / denom).masked_fill(zero_mask, 0.0)
 
+        W_softmax        = (wsm_accum        / denom).masked_fill(zero_mask, 0.0)
+        W_softmax_E_sq   = (wsm_sq_accum     / denom).masked_fill(zero_mask, 0.0)
+        W_softmax_var    = (W_softmax_E_sq - W_softmax * W_softmax).clamp(min=0.0)
+        W_softmax_signed = (wsm_signed_accum / denom).masked_fill(zero_mask, 0.0)
+        del W_softmax_E_sq
+
         out_path = os.path.join(output_dir, f"dag_{args.model}_{args.dataset}.pt")
         torch.save({
-            "APS":   APS.cpu(),
-            "ANS":   ANS.cpu(),
-            "AVG":   AVG.cpu(),
-            "VAR":   VAR.cpu(),
-            "AARV":  AARV.cpu(),
-            "ARV":   ARV.cpu(),
-            "P_add": P_add.cpu(),
-            "P_rem": P_rem.cpu(),
+            "APS":               APS.cpu(),
+            "ANS":               ANS.cpu(),
+            "AARV":              AARV.cpu(),
+            "P_add":             P_add.cpu(),
+            "P_rem":             P_rem.cpu(),
+            "W_softmax":         W_softmax.cpu(),
+            "W_softmax_var":     W_softmax_var.cpu(),
+            "W_softmax_signed":  W_softmax_signed.cpu(),
+            "act":               act_accum.cpu(),
             "n_tokens_selected": n_tokens_selected.cpu(),
-            "top_weight": top_weight.cpu(),
-            "top_prompt": top_prompt.cpu(),
-            "top_pos":    top_pos.cpu(),
-            "top_token":  top_token.cpu(),
-            "k_top_tokens": K_TOP_TOKENS,
-            "n_prompts": N_PROMPTS,
-            "max_tokens": MAX_TOKENS,
-            "model": MODEL_ID,
-            "moe_layers": MOE_LAYERS,
-            "dataset": args.dataset,
+            "top_weight":        top_weight.cpu(),
+            "top_prompt":        top_prompt.cpu(),
+            "top_pos":           top_pos.cpu(),
+            "top_token":         top_token.cpu(),
+            "k_top_tokens":      K_TOP_TOKENS,
+            "n_prompts":         N_PROMPTS,
+            "max_tokens":        MAX_TOKENS,
+            "model":             MODEL_ID,
+            "moe_layers":        MOE_LAYERS,
+            "dataset":           args.dataset,
         }, out_path)
         print(f"Saved {out_path}")
 

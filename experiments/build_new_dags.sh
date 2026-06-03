@@ -30,6 +30,13 @@
 # Memory between model swaps: each `python` invocation is its own process,
 # so GPU memory and resident RAM are reclaimed by the OS when it exits.
 #
+# PILOT NOTE: the on-disk dag_*.pt files from the previous schema (which
+# included AVG/VAR/ARV and lacked W_softmax/act) are NOT auto-deleted by
+# the skip-if-exists check. Before launching the pilot, remove the stale
+# pilot-model DAGs explicitly:
+#   rm -f $RESULT_PATH/circuits/dag_mixtral-8x7b_*.pt
+#   rm -f $RESULT_PATH/circuits/dag_deepseek-v2-lite_*.pt
+#
 # qwen3-235b-a22b and deepseek-v2 need multinode SLURM; handle separately
 # via experiments/launch_multinode_new.sh.
 
@@ -65,17 +72,17 @@ echo "RESULT_PATH=$RESULT_PATH"
 echo "CLEANUP_MODEL_CACHE=$CLEANUP_MODEL_CACHE"
 echo
 
-NEW_DATASETS=(wikitext2 gsm8k humaneval pile-arxiv pile-github)
-N_PROMPTS=1000
+# PILOT: rebuild every (model, dataset) DAG with the new edge-weight schema
+# (W_softmax family as primary, plus the Su et al. `act` per-vertex feature).
+# Pilot covers only Mixtral-8x7B and DeepSeek-V2-Lite across ALL 8 datasets.
+# Restore the full MODELS list after pilot validates the metric correlation
+# against the legacy P_flip edge weight (cf. compare_edge_metrics.py).
+NEW_DATASETS=(c4 math code wikitext2 gsm8k humaneval pile-arxiv pile-github)
+N_PROMPTS=500
 
-# Smallest first so quick wins come early.
 MODELS=(
-  olmoe
-  phi-3.5-moe
   mixtral-8x7b
   deepseek-v2-lite
-  qwen3-30b-a3b
-  mixtral-8x22b
 )
 
 # Batch size per model. mixtral-8x22b is the only "large" model in this list;
