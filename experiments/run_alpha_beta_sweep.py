@@ -10,8 +10,10 @@ and writes a slice file
 that the aggregator stitches into
     S[src, tgt, alpha, Q].
 
-Graph: the routing DAG used throughout is P_flip = P_add + P_rem. The
-per-graph quantile threshold is taken on |P_flip| over forward edges.
+Graph: the routing DAG edge weight used throughout is W = dag[EDGE_TENSOR],
+default "W_softmax" — the softmax-mass perturbation primary edge weight
+(main.tex §2). The per-graph quantile threshold is taken on |W| over
+forward edges.
 
 Threshold semantics (per main.tex §3.6): features (depth, out_norm, in_norm,
 load, class_hist) and mass are computed on the DENSE graph -- they are the
@@ -112,13 +114,22 @@ def load_dag(model, task):
     return torch.load(path, map_location="cpu")
 
 
+EDGE_TENSOR = "W_softmax"   # primary edge weight used throughout the sweep
+
+
 def build_triple_at_Q(model, task, classification, Q):
     """Build one triple at β = FIXED_BETA with:
       - F, mass        : computed on the DENSE routing DAG (intrinsic features).
       - C_path         : computed on the SPARSIFIED graph (edges with
-                         |P_flip| > θ_Q only).
+                         W > θ_Q only).
       - vertex set     : drop vertices isolated in the sparsified graph
                          (no surviving in- or out-edge).
+
+    The edge tensor W is read from `dag[EDGE_TENSOR]` (default "W_softmax"
+    — the softmax-mass perturbation primary edge weight defined in main.tex
+    §2). To switch to the legacy P_flip view, change EDGE_TENSOR to "P_flip"
+    and ensure each DAG file has that key (computable on the fly from P_add
+    + P_rem if needed).
 
     Note: this baseline does NOT apply the special-token (class_hist[special]
     > 0.5) mask. The legacy dense sweep applied it; we drop it here so the
@@ -127,27 +138,28 @@ def build_triple_at_Q(model, task, classification, Q):
 
     Returns (triple, threshold)."""
     dag = load_dag(model, task)
-    P_combined = (dag["P_add"] + dag["P_rem"]).float()
-    L = P_combined.shape[0]
+    W = dag[EDGE_TENSOR].float()
+    L = W.shape[0]
 
     # Forward-edge mask.
     s_idx = torch.arange(L).view(-1, 1, 1, 1)
     r_idx = torch.arange(L).view(1, 1, -1, 1)
-    fwd = (s_idx < r_idx).expand_as(P_combined)
+    fwd = (s_idx < r_idx).expand_as(W)
 
     # Per-graph absolute threshold from quantile Q.
-    threshold = _edge_quantile_threshold(P_combined, Q)
+    threshold = _edge_quantile_threshold(W, Q)
 
     # build_triple keeps F and mass on the DENSE graph; edge_threshold only
     # filters edges fed into the C_path shortest-path computation.
     triple = build_triple(dag, classification,
-                          beta=FIXED_BETA, edge_threshold=threshold)
+                          beta=FIXED_BETA, edge_threshold=threshold,
+                          edge_tensor=EDGE_TENSOR)
 
     # Identify vertices isolated in the SPARSIFIED graph (no surviving in-
     # or out-edge above threshold). This is the ONLY vertex filter. Strict
     # `>` matches the edge mask in fgw._shortest_path_costs so a vertex is
     # "isolated" here iff it contributes zero edges to C_path there.
-    survive = (torch.abs(P_combined) > threshold) & fwd
+    survive = (torch.abs(W) > threshold) & fwd
     out_sparse = survive.sum(dim=(2, 3)).reshape(-1).cpu().numpy()
     in_sparse  = survive.sum(dim=(0, 1)).reshape(-1).cpu().numpy()
     keep_mask = (out_sparse > 0) | (in_sparse > 0)
@@ -155,8 +167,9 @@ def build_triple_at_Q(model, task, classification, Q):
     triple = _subset_triple(triple, keep_mask)
     triple[3]["quantile"] = Q
     triple[3]["edge_threshold"] = threshold
+    triple[3]["edge_tensor"] = EDGE_TENSOR
 
-    del dag, P_combined, survive, fwd
+    del dag, W, survive, fwd
     return triple, threshold
 
 

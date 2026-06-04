@@ -248,12 +248,14 @@ def build_triple(dag: Dict[str, Any],
                  *,
                  beta: float = 0.5,
                  edge_threshold: float = 0.0,
+                 edge_tensor: str = "W_softmax",
                  ) -> Tuple[np.ndarray, np.ndarray, np.ndarray, Dict[str, Any]]:
     """Construct the FGW triple (C, F, mass) for one routing DAG.
 
     Args:
-        dag: dict produced by build_dag.py; expects keys P_add, P_rem,
-            n_tokens_selected, top_weight, top_prompt, top_pos, moe_layers.
+        dag: dict produced by build_dag.py; expects keys n_tokens_selected,
+            top_weight, top_prompt, top_pos, moe_layers, plus the edge tensor
+            selected via `edge_tensor` (default "W_softmax").
         classification: dict[(prompt_idx, position) -> class_idx] from
             build_token_classification. If None, the token-class histogram is
             set to all-mass-on-"special" (P6 contributes nothing).
@@ -263,6 +265,13 @@ def build_triple(dag: Dict[str, Any],
         edge_threshold: drop edges with W < threshold before computing
             shortest paths. 0.0 = use the dense graph. See main.tex
             "Graph thresholding".
+        edge_tensor: which 4D tensor in `dag` to use as the edge weight
+            W[c, j, l, n]. Default "W_softmax" (the softmax-mass perturbation
+            primary edge weight; cf. main.tex §2). Alternative options stored
+            in the DAG: "W_softmax_var", "W_softmax_signed", "APS", "ANS",
+            "AARV", "P_add", "P_rem". To use the legacy P_flip view, the
+            caller must inject `dag["P_flip"] = dag["P_add"] + dag["P_rem"]`
+            beforehand and pass edge_tensor="P_flip".
 
     Returns:
         C    : [n, n] np.float64  -- structural cost
@@ -270,7 +279,11 @@ def build_triple(dag: Dict[str, Any],
         mass : [n]    np.float64  -- probability mass, sums to 1
         meta : dict with L, N, n_verts, D
     """
-    W = (dag["P_add"] + dag["P_rem"]).float()
+    if edge_tensor not in dag:
+        raise KeyError(
+            f"edge_tensor={edge_tensor!r} not in dag (available keys: {sorted(dag)})"
+        )
+    W = dag[edge_tensor].float()
     L, N = W.shape[0], W.shape[1]
     n_verts = L * N
 
