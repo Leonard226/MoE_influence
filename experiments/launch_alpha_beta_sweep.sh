@@ -1,11 +1,14 @@
 #!/bin/bash
 #SBATCH --array=0-575               # 64 sources × 9 target chunks = 576 work units
+#SBATCH --nodes=1                   # one node per task
 #SBATCH --cpus-per-task=1
 #SBATCH --mem-per-cpu=24G           # peak per task ~8-12GB for qwen3-235b/dsv2
                                     # pairs at Q=0.9; 24G gives ~2x headroom and
                                     # lets SLURM pack heterogeneously so cheap
                                     # Mixtral chunks aren't artificially throttled.
-#SBATCH --nodelist=piora[5-8]       # restrict to piora5..piora8 (CPU-only sweep)
+#SBATCH --nodelist=piora2           # all tasks on piora2 (CPU-only sweep);
+                                    # avoids multi-node idle-allocation issues
+                                    # we hit before with piora[5-8].
 #SBATCH --output=logs/ab_sweep_%A_%a.log
 #
 # Pairwise α × Q quantile FGW sweep across all (model, task) tuples at fixed
