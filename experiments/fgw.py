@@ -275,7 +275,7 @@ def build_triple(dag: Dict[str, Any],
 
     Returns:
         C    : [n, n] np.float64  -- structural cost
-        F    : [n, D] np.float64  -- features [depth, out~, in~, load, class_0..class_{T-1}]
+        F    : [n, D] np.float64  -- features [depth, out~, in~, load, act~, class_0..class_{T-1}]
         mass : [n]    np.float64  -- probability mass, sums to 1
         meta : dict with L, N, n_verts, D
     """
@@ -313,7 +313,18 @@ def build_triple(dag: Dict[str, Any],
     layer_mean = n_tok.mean(dim=1, keepdim=True).clamp(min=1e-12)  # [L, 1]
     load = n_tok / layer_mean  # [L, N], ~1 = average
 
-    # 5. token-class histogram
+    # 5. activation magnitude (Su et al. super-expert feature).
+    # Raw `act` spans 3-5 orders of magnitude within a graph and another
+    # 10000x across models -- raw values would dominate the Wasserstein
+    # term and break cross-model comparison. Rank-normalise within graph
+    # so each vertex contributes its *rank* in [0, 1], matching the
+    # Su et al. super-expert criterion (top-ranked vertex = super-expert)
+    # and aligning scales with the other features.
+    act = dag["act"].float().reshape(-1)            # [n_verts]
+    ranks = act.argsort().argsort().float()         # rank within graph
+    act_norm = (ranks / max(float(ranks.max()), 1.0)).reshape(L, N)
+
+    # 6. token-class histogram
     if classification is not None and "top_prompt" in dag and "top_pos" in dag:
         class_hist = compute_class_histogram(
             dag["top_weight"], dag["top_prompt"], dag["top_pos"], classification)
@@ -326,6 +337,7 @@ def build_triple(dag: Dict[str, Any],
         out_norm.unsqueeze(-1),
         in_norm.unsqueeze(-1),
         load.unsqueeze(-1),
+        act_norm.unsqueeze(-1),      # NEW: rank-normalised Su et al. act
         class_hist,                  # [L, N, N_CLASSES]
     ], dim=-1).reshape(n_verts, -1).double().numpy()
 
