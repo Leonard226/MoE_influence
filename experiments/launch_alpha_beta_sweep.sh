@@ -35,8 +35,9 @@
 #
 # After all array tasks finish:
 #   python experiments/aggregate_alpha_beta_sweep.py
-# stitches the slices into S_full.npz of shape (64, 64, 3, 3) indexed
-# (src, tgt, α, Q).
+# stitches the slices into S_full_with_act.npz of shape (64, 64, 3, 3)
+# indexed (src, tgt, α, Q). The 'with_act' suffix reflects the current
+# schema; the legacy 'no_act' aggregate is archived under the same dir.
 
 set -euo pipefail
 

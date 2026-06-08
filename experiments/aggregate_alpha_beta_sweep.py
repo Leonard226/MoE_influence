@@ -2,8 +2,12 @@
 S[src, tgt, α, Q] tensor.
 
 Reads {result_path}/circuits/alpha_beta_sweep/sweep_src*_chunk*.npz
-files and writes the merged S_full.npz to the same directory. Reports
-any missing or failed pairs.
+files and writes the merged S_full_with_act.npz to the same directory.
+Reports any missing or failed pairs.
+
+The filename suffix reflects the current schema (F includes the
+rank-normalised Su et al. activation feature). To override for ad-hoc
+runs against an older sweep, pass --output explicitly.
 """
 import argparse
 import os
@@ -32,7 +36,7 @@ def main():
     input_dir = args.input_dir or os.path.join(
         config["result_path"], "circuits", "alpha_beta_sweep"
     )
-    output_path = args.output or os.path.join(input_dir, "S_full.npz")
+    output_path = args.output or os.path.join(input_dir, "S_full_with_act.npz")
 
     n_a, n_q = len(ALPHAS), len(QUANTILES)
     S_full = np.full((N_TUPLES, N_TUPLES, n_a, n_q), np.nan)

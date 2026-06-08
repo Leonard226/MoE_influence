@@ -1,15 +1,18 @@
 """Headline analysis of the alpha × Q quantile FGW sweep.
 
-Reads S_full.npz produced by aggregate_alpha_beta_sweep.py
+Reads S_full_with_act.npz produced by aggregate_alpha_beta_sweep.py
 (shape (64, 64, len(ALPHAS), len(QUANTILES))) and writes to
-{result_path}/circuits/alpha_beta_sweep/analysis/:
+{result_path}/circuits/alpha_beta_sweep/analysis/with_act/:
 
     summary.txt
         Coverage, global aggregates per (α, Q), per-task CMS, per-model WM,
         within-family pair tables.
-    heatmap_a{α}_Q{Q}.png    (9 PNGs, one per (α, Q) cell)
-        Per-task 2×4 grid of 8×8 model×model heatmaps, within-family model
-        pairs boxed in red, cell values overlaid.
+    heatmap_a{α}_Q{Q}.pdf    (9 PDFs, one per (α, Q) cell)
+        Per-task 2×4 grid of 8×8 model×model heatmaps, cell values overlaid.
+
+The 'with_act' suffix reflects the current schema (W_softmax edge weight,
+F includes rank-normalised Su et al. activation). The legacy 'no_act'
+results are archived alongside under analysis/no_act/.
 """
 import os
 import sys
@@ -30,8 +33,8 @@ with open(os.path.join(ROOT, "config.yaml")) as f:
     config = yaml.safe_load(f)
 
 INPUT_DIR = os.path.join(config["result_path"], "circuits", "alpha_beta_sweep")
-INPUT_PATH = os.path.join(INPUT_DIR, "S_full.npz")
-OUT_DIR = os.path.join(INPUT_DIR, "analysis")
+INPUT_PATH = os.path.join(INPUT_DIR, "S_full_with_act.npz")
+OUT_DIR = os.path.join(INPUT_DIR, "analysis", "with_act")
 Path(OUT_DIR).mkdir(parents=True, exist_ok=True)
 
 # ---------------------------------------------------------------------------
