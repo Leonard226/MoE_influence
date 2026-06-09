@@ -1,8 +1,8 @@
-"""Q-sweep extension of the metric-validation SNR test (parallel).
+"""Q-sweep validation of the FGW structural metric (parallel).
 
 Pair: Mixtral-8x7B / c4   vs   Qwen3-30B-A3B / c4
-Settings: alpha = 1, beta = 0 (pure path-geometry channel of the structural cost)
-Axis:     Q in {0.0, 0.9, 0.95, 0.99, 0.999} - per-graph quantile sparsification
+Settings: alpha = 1, beta = 0.5  (matches the headline sweep's structural cost).
+Axis:     Q in {0.0, 0.9, 0.95, 0.99, 0.999} - per-graph quantile sparsification.
 
 For each Q we compare:
   - real x real:   d_mix vs d_qwen at the same Q-threshold, N_SOLVER_SEEDS FGW-solver seeds
@@ -51,7 +51,7 @@ N_SOLVER_SEEDS = 5
 N_PERM_SEEDS = 5
 N_INIT = 10           # FGW random initialisations per solver call
 ALPHA = 1.0
-BETA = 0.0
+BETA = 0.5      # matches the headline sweep (was 0 in the original probe)
 
 
 # ---------------------------------------------------------------------------
