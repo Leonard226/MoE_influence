@@ -6,8 +6,12 @@ Axis:     Q in {0.0, 0.9, 0.95, 0.99, 0.999} - per-graph quantile sparsification
 
 For each Q we compare:
   - real x real:   d_mix vs d_qwen at the same Q-threshold, N_SOLVER_SEEDS FGW-solver seeds
-  - real x random: d_mix vs (qwen with W_softmax entries i.i.d. shuffled),
-                   N_PERM_SEEDS permutation seeds, Q-threshold recomputed per-perm
+  - real x random: d_mix vs make_null(d_qwen, seed), N_PERM_SEEDS permutation seeds.
+                   The null applies (i) a forward-triangle-only shuffle of
+                   W_softmax entries, AND (ii) independent cross-layer
+                   permutations of each per-vertex feature column (act,
+                   n_tokens_selected, top_*-bundle). See make_null() docstring.
+                   Q-threshold recomputed per-null.
 
 Parallelism: the 50 independent FGW calls are dispatched to a ProcessPoolExecutor.
 Set SLURM_CPUS_PER_TASK (or pass --workers N) to control the worker count.
@@ -39,6 +43,7 @@ torch.set_num_threads(1)
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 from experiments.fgw import build_triple, fgw_distance  # noqa: E402
+from experiments.run_alpha_beta_sweep import _subset_triple  # noqa: E402
 
 
 # ---------------------------------------------------------------------------
@@ -71,13 +76,78 @@ def q_threshold(dag: dict, Q: float) -> float:
     return float(torch.quantile(vals, Q))
 
 
-def shuffle_edges(dag: dict, seed: int) -> dict:
-    """Copy `dag` with W_softmax entries i.i.d. shuffled."""
+def _shuffle_forward_edges(dag: dict, seed: int) -> dict:
+    """Permute W_softmax entries WITHIN the forward triangle (s < r).
+    Backward triangle stays zero. Preserves the marginal distribution of
+    forward edge magnitudes exactly; randomises which (sender, receiver)
+    pair holds which weight.
+    """
     out = copy.deepcopy(dag)
     g = torch.Generator().manual_seed(seed)
     W = out["W_softmax"].clone()
-    flat = W.flatten()
-    out["W_softmax"] = flat[torch.randperm(flat.numel(), generator=g)].reshape(W.shape)
+    L = W.shape[0]
+    s_idx = torch.arange(L).view(-1, 1, 1, 1)
+    r_idx = torch.arange(L).view(1, 1, -1, 1)
+    fwd = (s_idx < r_idx).expand_as(W)
+    fwd_vals = W[fwd]
+    perm = torch.randperm(fwd_vals.numel(), generator=g)
+    W_new = torch.zeros_like(W)
+    W_new[fwd] = fwd_vals[perm]
+    out["W_softmax"] = W_new
+    return out
+
+
+def _shuffle_features(dag: dict, seed: int) -> dict:
+    """Independent cross-layer permutation of each per-vertex feature column.
+
+    Three independent permutations of shape (L*N,):
+      - pi_act      applied to dag["act"]
+      - pi_load     applied to dag["n_tokens_selected"]
+      - pi_class    applied jointly to dag["top_weight"], ["top_prompt"],
+                    ["top_pos"], ["top_token"] (they form a bundle from
+                    which class_hist is computed; must permute together
+                    to keep that bundle internally consistent).
+
+    Depth is positional (not stored) and stays correct after this shuffle.
+    Out-strength / in-strength are recomputed from the shuffled W inside
+    build_triple, so they remain consistent with the shuffled structure.
+
+    Per-feature-column independence prevents the transport plan from
+    'decrypting' the permutation: no single pi pairs vertices in a way
+    that zeroes any feature column.
+    """
+    out = copy.deepcopy(dag)
+    g = torch.Generator().manual_seed(seed)
+    L, N = out["W_softmax"].shape[0], out["W_softmax"].shape[1]
+    n_verts = L * N
+
+    def _apply(key, perm):
+        t = out[key]
+        arr = t.reshape(n_verts, *t.shape[2:])
+        out[key] = arr[perm].reshape(t.shape)
+
+    # Independent permutation per feature group.
+    if "act" in out:
+        _apply("act", torch.randperm(n_verts, generator=g))
+    if "n_tokens_selected" in out:
+        _apply("n_tokens_selected", torch.randperm(n_verts, generator=g))
+
+    # Class-hist bundle: same permutation across the four top_* tensors so
+    # that each null-vertex's top-K token bundle stays internally coherent.
+    class_perm = torch.randperm(n_verts, generator=g)
+    for key in ("top_weight", "top_prompt", "top_pos", "top_token"):
+        if key in out:
+            _apply(key, class_perm)
+
+    return out
+
+
+def make_null(dag: dict, seed: int) -> dict:
+    """Combined null: forward-only edge shuffle + cross-layer per-column
+    feature shuffle. See _shuffle_forward_edges and _shuffle_features for
+    the construction rationale."""
+    out = _shuffle_forward_edges(dag, seed)
+    out = _shuffle_features(out, seed + 1_000_003)
     return out
 
 
@@ -104,29 +174,52 @@ def _worker_init(result_path: str, pair: tuple[str, str], dataset: str) -> None:
     _WORKER_DAGS = (d_a, d_b)
 
 
+def _isolated_keep_mask(dag: dict, theta: float) -> np.ndarray:
+    """Same filter as run_alpha_beta_sweep.build_triple_at_Q:
+    keep a vertex iff it has at least one surviving forward in- or out-edge
+    above threshold."""
+    W = dag["W_softmax"]
+    L = W.shape[0]
+    s_idx = torch.arange(L).view(-1, 1, 1, 1)
+    r_idx = torch.arange(L).view(1, 1, -1, 1)
+    fwd = (s_idx < r_idx).expand_as(W)
+    survive = (torch.abs(W) > theta) & fwd
+    out_sparse = survive.sum(dim=(2, 3)).reshape(-1).cpu().numpy()
+    in_sparse  = survive.sum(dim=(0, 1)).reshape(-1).cpu().numpy()
+    return (out_sparse > 0) | (in_sparse > 0)
+
+
+def _build_filtered_triple(dag: dict, theta: float):
+    """Build a triple at BETA, edge_threshold=theta, then drop vertices
+    isolated in the sparsified graph (matches the headline sweep)."""
+    triple = build_triple(dag, beta=BETA, edge_threshold=theta)
+    keep_mask = _isolated_keep_mask(dag, theta)
+    return _subset_triple(triple, keep_mask), int(keep_mask.sum())
+
+
 def _worker_compute(job: tuple[float, str, int]) -> dict:
-    """One FGW call: (Q, kind, seed) -> distance + the two thetas used."""
+    """One FGW call: (Q, kind, seed) -> distance + thresholds + kept-vertex counts."""
     assert _WORKER_DAGS is not None
     Q, kind, seed = job
     d_a, d_b = _WORKER_DAGS
 
     theta_a = q_threshold(d_a, Q)
+    t1, n_keep_a = _build_filtered_triple(d_a, theta_a)
     if kind == "real":
         theta_b = q_threshold(d_b, Q)
-        t1 = build_triple(d_a, beta=BETA, edge_threshold=theta_a)
-        t2 = build_triple(d_b, beta=BETA, edge_threshold=theta_b)
+        t2, n_keep_b = _build_filtered_triple(d_b, theta_b)
         d, _ = fgw_distance(t1, t2, alpha=ALPHA, n_init=N_INIT, seed=seed)
     elif kind == "random":
-        d_b_rand = shuffle_edges(d_b, seed + 1000)
+        d_b_rand = make_null(d_b, seed + 1000)
         theta_b = q_threshold(d_b_rand, Q)
-        t1 = build_triple(d_a, beta=BETA, edge_threshold=theta_a)
-        t2 = build_triple(d_b_rand, beta=BETA, edge_threshold=theta_b)
+        t2, n_keep_b = _build_filtered_triple(d_b_rand, theta_b)
         d, _ = fgw_distance(t1, t2, alpha=ALPHA, n_init=N_INIT, seed=0)
     else:
         raise ValueError(f"unknown kind: {kind!r}")
 
     return {"Q": Q, "kind": kind, "seed": seed, "d": d,
-            "theta_a": theta_a, "theta_b": theta_b}
+            "theta_a": theta_a, "theta_b": theta_b,
+            "n_keep_a": n_keep_a, "n_keep_b": n_keep_b}
 
 
 # ---------------------------------------------------------------------------
@@ -176,12 +269,18 @@ def main() -> None:
             Q, kind, seed = r["Q"], r["kind"], r["seed"]
             raw[Q][kind][seed] = (r["d"], r["theta_b"])
             raw[Q]["theta_a"] = r["theta_a"]
+            raw[Q]["n_keep_a"] = r["n_keep_a"]
             if kind == "real":
                 raw[Q]["theta_b_real"] = r["theta_b"]
+                raw[Q]["n_keep_b_real"] = r["n_keep_b"]
+            else:
+                raw[Q].setdefault("n_keep_b_rand", []).append(r["n_keep_b"])
             completed += 1
             print(f"[{completed:>3}/{len(jobs)}]  Q={Q:>6.3f}  {kind:>6}  "
                   f"seed={seed}  d={r['d']:.4f}  "
-                  f"theta_b={r['theta_b']:.4f}  (t={time.time() - t0:.0f}s)",
+                  f"theta_b={r['theta_b']:.4f}  "
+                  f"|V|_keep=({r['n_keep_a']},{r['n_keep_b']})  "
+                  f"(t={time.time() - t0:.0f}s)",
                   flush=True)
 
     # Aggregate per Q.
@@ -199,6 +298,9 @@ def main() -> None:
             Q=Q,
             theta_a=float(raw[Q]["theta_a"]),
             theta_b_real=float(raw[Q]["theta_b_real"]),
+            n_keep_a=int(raw[Q]["n_keep_a"]),
+            n_keep_b_real=int(raw[Q]["n_keep_b_real"]),
+            n_keep_b_rand_mean=float(np.mean(raw[Q]["n_keep_b_rand"])),
             real_d_mean=float(real_d.mean()), real_d_std=float(real_d.std()),
             rand_d_mean=float(rand_d.mean()), rand_d_std=float(rand_d.std()),
             real_S_mean=float(real_S.mean()), real_S_std=float(real_S.std()),
@@ -210,16 +312,17 @@ def main() -> None:
 
     # Print summary table.
     print()
-    print(f"{'Q':>6s}  {'realS_mean':>10s}  {'realS_std':>10s}  "
-          f"{'randS_mean':>10s}  {'randS_std':>10s}  {'gap_d':>8s}  "
-          f"{'SNR':>7s}  {'theta_a':>9s}  {'theta_b':>9s}")
-    print("-" * 105)
+    print(f"{'Q':>6s}  {'realS_mean':>10s}  {'randS_mean':>10s}  {'gap_d':>8s}  "
+          f"{'SNR':>7s}  {'theta_a':>9s}  {'theta_b':>9s}  "
+          f"{'|V|_a':>7s}  {'|V|_b_r':>9s}  {'|V|_b_p':>9s}")
+    print("-" * 110)
     for Q in QUANTILES:
         r = results[f"{Q}"]
-        print(f"{Q:>6.3f}  {r['real_S_mean']:>10.4f}  {r['real_S_std']:>10.4f}  "
-              f"{r['rand_S_mean']:>10.4f}  {r['rand_S_std']:>10.4f}  "
+        print(f"{Q:>6.3f}  {r['real_S_mean']:>10.4f}  {r['rand_S_mean']:>10.4f}  "
               f"{r['gap_d']:>+8.4f}  {r['snr']:>7.1f}  "
-              f"{r['theta_a']:>9.4f}  {r['theta_b_real']:>9.4f}")
+              f"{r['theta_a']:>9.4f}  {r['theta_b_real']:>9.4f}  "
+              f"{r['n_keep_a']:>7d}  {r['n_keep_b_real']:>9d}  "
+              f"{r['n_keep_b_rand_mean']:>9.0f}")
 
     meta = dict(
         pair=list(PAIR), dataset=DATASET,
