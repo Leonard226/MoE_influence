@@ -320,23 +320,7 @@ def main() -> None:
                 rand_d=[float(x) for x in rand_d],
             )
 
-    # Print summary table: one block per alpha, rows = Q.
-    print()
-    for alpha in ALPHA_AXIS:
-        print(f"--- alpha = {alpha} ---")
-        print(f"{'Q':>6s}  {'realS':>8s}  {'randS':>8s}  {'gap_S':>+8s}  "
-              f"{'gap_d':>+8s}  {'SNR':>7s}  {'|V|_a':>6s}  "
-              f"{'|V|_b_r':>8s}  {'|V|_b_p':>8s}")
-        print("-" * 84)
-        for Q in QUANTILES:
-            r = results[f"a{alpha}_Q{Q}"]
-            gap_S = r["real_S_mean"] - r["rand_S_mean"]
-            print(f"{Q:>6.3f}  {r['real_S_mean']:>8.4f}  {r['rand_S_mean']:>8.4f}  "
-                  f"{gap_S:>+8.4f}  {r['gap_d']:>+8.4f}  {r['snr']:>7.1f}  "
-                  f"{r['n_keep_a']:>6d}  {r['n_keep_b_real']:>8d}  "
-                  f"{r['n_keep_b_rand_mean']:>8.0f}")
-        print()
-
+    # Save JSON first so a print failure can never cost us the results.
     meta = dict(
         pair=list(PAIR), dataset=DATASET,
         beta=BETA, n_init=N_INIT,
@@ -348,7 +332,23 @@ def main() -> None:
     out_path.parent.mkdir(parents=True, exist_ok=True)
     with open(out_path, "w") as f:
         json.dump({"meta": meta, "results": results}, f, indent=2)
-    print(f"\nSaved: {out_path}")
+    print(f"\nSaved: {out_path}\n")
+
+    # Print summary table: one block per alpha, rows = Q.
+    for alpha in ALPHA_AXIS:
+        print(f"--- alpha = {alpha} ---")
+        print(f"{'Q':>6s}  {'realS':>8s}  {'randS':>8s}  {'gap_S':>8s}  "
+              f"{'gap_d':>8s}  {'SNR':>7s}  {'|V|_a':>6s}  "
+              f"{'|V|_b_r':>8s}  {'|V|_b_p':>8s}")
+        print("-" * 84)
+        for Q in QUANTILES:
+            r = results[f"a{alpha}_Q{Q}"]
+            gap_S = r["real_S_mean"] - r["rand_S_mean"]
+            print(f"{Q:>6.3f}  {r['real_S_mean']:>8.4f}  {r['rand_S_mean']:>8.4f}  "
+                  f"{gap_S:>+8.4f}  {r['gap_d']:>+8.4f}  {r['snr']:>7.1f}  "
+                  f"{r['n_keep_a']:>6d}  {r['n_keep_b_real']:>8d}  "
+                  f"{r['n_keep_b_rand_mean']:>8.0f}")
+        print()
     print(f"Total wallclock: {time.time() - t0:.0f}s")
 
 
