@@ -1,10 +1,12 @@
-"""Q-sweep validation of the FGW structural metric (parallel).
+"""(alpha, Q)-sweep validation of the FGW metric (parallel).
 
 Pair: Mixtral-8x7B / c4   vs   Qwen3-30B-A3B / c4
-Settings: alpha = 1, beta = 0.5  (matches the headline sweep's structural cost).
-Axis:     Q in {0.0, 0.9, 0.95, 0.99, 0.999} - per-graph quantile sparsification.
+Settings: beta = 0.5 fixed (matches the headline sweep).
+Axes:
+  alpha in {0.0, 0.5, 1.0}                       - feature vs structure mix
+  Q     in {0.0, 0.9, 0.95, 0.99, 0.999}         - per-graph quantile sparsification
 
-For each Q we compare:
+For each (alpha, Q) we compare:
   - real x real:   d_mix vs d_qwen at the same Q-threshold, N_SOLVER_SEEDS FGW-solver seeds
   - real x random: d_mix vs make_null(d_qwen, seed), N_PERM_SEEDS permutation seeds.
                    The null applies (i) a forward-triangle-only shuffle of
@@ -51,12 +53,12 @@ from experiments.run_alpha_beta_sweep import _subset_triple  # noqa: E402
 # ---------------------------------------------------------------------------
 PAIR = ("mixtral-8x7b", "qwen3-30b-a3b")
 DATASET = "c4"
-QUANTILES = [0.0, 0.9, 0.95, 0.99, 0.999]
+QUANTILES  = [0.0, 0.9, 0.95, 0.99, 0.999]
+ALPHA_AXIS = [0.0, 0.5, 1.0]
 N_SOLVER_SEEDS = 5
 N_PERM_SEEDS = 5
 N_INIT = 10           # FGW random initialisations per solver call
-ALPHA = 1.0
-BETA = 0.5      # matches the headline sweep (was 0 in the original probe)
+BETA = 0.5            # matches the headline sweep
 
 
 # ---------------------------------------------------------------------------
@@ -197,10 +199,10 @@ def _build_filtered_triple(dag: dict, theta: float):
     return _subset_triple(triple, keep_mask), int(keep_mask.sum())
 
 
-def _worker_compute(job: tuple[float, str, int]) -> dict:
-    """One FGW call: (Q, kind, seed) -> distance + thresholds + kept-vertex counts."""
+def _worker_compute(job: tuple[float, float, str, int]) -> dict:
+    """One FGW call: (alpha, Q, kind, seed) -> distance + thresholds + |V|s."""
     assert _WORKER_DAGS is not None
-    Q, kind, seed = job
+    alpha, Q, kind, seed = job
     d_a, d_b = _WORKER_DAGS
 
     theta_a = q_threshold(d_a, Q)
@@ -208,16 +210,16 @@ def _worker_compute(job: tuple[float, str, int]) -> dict:
     if kind == "real":
         theta_b = q_threshold(d_b, Q)
         t2, n_keep_b = _build_filtered_triple(d_b, theta_b)
-        d, _ = fgw_distance(t1, t2, alpha=ALPHA, n_init=N_INIT, seed=seed)
+        d, _ = fgw_distance(t1, t2, alpha=alpha, n_init=N_INIT, seed=seed)
     elif kind == "random":
         d_b_rand = make_null(d_b, seed + 1000)
         theta_b = q_threshold(d_b_rand, Q)
         t2, n_keep_b = _build_filtered_triple(d_b_rand, theta_b)
-        d, _ = fgw_distance(t1, t2, alpha=ALPHA, n_init=N_INIT, seed=0)
+        d, _ = fgw_distance(t1, t2, alpha=alpha, n_init=N_INIT, seed=0)
     else:
         raise ValueError(f"unknown kind: {kind!r}")
 
-    return {"Q": Q, "kind": kind, "seed": seed, "d": d,
+    return {"alpha": alpha, "Q": Q, "kind": kind, "seed": seed, "d": d,
             "theta_a": theta_a, "theta_b": theta_b,
             "n_keep_a": n_keep_a, "n_keep_b": n_keep_b}
 
@@ -241,24 +243,30 @@ def main() -> None:
     print(f"Project root : {ROOT}")
     print(f"Result path  : {result_path}")
     print(f"Pair         : {PAIR}  on  {DATASET}")
-    print(f"Settings     : alpha={ALPHA}, beta={BETA}, n_init={N_INIT}, "
+    print(f"Settings     : beta={BETA}, n_init={N_INIT}, "
           f"solver_seeds={N_SOLVER_SEEDS}, perm_seeds={N_PERM_SEEDS}")
+    print(f"alpha axis   : {ALPHA_AXIS}")
     print(f"Q axis       : {QUANTILES}")
     print(f"Workers      : {n_workers}")
 
-    # Build job list (50 FGW calls = 5 Q x (5 real + 5 random)).
-    jobs: list[tuple[float, str, int]] = []
-    for Q in QUANTILES:
-        for s in range(N_SOLVER_SEEDS):
-            jobs.append((Q, "real", s))
-        for s in range(N_PERM_SEEDS):
-            jobs.append((Q, "random", s))
+    # Build job list: |alpha_axis| * |QUANTILES| * (real + random) seeds.
+    jobs: list[tuple[float, float, str, int]] = []
+    for alpha in ALPHA_AXIS:
+        for Q in QUANTILES:
+            for s in range(N_SOLVER_SEEDS):
+                jobs.append((alpha, Q, "real", s))
+            for s in range(N_PERM_SEEDS):
+                jobs.append((alpha, Q, "random", s))
     print(f"Total jobs   : {len(jobs)}\n")
 
-    # Run pool.
+    # Run pool. raw[(alpha, Q)] holds the per-cell aggregation state.
     t0 = time.time()
-    raw: dict[float, dict] = {Q: {"real": {}, "random": {}, "theta_a": None,
-                                  "theta_b_real": None} for Q in QUANTILES}
+    raw: dict[tuple[float, float], dict] = {
+        (a, Q): {"real": {}, "random": {}, "theta_a": None,
+                 "theta_b_real": None, "n_keep_a": None,
+                 "n_keep_b_real": None, "n_keep_b_rand": []}
+        for a in ALPHA_AXIS for Q in QUANTILES
+    }
     completed = 0
     with ProcessPoolExecutor(max_workers=n_workers,
                              initializer=_worker_init,
@@ -266,69 +274,75 @@ def main() -> None:
         futs = [ex.submit(_worker_compute, job) for job in jobs]
         for f in as_completed(futs):
             r = f.result()
-            Q, kind, seed = r["Q"], r["kind"], r["seed"]
-            raw[Q][kind][seed] = (r["d"], r["theta_b"])
-            raw[Q]["theta_a"] = r["theta_a"]
-            raw[Q]["n_keep_a"] = r["n_keep_a"]
+            alpha, Q, kind, seed = r["alpha"], r["Q"], r["kind"], r["seed"]
+            cell = raw[(alpha, Q)]
+            cell[kind][seed] = (r["d"], r["theta_b"])
+            cell["theta_a"] = r["theta_a"]
+            cell["n_keep_a"] = r["n_keep_a"]
             if kind == "real":
-                raw[Q]["theta_b_real"] = r["theta_b"]
-                raw[Q]["n_keep_b_real"] = r["n_keep_b"]
+                cell["theta_b_real"] = r["theta_b"]
+                cell["n_keep_b_real"] = r["n_keep_b"]
             else:
-                raw[Q].setdefault("n_keep_b_rand", []).append(r["n_keep_b"])
+                cell["n_keep_b_rand"].append(r["n_keep_b"])
             completed += 1
-            print(f"[{completed:>3}/{len(jobs)}]  Q={Q:>6.3f}  {kind:>6}  "
-                  f"seed={seed}  d={r['d']:.4f}  "
-                  f"theta_b={r['theta_b']:.4f}  "
-                  f"|V|_keep=({r['n_keep_a']},{r['n_keep_b']})  "
+            print(f"[{completed:>3}/{len(jobs)}]  alpha={alpha:.2f}  Q={Q:>6.3f}  "
+                  f"{kind:>6}  seed={seed}  d={r['d']:.4f}  "
+                  f"|V|=({r['n_keep_a']},{r['n_keep_b']})  "
                   f"(t={time.time() - t0:.0f}s)",
                   flush=True)
 
-    # Aggregate per Q.
+    # Aggregate per (alpha, Q).
     results: dict[str, dict] = {}
-    for Q in QUANTILES:
-        real_d = np.array([raw[Q]["real"][s][0] for s in range(N_SOLVER_SEEDS)])
-        rand_d = np.array([raw[Q]["random"][s][0] for s in range(N_PERM_SEEDS)])
-        real_S = np.exp(-real_d)
-        rand_S = np.exp(-rand_d)
-        gap_d = float(rand_d.mean() - real_d.mean())
-        noise = max(float(real_d.std()), float(rand_d.std()), 1e-9)
-        snr = gap_d / noise
+    for alpha in ALPHA_AXIS:
+        for Q in QUANTILES:
+            cell = raw[(alpha, Q)]
+            real_d = np.array([cell["real"][s][0] for s in range(N_SOLVER_SEEDS)])
+            rand_d = np.array([cell["random"][s][0] for s in range(N_PERM_SEEDS)])
+            real_S = np.exp(-real_d)
+            rand_S = np.exp(-rand_d)
+            gap_d = float(rand_d.mean() - real_d.mean())
+            noise = max(float(real_d.std()), float(rand_d.std()), 1e-9)
+            snr = gap_d / noise
 
-        results[f"{Q}"] = dict(
-            Q=Q,
-            theta_a=float(raw[Q]["theta_a"]),
-            theta_b_real=float(raw[Q]["theta_b_real"]),
-            n_keep_a=int(raw[Q]["n_keep_a"]),
-            n_keep_b_real=int(raw[Q]["n_keep_b_real"]),
-            n_keep_b_rand_mean=float(np.mean(raw[Q]["n_keep_b_rand"])),
-            real_d_mean=float(real_d.mean()), real_d_std=float(real_d.std()),
-            rand_d_mean=float(rand_d.mean()), rand_d_std=float(rand_d.std()),
-            real_S_mean=float(real_S.mean()), real_S_std=float(real_S.std()),
-            rand_S_mean=float(rand_S.mean()), rand_S_std=float(rand_S.std()),
-            gap_d=gap_d, snr=snr,
-            real_d=[float(x) for x in real_d],
-            rand_d=[float(x) for x in rand_d],
-        )
+            results[f"a{alpha}_Q{Q}"] = dict(
+                alpha=alpha, Q=Q,
+                theta_a=float(cell["theta_a"]),
+                theta_b_real=float(cell["theta_b_real"]),
+                n_keep_a=int(cell["n_keep_a"]),
+                n_keep_b_real=int(cell["n_keep_b_real"]),
+                n_keep_b_rand_mean=float(np.mean(cell["n_keep_b_rand"])),
+                real_d_mean=float(real_d.mean()), real_d_std=float(real_d.std()),
+                rand_d_mean=float(rand_d.mean()), rand_d_std=float(rand_d.std()),
+                real_S_mean=float(real_S.mean()), real_S_std=float(real_S.std()),
+                rand_S_mean=float(rand_S.mean()), rand_S_std=float(rand_S.std()),
+                gap_d=gap_d, snr=snr,
+                real_d=[float(x) for x in real_d],
+                rand_d=[float(x) for x in rand_d],
+            )
 
-    # Print summary table.
+    # Print summary table: one block per alpha, rows = Q.
     print()
-    print(f"{'Q':>6s}  {'realS_mean':>10s}  {'randS_mean':>10s}  {'gap_d':>8s}  "
-          f"{'SNR':>7s}  {'theta_a':>9s}  {'theta_b':>9s}  "
-          f"{'|V|_a':>7s}  {'|V|_b_r':>9s}  {'|V|_b_p':>9s}")
-    print("-" * 110)
-    for Q in QUANTILES:
-        r = results[f"{Q}"]
-        print(f"{Q:>6.3f}  {r['real_S_mean']:>10.4f}  {r['rand_S_mean']:>10.4f}  "
-              f"{r['gap_d']:>+8.4f}  {r['snr']:>7.1f}  "
-              f"{r['theta_a']:>9.4f}  {r['theta_b_real']:>9.4f}  "
-              f"{r['n_keep_a']:>7d}  {r['n_keep_b_real']:>9d}  "
-              f"{r['n_keep_b_rand_mean']:>9.0f}")
+    for alpha in ALPHA_AXIS:
+        print(f"--- alpha = {alpha} ---")
+        print(f"{'Q':>6s}  {'realS':>8s}  {'randS':>8s}  {'gap_S':>+8s}  "
+              f"{'gap_d':>+8s}  {'SNR':>7s}  {'|V|_a':>6s}  "
+              f"{'|V|_b_r':>8s}  {'|V|_b_p':>8s}")
+        print("-" * 84)
+        for Q in QUANTILES:
+            r = results[f"a{alpha}_Q{Q}"]
+            gap_S = r["real_S_mean"] - r["rand_S_mean"]
+            print(f"{Q:>6.3f}  {r['real_S_mean']:>8.4f}  {r['rand_S_mean']:>8.4f}  "
+                  f"{gap_S:>+8.4f}  {r['gap_d']:>+8.4f}  {r['snr']:>7.1f}  "
+                  f"{r['n_keep_a']:>6d}  {r['n_keep_b_real']:>8d}  "
+                  f"{r['n_keep_b_rand_mean']:>8.0f}")
+        print()
 
     meta = dict(
         pair=list(PAIR), dataset=DATASET,
-        alpha=ALPHA, beta=BETA, n_init=N_INIT,
+        beta=BETA, n_init=N_INIT,
         n_solver_seeds=N_SOLVER_SEEDS, n_perm_seeds=N_PERM_SEEDS,
-        quantiles=QUANTILES, n_workers=n_workers,
+        alpha_axis=ALPHA_AXIS, quantiles=QUANTILES,
+        n_workers=n_workers,
         wallclock_s=time.time() - t0,
     )
     out_path.parent.mkdir(parents=True, exist_ok=True)
