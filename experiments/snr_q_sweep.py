@@ -39,6 +39,7 @@ torch.set_num_threads(1)
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 from experiments.fgw import build_triple, fgw_distance  # noqa: E402
+from experiments.run_alpha_beta_sweep import _subset_triple  # noqa: E402
 
 
 # ---------------------------------------------------------------------------
@@ -104,29 +105,52 @@ def _worker_init(result_path: str, pair: tuple[str, str], dataset: str) -> None:
     _WORKER_DAGS = (d_a, d_b)
 
 
+def _isolated_keep_mask(dag: dict, theta: float) -> np.ndarray:
+    """Same filter as run_alpha_beta_sweep.build_triple_at_Q:
+    keep a vertex iff it has at least one surviving forward in- or out-edge
+    above threshold."""
+    W = dag["W_softmax"]
+    L = W.shape[0]
+    s_idx = torch.arange(L).view(-1, 1, 1, 1)
+    r_idx = torch.arange(L).view(1, 1, -1, 1)
+    fwd = (s_idx < r_idx).expand_as(W)
+    survive = (torch.abs(W) > theta) & fwd
+    out_sparse = survive.sum(dim=(2, 3)).reshape(-1).cpu().numpy()
+    in_sparse  = survive.sum(dim=(0, 1)).reshape(-1).cpu().numpy()
+    return (out_sparse > 0) | (in_sparse > 0)
+
+
+def _build_filtered_triple(dag: dict, theta: float):
+    """Build a triple at BETA, edge_threshold=theta, then drop vertices
+    isolated in the sparsified graph (matches the headline sweep)."""
+    triple = build_triple(dag, beta=BETA, edge_threshold=theta)
+    keep_mask = _isolated_keep_mask(dag, theta)
+    return _subset_triple(triple, keep_mask), int(keep_mask.sum())
+
+
 def _worker_compute(job: tuple[float, str, int]) -> dict:
-    """One FGW call: (Q, kind, seed) -> distance + the two thetas used."""
+    """One FGW call: (Q, kind, seed) -> distance + thresholds + kept-vertex counts."""
     assert _WORKER_DAGS is not None
     Q, kind, seed = job
     d_a, d_b = _WORKER_DAGS
 
     theta_a = q_threshold(d_a, Q)
+    t1, n_keep_a = _build_filtered_triple(d_a, theta_a)
     if kind == "real":
         theta_b = q_threshold(d_b, Q)
-        t1 = build_triple(d_a, beta=BETA, edge_threshold=theta_a)
-        t2 = build_triple(d_b, beta=BETA, edge_threshold=theta_b)
+        t2, n_keep_b = _build_filtered_triple(d_b, theta_b)
         d, _ = fgw_distance(t1, t2, alpha=ALPHA, n_init=N_INIT, seed=seed)
     elif kind == "random":
         d_b_rand = shuffle_edges(d_b, seed + 1000)
         theta_b = q_threshold(d_b_rand, Q)
-        t1 = build_triple(d_a, beta=BETA, edge_threshold=theta_a)
-        t2 = build_triple(d_b_rand, beta=BETA, edge_threshold=theta_b)
+        t2, n_keep_b = _build_filtered_triple(d_b_rand, theta_b)
         d, _ = fgw_distance(t1, t2, alpha=ALPHA, n_init=N_INIT, seed=0)
     else:
         raise ValueError(f"unknown kind: {kind!r}")
 
     return {"Q": Q, "kind": kind, "seed": seed, "d": d,
-            "theta_a": theta_a, "theta_b": theta_b}
+            "theta_a": theta_a, "theta_b": theta_b,
+            "n_keep_a": n_keep_a, "n_keep_b": n_keep_b}
 
 
 # ---------------------------------------------------------------------------
@@ -176,12 +200,18 @@ def main() -> None:
             Q, kind, seed = r["Q"], r["kind"], r["seed"]
             raw[Q][kind][seed] = (r["d"], r["theta_b"])
             raw[Q]["theta_a"] = r["theta_a"]
+            raw[Q]["n_keep_a"] = r["n_keep_a"]
             if kind == "real":
                 raw[Q]["theta_b_real"] = r["theta_b"]
+                raw[Q]["n_keep_b_real"] = r["n_keep_b"]
+            else:
+                raw[Q].setdefault("n_keep_b_rand", []).append(r["n_keep_b"])
             completed += 1
             print(f"[{completed:>3}/{len(jobs)}]  Q={Q:>6.3f}  {kind:>6}  "
                   f"seed={seed}  d={r['d']:.4f}  "
-                  f"theta_b={r['theta_b']:.4f}  (t={time.time() - t0:.0f}s)",
+                  f"theta_b={r['theta_b']:.4f}  "
+                  f"|V|_keep=({r['n_keep_a']},{r['n_keep_b']})  "
+                  f"(t={time.time() - t0:.0f}s)",
                   flush=True)
 
     # Aggregate per Q.
@@ -199,6 +229,9 @@ def main() -> None:
             Q=Q,
             theta_a=float(raw[Q]["theta_a"]),
             theta_b_real=float(raw[Q]["theta_b_real"]),
+            n_keep_a=int(raw[Q]["n_keep_a"]),
+            n_keep_b_real=int(raw[Q]["n_keep_b_real"]),
+            n_keep_b_rand_mean=float(np.mean(raw[Q]["n_keep_b_rand"])),
             real_d_mean=float(real_d.mean()), real_d_std=float(real_d.std()),
             rand_d_mean=float(rand_d.mean()), rand_d_std=float(rand_d.std()),
             real_S_mean=float(real_S.mean()), real_S_std=float(real_S.std()),
@@ -210,16 +243,17 @@ def main() -> None:
 
     # Print summary table.
     print()
-    print(f"{'Q':>6s}  {'realS_mean':>10s}  {'realS_std':>10s}  "
-          f"{'randS_mean':>10s}  {'randS_std':>10s}  {'gap_d':>8s}  "
-          f"{'SNR':>7s}  {'theta_a':>9s}  {'theta_b':>9s}")
-    print("-" * 105)
+    print(f"{'Q':>6s}  {'realS_mean':>10s}  {'randS_mean':>10s}  {'gap_d':>8s}  "
+          f"{'SNR':>7s}  {'theta_a':>9s}  {'theta_b':>9s}  "
+          f"{'|V|_a':>7s}  {'|V|_b_r':>9s}  {'|V|_b_p':>9s}")
+    print("-" * 110)
     for Q in QUANTILES:
         r = results[f"{Q}"]
-        print(f"{Q:>6.3f}  {r['real_S_mean']:>10.4f}  {r['real_S_std']:>10.4f}  "
-              f"{r['rand_S_mean']:>10.4f}  {r['rand_S_std']:>10.4f}  "
+        print(f"{Q:>6.3f}  {r['real_S_mean']:>10.4f}  {r['rand_S_mean']:>10.4f}  "
               f"{r['gap_d']:>+8.4f}  {r['snr']:>7.1f}  "
-              f"{r['theta_a']:>9.4f}  {r['theta_b_real']:>9.4f}")
+              f"{r['theta_a']:>9.4f}  {r['theta_b_real']:>9.4f}  "
+              f"{r['n_keep_a']:>7d}  {r['n_keep_b_real']:>9d}  "
+              f"{r['n_keep_b_rand_mean']:>9.0f}")
 
     meta = dict(
         pair=list(PAIR), dataset=DATASET,
