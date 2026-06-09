@@ -1,6 +1,5 @@
 __pycache__/
 *.png
-*.pdf
 *.npz
 *.pt
 *.pyc
