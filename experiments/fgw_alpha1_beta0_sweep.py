@@ -64,7 +64,8 @@ N_TUPLES = len(TUPLES)
 QUANTILES = [0.9, 0.99, 0.999]
 ALPHA = 1.0
 BETA = 0.0
-N_INIT = 5         # match headline sweep
+N_INIT = 3         # baseline-comparison run; slightly noisier per pair but fine
+                   # for Pearson/Spearman vs spectral (was 5 in headline sweep)
 
 
 # ---------------------------------------------------------------------------
