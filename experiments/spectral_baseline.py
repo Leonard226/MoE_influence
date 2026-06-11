@@ -126,17 +126,17 @@ def spectral_signature(dag: dict, Q: float, top_k: int = TOP_K) -> tuple[np.ndar
     inv_sqrt_d_in  = 1.0 / np.sqrt(d_in  + eps)
     A_tilde = (inv_sqrt_d_out[:, None] * A) * inv_sqrt_d_in[None, :]
 
-    # Top-k singular values. svds wants k <= n_keep - 1; pad result with zeros
-    # to length top_k for cross-graph compatibility.
+    # Top-k singular values. Use randomised SVD (sklearn) which converges in
+    # fixed iterations regardless of spectrum clustering. The sparse ARPACK
+    # Lanczos path (scipy svds) iterates indefinitely when many singular values
+    # cluster at 1 (which happens at high Q on disconnected sparsified graphs).
     k = min(top_k, n_keep - 1)
     try:
-        from scipy.sparse import csr_matrix
-        from scipy.sparse.linalg import svds
-        # svds is faster on sparse input; A_tilde is generally dense post-norm but
-        # the sparse Lanczos path still wins for large matrices.
-        sigma = svds(csr_matrix(A_tilde), k=k, which="LM", return_singular_vectors=False)
+        from sklearn.utils.extmath import randomized_svd
+        _, sigma, _ = randomized_svd(A_tilde, n_components=k,
+                                     n_iter=5, random_state=0)
     except Exception:
-        # Fall back to dense SVD if Lanczos fails (small matrix, ill-conditioned, etc.).
+        # Fall back to dense SVD on small/pathological matrices.
         sigma = np.linalg.svd(A_tilde, compute_uv=False)[:k]
 
     sigma = np.sort(np.asarray(sigma, dtype=np.float64))[::-1]  # descending
