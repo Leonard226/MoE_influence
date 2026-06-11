@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import multiprocessing as mp
 import os
 import sys
 import time
@@ -213,7 +214,10 @@ def main() -> None:
     n_keep: dict[int, dict[float, int]] = {i: {} for i in range(N_TUPLES)}
     completed = 0
 
-    with ProcessPoolExecutor(max_workers=n_workers) as ex:
+    # 'spawn' context avoids fork-related deadlocks when workers inherit a
+    # PyTorch-initialised parent process. Each worker starts fresh.
+    ctx = mp.get_context("spawn")
+    with ProcessPoolExecutor(max_workers=n_workers, mp_context=ctx) as ex:
         futs = [ex.submit(_worker_compute, j) for j in jobs]
         for f in as_completed(futs):
             r = f.result()
