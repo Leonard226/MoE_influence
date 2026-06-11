@@ -188,42 +188,69 @@ def main() -> None:
     t0 = time.time()
     ctx = mp.get_context("spawn")
     completed = 0
+    failed = 0
     last_print = 0.0
+    last_save = 0.0
+    save_interval = 60.0   # checkpoint to disk at most once a minute
 
-    with ProcessPoolExecutor(max_workers=n_workers, mp_context=ctx) as ex:
-        futs = [ex.submit(_worker_compute, j) for j in jobs]
-        for f in as_completed(futs):
-            r = f.result()
-            src, tgt, qi, d = r["src"], r["tgt"], r["q"], r["d"]
-            s = float(np.exp(-d))
-            S[src, tgt, qi] = s
-            S[tgt, src, qi] = s
-            completed += 1
-            # Throttle prints: at most every 5 seconds.
-            now = time.time()
-            if now - last_print > 5.0 or completed in (1, len(jobs)):
-                last_print = now
-                src_m, src_t = TUPLES[src]
-                tgt_m, tgt_t = TUPLES[tgt]
-                print(f"  [{completed:>5d}/{len(jobs)}]  "
-                      f"{src_m:<18s}/{src_t:<12s} x {tgt_m:<18s}/{tgt_t:<12s}  "
-                      f"Q={QUANTILES[qi]:>5.3f}  S={s:.4f}  "
-                      f"(t={now - t0:.0f}s)", flush=True)
+    def _save_checkpoint(tag: str = "") -> None:
+        np.savez(
+            out_path,
+            S=S,
+            tuples=np.array([f"{m}/{t}" for m, t in TUPLES], dtype=object),
+            models=np.array(MODELS, dtype=object),
+            tasks=np.array(TASKS, dtype=object),
+            quantiles=np.array(QUANTILES),
+            alpha=ALPHA, beta=BETA, n_init=N_INIT,
+        )
+        if tag:
+            print(f"    [checkpoint {tag}] saved {out_path.name}  "
+                  f"NaN={int(np.isnan(S).sum())}",
+                  flush=True)
+
+    try:
+        with ProcessPoolExecutor(max_workers=n_workers, mp_context=ctx) as ex:
+            futs = {ex.submit(_worker_compute, j): j for j in jobs}
+            for f in as_completed(futs):
+                try:
+                    r = f.result()
+                    src, tgt, qi, d = r["src"], r["tgt"], r["q"], r["d"]
+                    s = float(np.exp(-d))
+                    S[src, tgt, qi] = s
+                    S[tgt, src, qi] = s
+                except Exception as e:
+                    # Per-future failure (worker OOM-killed, solver crash, etc.):
+                    # leave the cell as NaN and continue.
+                    failed += 1
+                    job = futs[f]
+                    src, tgt, qi, _ = job
+                    src_m, src_t = TUPLES[src]
+                    tgt_m, tgt_t = TUPLES[tgt]
+                    if failed <= 20 or failed % 50 == 0:
+                        print(f"  FAIL [{failed}]: src={src_m}/{src_t}  "
+                              f"tgt={tgt_m}/{tgt_t}  Q={QUANTILES[qi]}  "
+                              f"reason={type(e).__name__}: {str(e)[:120]}",
+                              flush=True)
+                completed += 1
+                now = time.time()
+                if now - last_print > 5.0 or completed in (1, len(jobs)):
+                    last_print = now
+                    print(f"  [{completed:>5d}/{len(jobs)}]  "
+                          f"ok={completed - failed}  fail={failed}  "
+                          f"(t={now - t0:.0f}s)", flush=True)
+                if now - last_save > save_interval:
+                    last_save = now
+                    _save_checkpoint(tag=f"{completed}/{len(jobs)}")
+    except Exception as e:
+        print(f"\n!! Pool died: {type(e).__name__}: {e}")
+        print(f"   Salvaging {completed - failed} completed cells.")
 
     print(f"\nDone in {time.time() - t0:.0f}s.")
-    print(f"NaN cells remaining: {int(np.isnan(S).sum())}")
+    print(f"  Completed: {completed - failed}/{len(jobs)}")
+    print(f"  Failed:    {failed}/{len(jobs)}")
+    print(f"  NaN cells remaining: {int(np.isnan(S).sum())}")
 
-    np.savez(
-        out_path,
-        S=S,
-        tuples=np.array([f"{m}/{t}" for m, t in TUPLES], dtype=object),
-        models=np.array(MODELS, dtype=object),
-        tasks=np.array(TASKS, dtype=object),
-        quantiles=np.array(QUANTILES),
-        alpha=ALPHA,
-        beta=BETA,
-        n_init=N_INIT,
-    )
+    _save_checkpoint()
     print(f"Saved: {out_path}\n")
 
     # Quick comparison vs spectral baseline.
