@@ -87,12 +87,15 @@ def spectral_signature(dag: dict, Q: float, top_k: int = TOP_K) -> tuple[np.ndar
     fwd = (s_idx < r_idx).expand_as(W)
 
     # Per-graph Q-threshold over POSITIVE forward edges (matches the sweep).
+    # Use numpy.quantile, not torch.quantile: torch errors out above ~16M
+    # elements and Qwen3-235B has ~72M forward edges. Same workaround as
+    # run_alpha_beta_sweep._edge_quantile_threshold.
     if Q == 0.0:
         theta = 0.0
     else:
-        vals = torch.abs(W[fwd])
-        vals = vals[vals > 0]
-        theta = float(torch.quantile(vals, Q)) if vals.numel() else 0.0
+        edge_vals = torch.abs(W[fwd]).cpu().numpy().astype(np.float64)
+        nz = edge_vals[edge_vals > 0]
+        theta = float(np.quantile(nz, Q)) if len(nz) else 0.0
 
     # Build the sparsified forward adjacency.
     keep_edge = (torch.abs(W) > theta) & fwd
