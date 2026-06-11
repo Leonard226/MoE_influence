@@ -144,20 +144,27 @@ def spectral_signature(dag: dict, Q: float, top_k: int = TOP_K) -> tuple[np.ndar
 
 
 # ---------------------------------------------------------------------------
-# Worker: load one DAG, compute its signature at each Q.
+# Worker: compute the signature for one (model, task, Q) triple.
+#
+# Per-worker DAG cache: if the same DAG is needed again for a different Q on
+# the same worker, the second call reuses the in-memory copy. This makes the
+# fine-grained 192-job split free in terms of redundant disk I/O.
 # ---------------------------------------------------------------------------
-def _worker_compute(args: tuple[int, str, str, str]) -> dict:
-    """Compute the spectral signatures for one (model, task) DAG at all Qs."""
-    idx, model, task, result_path = args
-    path = Path(result_path) / "circuits" / f"dag_{model}_{task}.pt"
-    dag = torch.load(path, weights_only=False)
-    out = {"idx": idx, "model": model, "task": task,
-           "signatures": {}, "n_keep": {}}
-    for Q in QUANTILES:
-        sig, n_keep = spectral_signature(dag, Q, top_k=TOP_K)
-        out["signatures"][Q] = sig
-        out["n_keep"][Q] = n_keep
-    return out
+_WORKER_DAG_CACHE: dict[tuple[str, str], dict] = {}
+
+
+def _worker_compute(args: tuple[int, str, str, float, str]) -> dict:
+    """Compute the spectral signature for ONE (model, task, Q) job."""
+    idx, model, task, Q, result_path = args
+    key = (model, task)
+    dag = _WORKER_DAG_CACHE.get(key)
+    if dag is None:
+        path = Path(result_path) / "circuits" / f"dag_{model}_{task}.pt"
+        dag = torch.load(path, weights_only=False)
+        _WORKER_DAG_CACHE[key] = dag
+    sig, n_keep = spectral_signature(dag, Q, top_k=TOP_K)
+    return {"idx": idx, "model": model, "task": task, "Q": Q,
+            "signature": sig, "n_keep": n_keep}
 
 
 # ---------------------------------------------------------------------------
@@ -187,24 +194,34 @@ def main() -> None:
     print(f"Workers      : {n_workers}")
     print()
 
-    # Stage 1: compute signatures in parallel (one job per DAG).
-    print("Stage 1: computing spectral signatures (one SVD per DAG per Q) ...")
+    # Stage 1: compute signatures in parallel.
+    # 192 fine-grained jobs (one per (model, task, Q)) so the 128-core pool
+    # stays saturated. The per-worker DAG cache means re-using the same DAG
+    # for multiple Q values is free in terms of disk I/O.
+    print("Stage 1: computing spectral signatures (one SVD per DAG-Q) ...")
     t0 = time.time()
-    jobs = [(i, m, t, result_path) for i, (m, t) in enumerate(TUPLES)]
+    jobs = [(i, m, t, Q, result_path)
+            for i, (m, t) in enumerate(TUPLES)
+            for Q in QUANTILES]
+    print(f"  Total jobs: {len(jobs)}  (fine-grained: 1 per (model, task, Q))\n")
 
-    # signatures[idx, Q] = ndarray of length TOP_K
-    signatures: dict[int, dict[float, np.ndarray]] = {}
-    n_keep: dict[int, dict[float, int]] = {}
+    # signatures[idx][Q] = ndarray of length TOP_K
+    signatures: dict[int, dict[float, np.ndarray]] = {i: {} for i in range(N_TUPLES)}
+    n_keep: dict[int, dict[float, int]] = {i: {} for i in range(N_TUPLES)}
+    completed = 0
 
     with ProcessPoolExecutor(max_workers=n_workers) as ex:
         futs = [ex.submit(_worker_compute, j) for j in jobs]
         for f in as_completed(futs):
             r = f.result()
             idx = r["idx"]
-            signatures[idx] = r["signatures"]
-            n_keep[idx] = r["n_keep"]
-            print(f"  [{idx + 1:>2d}/{N_TUPLES}] {r['model']:<18s}/{r['task']:<12s}  "
-                  f"|V|_keep={r['n_keep']}  "
+            Q = r["Q"]
+            signatures[idx][Q] = r["signature"]
+            n_keep[idx][Q] = r["n_keep"]
+            completed += 1
+            print(f"  [{completed:>3d}/{len(jobs)}] {r['model']:<18s}/{r['task']:<12s}  "
+                  f"Q={Q:>6.3f}  |V|_keep={r['n_keep']:>5d}  "
+                  f"sig[0:3]={r['signature'][:3]}  "
                   f"(t={time.time() - t0:.0f}s)", flush=True)
 
     print(f"\nStage 1 done in {time.time() - t0:.0f}s.\n")
