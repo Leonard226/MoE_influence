@@ -187,7 +187,11 @@ def _apply_ablation(triple, ablation_name: str):
 _WORKER_DAGS: dict[tuple[str, str], dict] = {}
 _WORKER_CLASSES: dict[tuple[str, str], dict] = {}
 _WORKER_TRIPLES: OrderedDict = OrderedDict()
-_TRIPLE_CACHE_CAP = 6   # keep at most 6 base triples per worker
+_TRIPLE_CACHE_CAP = 3   # keep at most 3 base triples per worker.
+                        # Lowered from 6 after OOM cascade on piora-3GB-per-cpu:
+                        # Qwen3-235B's base triple is ~600 MB, so 6 cached triples
+                        # = 3.6 GB JUST IN CACHE. 3 entries (= source + target +
+                        # one staging slot) is enough for paired-job locality.
 
 
 def _get_dag(model: str, task: str, result_path: str) -> dict:
