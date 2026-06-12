@@ -287,7 +287,19 @@ def _process_one_pair_task(pair_task_idx: int, result_path: str, out_dir: Path) 
     print(f"Pair-task    : idx={pair_task_idx}  pair={mi},{mj}  task_idx={t_idx}")
     print(f"  src        : {model_i} / {task}")
     print(f"  tgt        : {model_j} / {task}")
-    print(f"  Output     : {out_npz}\n")
+    print(f"  Output     : {out_npz}")
+
+    # Skip if the output already exists and is non-empty (resume-friendly).
+    if out_npz.exists() and out_npz.stat().st_size > 0:
+        d = np.load(out_npz, allow_pickle=True)
+        n_done = int((~np.isnan(d["S"])).sum())
+        if n_done == len(ABLATION_NAMES) * len(QUANTILES):
+            print(f"  SKIP: output already complete ({n_done} cells)\n")
+            return
+        else:
+            print(f"  output is partial ({n_done} cells); recomputing\n")
+    else:
+        print()
 
     t0 = time.time()
     # Load DAGs + classifications.
