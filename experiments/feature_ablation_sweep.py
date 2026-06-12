@@ -249,6 +249,108 @@ def _worker_compute(args: tuple[int, int, int, int, int, str]) -> dict:
 
 
 # ---------------------------------------------------------------------------
+# Per-pair-task processing (SLURM-array-friendly path, NOT pool-based).
+#
+# One SLURM array task per (model_pair, dataset) tuple. Each task:
+#   1. Loads the 2 DAGs + 2 classifications.
+#   2. Builds the 6 base triples (2 models x 3 Q values) sequentially.
+#   3. Iterates 7 ablations x 3 Q values = 21 FGW calls sequentially.
+#   4. Saves a (7, 3) tensor + (mi, mj, t_idx) metadata.
+#
+# Total: 28 model-pairs x 8 tasks = 224 SLURM array tasks. Each is fully
+# independent: no ProcessPool to break, no cascading failures. If one task
+# OOMs on Qwen3-235B x Qwen3-235B it's an isolated loss, not catastrophic.
+# ---------------------------------------------------------------------------
+def _pair_idx_to_mij(pair_idx: int, n_m: int = 8) -> tuple[int, int]:
+    """Map pair_idx in [0, C(n_m, 2)) to (mi, mj) with mi < mj.
+    Lexicographic order: (0,1), (0,2), ..., (0, n_m-1), (1,2), ..."""
+    pairs = [(i, j) for i in range(n_m) for j in range(i + 1, n_m)]
+    return pairs[pair_idx]
+
+
+def _process_one_pair_task(pair_task_idx: int, result_path: str, out_dir: Path) -> None:
+    """Sequentially compute (7 ablations x 3 Q values) for one (m_i, m_j, task)."""
+    n_t = len(TASKS)
+    n_pairs = len(MODELS) * (len(MODELS) - 1) // 2
+    n_total = n_pairs * n_t
+    if pair_task_idx < 0 or pair_task_idx >= n_total:
+        print(f"ERROR: --pair-task-idx={pair_task_idx} not in [0, {n_total})")
+        sys.exit(1)
+
+    pair_idx = pair_task_idx // n_t
+    t_idx = pair_task_idx % n_t
+    mi, mj = _pair_idx_to_mij(pair_idx, n_m=len(MODELS))
+    model_i, model_j = MODELS[mi], MODELS[mj]
+    task = TASKS[t_idx]
+
+    out_npz = out_dir / f"S_loo_pair_{pair_task_idx:03d}.npz"
+    print(f"Pair-task    : idx={pair_task_idx}  pair={mi},{mj}  task_idx={t_idx}")
+    print(f"  src        : {model_i} / {task}")
+    print(f"  tgt        : {model_j} / {task}")
+    print(f"  Output     : {out_npz}\n")
+
+    t0 = time.time()
+    # Load DAGs + classifications.
+    dag_i = torch.load(Path(result_path) / "circuits" / f"dag_{model_i}_{task}.pt",
+                       weights_only=False)
+    dag_j = torch.load(Path(result_path) / "circuits" / f"dag_{model_j}_{task}.pt",
+                       weights_only=False)
+    with open(Path(result_path) / "circuits" / CACHE_DIR_NAME /
+              f"classify_{model_i}_{task}.pkl", "rb") as f:
+        cls_i = pickle.load(f)
+    with open(Path(result_path) / "circuits" / CACHE_DIR_NAME /
+              f"classify_{model_j}_{task}.pkl", "rb") as f:
+        cls_j = pickle.load(f)
+    print(f"  loaded DAGs + classifications ({time.time() - t0:.1f}s)", flush=True)
+
+    # Build 6 base triples (2 models x 3 Q values).
+    triples_i: dict[int, tuple] = {}
+    triples_j: dict[int, tuple] = {}
+    for q_idx, Q in enumerate(QUANTILES):
+        theta_i = q_threshold(dag_i, Q)
+        triples_i[q_idx], n_keep_i = _build_filtered_triple(dag_i, cls_i, theta_i)
+        theta_j = q_threshold(dag_j, Q)
+        triples_j[q_idx], n_keep_j = _build_filtered_triple(dag_j, cls_j, theta_j)
+        print(f"  built triples at Q={Q}: |V|_i={n_keep_i}, |V|_j={n_keep_j}  "
+              f"({time.time() - t0:.1f}s)", flush=True)
+
+    # Free DAGs + classifications -- we only need the triples from here on.
+    del dag_i, dag_j, cls_i, cls_j
+
+    # Iterate ablations x Q.
+    n_abl = len(ABLATION_NAMES)
+    n_q = len(QUANTILES)
+    S_one = np.full((n_abl, n_q), np.nan, dtype=np.float64)
+    n_failed = 0
+
+    for abl_idx, abl in enumerate(ABLATION_NAMES):
+        for q_idx, Q in enumerate(QUANTILES):
+            try:
+                t_i = _apply_ablation(triples_i[q_idx], abl)
+                t_j = _apply_ablation(triples_j[q_idx], abl)
+                d, _ = fgw_distance(t_i, t_j, alpha=ALPHA, n_init=N_INIT, seed=0)
+                S_one[abl_idx, q_idx] = float(np.exp(-d))
+                print(f"  abl={abl:<10s}  Q={Q:>5.3f}  S={S_one[abl_idx, q_idx]:.4f}  "
+                      f"({time.time() - t0:.1f}s)", flush=True)
+            except Exception as e:
+                n_failed += 1
+                print(f"  FAIL abl={abl} Q={Q}: {type(e).__name__}: {str(e)[:200]}",
+                      flush=True)
+
+    np.savez(
+        out_npz,
+        S=S_one,
+        mi=mi, mj=mj, t_idx=t_idx,
+        model_i=model_i, model_j=model_j, task=task,
+        ablations=np.array(ABLATION_NAMES, dtype=object),
+        quantiles=np.array(QUANTILES),
+        alpha=ALPHA, beta=BETA, n_init=N_INIT,
+    )
+    print(f"\nDone in {time.time() - t0:.1f}s.  Failed: {n_failed}/{n_abl * n_q}")
+    print(f"Saved: {out_npz}")
+
+
+# ---------------------------------------------------------------------------
 # Main.
 # ---------------------------------------------------------------------------
 def main() -> None:
@@ -261,9 +363,18 @@ def main() -> None:
                         help="How many SLURM array tasks split the job list "
                              "across nodes. Default 1 (single-node run).")
     parser.add_argument("--merge", action="store_true",
-                        help="Skip computation; merge all S_loo_chunk*.npz "
-                             "into S_loo.npz and run the analysis. Use this "
-                             "after all SLURM array tasks finish.")
+                        help="Skip computation; merge all S_loo_chunk*.npz AND "
+                             "S_loo_pair_*.npz files into S_loo.npz and run the "
+                             "analysis. Use this after all SLURM array tasks finish.")
+    parser.add_argument("--pair-task-idx", type=int, default=None,
+                        help="Per-pair-task mode: process ONE (model_pair, task) "
+                             "combination across all 7 ablations x 3 Q values "
+                             "sequentially in a single process. Index in "
+                             "[0, 224): pair_idx = idx // 8, t_idx = idx %% 8. "
+                             "Picks up SLURM_ARRAY_TASK_ID if not given. "
+                             "This mode is robust to single-job OOM (no shared "
+                             "ProcessPool) -- preferred over --chunk for "
+                             "production SLURM array runs.")
     args = parser.parse_args()
 
     with open(ROOT / "config.yaml") as f:
@@ -273,6 +384,14 @@ def main() -> None:
     out_dir.mkdir(parents=True, exist_ok=True)
     out_npz_final = out_dir / "S_loo.npz"
     out_json = out_dir / "loo_summary.json"
+
+    # -- Per-pair-task mode (preferred for SLURM array runs) ---------------
+    # If --pair-task-idx is set (explicitly or via SLURM_ARRAY_TASK_ID under
+    # a no-num-chunks invocation), short-circuit: do ONE (pair, task) tuple
+    # sequentially and exit. No ProcessPool, no cascade risk.
+    if args.pair_task_idx is not None:
+        _process_one_pair_task(args.pair_task_idx, result_path, out_dir)
+        return
 
     # Chunking config: either explicit --chunk, or pick up SLURM_ARRAY_TASK_ID.
     if args.chunk is None:
@@ -321,17 +440,34 @@ def main() -> None:
     # S[abl, q, t, mi, mj] tensor; symmetric in (mi, mj); diagonal NaN.
     S = np.full((n_abl, n_q, n_t, n_m, n_m), np.nan, dtype=np.float64)
 
-    # --- Merge-only path: combine partial chunks and run analysis, no compute. ---
+    # --- Merge-only path: combine partial results and run analysis, no compute. ---
     if args.merge:
         chunk_files = sorted(out_dir.glob("S_loo_chunk*_of_*.npz"))
-        if not chunk_files:
-            print(f"ERROR: --merge mode but no S_loo_chunk*_of_*.npz files in {out_dir}")
+        pair_files  = sorted(out_dir.glob("S_loo_pair_*.npz"))
+        if not chunk_files and not pair_files:
+            print(f"ERROR: --merge mode but no S_loo_chunk* or S_loo_pair_* files "
+                  f"in {out_dir}")
             sys.exit(1)
-        print(f"\nMerge mode: combining {len(chunk_files)} chunk files ...")
+        print(f"\nMerge mode: combining {len(chunk_files)} chunk file(s) "
+              f"and {len(pair_files)} pair-task file(s) ...")
+        # Pair-task files first (per-(pair, task), shape (n_abl, n_q)):
+        for f in pair_files:
+            d = np.load(f, allow_pickle=True)
+            S_pair = d["S"]                    # (n_abl, n_q)
+            mi = int(d["mi"]); mj = int(d["mj"]); t_idx = int(d["t_idx"])
+            non_nan = ~np.isnan(S_pair)
+            # Fill both (mi, mj) and (mj, mi) for symmetry.
+            for abl_idx in range(n_abl):
+                for q_idx in range(n_q):
+                    if non_nan[abl_idx, q_idx]:
+                        S[abl_idx, q_idx, t_idx, mi, mj] = S_pair[abl_idx, q_idx]
+                        S[abl_idx, q_idx, t_idx, mj, mi] = S_pair[abl_idx, q_idx]
+            n_filled = int(non_nan.sum())
+            print(f"  {f.name}: filled {n_filled} cells (mi={mi}, mj={mj}, t={t_idx})")
+        # Then chunk files (full-tensor shape, only some cells non-NaN):
         for f in chunk_files:
             d = np.load(f, allow_pickle=True)
             S_chunk = d["S"]
-            # Non-NaN entries from each chunk replace the (initially NaN) cells.
             non_nan = ~np.isnan(S_chunk)
             S[non_nan] = S_chunk[non_nan]
             print(f"  {f.name}: filled {int(non_nan.sum())} cells")
