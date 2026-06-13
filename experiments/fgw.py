@@ -249,6 +249,7 @@ def build_triple(dag: Dict[str, Any],
                  beta: float = 0.5,
                  edge_threshold: float = 0.0,
                  edge_tensor: str = "W_softmax",
+                 act_norm_method: str = "rank",
                  ) -> Tuple[np.ndarray, np.ndarray, np.ndarray, Dict[str, Any]]:
     """Construct the FGW triple (C, F, mass) for one routing DAG.
 
@@ -315,14 +316,30 @@ def build_triple(dag: Dict[str, Any],
 
     # 5. activation magnitude (Su et al. super-expert feature).
     # Raw `act` spans 3-5 orders of magnitude within a graph and another
-    # 10000x across models -- raw values would dominate the Wasserstein
-    # term and break cross-model comparison. Rank-normalise within graph
-    # so each vertex contributes its *rank* in [0, 1], matching the
-    # Su et al. super-expert criterion (top-ranked vertex = super-expert)
-    # and aligning scales with the other features.
+    # 100-10000x across models -- raw values would dominate the Wasserstein
+    # term and break cross-model comparison.
+    #
+    # Two normalisation choices:
+    #   "rank"     : within-graph rank in [0, 1]. Erases distribution shape:
+    #                two graphs with very different act distributions look
+    #                identical to the metric. (Legacy default.)
+    #   "log_max"  : log(1 + act) / log(1 + max(act)). Preserves dynamic range
+    #                and super-expert dominance while spreading the bulk of
+    #                the distribution across [0, 1]. Motivated by the per-model
+    #                Zipf curves (see main.tex, fig:act-distribution).
     act = dag["act"].float().reshape(-1)            # [n_verts]
-    ranks = act.argsort().argsort().float()         # rank within graph
-    act_norm = (ranks / max(float(ranks.max()), 1.0)).reshape(L, N)
+    if act_norm_method == "rank":
+        ranks = act.argsort().argsort().float()
+        act_norm = (ranks / max(float(ranks.max()), 1.0)).reshape(L, N)
+    elif act_norm_method == "log_max":
+        log_act = torch.log1p(act)
+        log_max = torch.log1p(act.max()).clamp(min=1e-12)
+        act_norm = (log_act / log_max).reshape(L, N)
+    else:
+        raise ValueError(
+            f"Unknown act_norm_method={act_norm_method!r}; "
+            "expected 'rank' or 'log_max'."
+        )
 
     # 6. token-class histogram
     if classification is not None and "top_prompt" in dag and "top_pos" in dag:

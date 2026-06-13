@@ -88,6 +88,12 @@ BETA = 1.0          # IRRELEVANT at alpha=0 (Wasserstein-only, C unused); but
                     # optimisation, identical FGW output as beta=0.5 here.
 N_INIT = 5          # matches headline sweep
 
+# Activation feature normalisation. Set from --act-norm CLI flag in main().
+# Defaults to "rank" so existing scripts and the per-pair-task workers behave
+# identically to before. With "log_max" the script writes to a separate output
+# directory (see main()) so the legacy results are preserved untouched.
+_ACT_NORM_METHOD = "rank"
+
 # Feature column indices in F (from experiments/fgw.py:324-330).
 #   depth, out, in, load, act = single columns (0..4)
 #   class_hist = 5 columns (5..9), the per-token-class histogram
@@ -155,11 +161,15 @@ def _isolated_keep_mask(dag: dict, theta: float) -> np.ndarray:
     return (out_sparse > 0) | (in_sparse > 0)
 
 
-def _build_filtered_triple(dag: dict, classification, theta: float):
+def _build_filtered_triple(dag: dict, classification, theta: float,
+                           act_norm_method: str = "rank"):
     """Build triple at BETA, edge_threshold=theta, then drop isolated vertices.
     PASSES the classification through so class_hist is meaningful (the alpha=0
-    Wasserstein term needs it). Matches run_alpha_beta_sweep.build_triple_at_Q."""
-    triple = build_triple(dag, classification, beta=BETA, edge_threshold=theta)
+    Wasserstein term needs it). Matches run_alpha_beta_sweep.build_triple_at_Q.
+    `act_norm_method` selects the activation feature normalisation ("rank" or
+    "log_max"); plumbed through to fgw.build_triple."""
+    triple = build_triple(dag, classification, beta=BETA, edge_threshold=theta,
+                          act_norm_method=act_norm_method)
     keep_mask = _isolated_keep_mask(dag, theta)
     return _subset_triple(triple, keep_mask), int(keep_mask.sum())
 
@@ -221,7 +231,8 @@ def _get_base_triple(model: str, task: str, q_idx: int, result_path: str):
     cls = _get_classification(model, task, result_path)
     Q = QUANTILES[q_idx]
     theta = q_threshold(dag, Q)
-    triple, _ = _build_filtered_triple(dag, cls, theta)
+    triple, _ = _build_filtered_triple(dag, cls, theta,
+                                       act_norm_method=_ACT_NORM_METHOD)
     _WORKER_TRIPLES[key] = triple
     while len(_WORKER_TRIPLES) > _TRIPLE_CACHE_CAP:
         _WORKER_TRIPLES.popitem(last=False)
@@ -320,9 +331,11 @@ def _process_one_pair_task(pair_task_idx: int, result_path: str, out_dir: Path) 
     triples_j: dict[int, tuple] = {}
     for q_idx, Q in enumerate(QUANTILES):
         theta_i = q_threshold(dag_i, Q)
-        triples_i[q_idx], n_keep_i = _build_filtered_triple(dag_i, cls_i, theta_i)
+        triples_i[q_idx], n_keep_i = _build_filtered_triple(
+            dag_i, cls_i, theta_i, act_norm_method=_ACT_NORM_METHOD)
         theta_j = q_threshold(dag_j, Q)
-        triples_j[q_idx], n_keep_j = _build_filtered_triple(dag_j, cls_j, theta_j)
+        triples_j[q_idx], n_keep_j = _build_filtered_triple(
+            dag_j, cls_j, theta_j, act_norm_method=_ACT_NORM_METHOD)
         print(f"  built triples at Q={Q}: |V|_i={n_keep_i}, |V|_j={n_keep_j}  "
               f"({time.time() - t0:.1f}s)", flush=True)
 
@@ -387,12 +400,34 @@ def main() -> None:
                              "This mode is robust to single-job OOM (no shared "
                              "ProcessPool) -- preferred over --chunk for "
                              "production SLURM array runs.")
+    parser.add_argument("--act-norm", type=str, default="rank",
+                        choices=["rank", "log_max"],
+                        help="Normalisation method for the activation feature "
+                             "passed through to fgw.build_triple. "
+                             "'rank' (default) reproduces the legacy behaviour. "
+                             "'log_max' uses log(1+act) / log(1+max(act)). "
+                             "When --act-norm log_max is set, results are "
+                             "written to .../feature_ablation_logact/ to keep "
+                             "the legacy rank-based results untouched.")
     args = parser.parse_args()
+
+    # Apply act-normalisation choice to the module-level global used by the
+    # triple-builder. Workers in per-pair-task mode (each SLURM array task is
+    # its own Python process) see this set; for chunk mode the spawn workers
+    # re-import the module and use its default value -- so chunk mode only
+    # works with the default 'rank'. Use --pair-task-idx for log_max runs.
+    global _ACT_NORM_METHOD
+    _ACT_NORM_METHOD = args.act_norm
 
     with open(ROOT / "config.yaml") as f:
         cfg = yaml.safe_load(f)
     result_path = cfg["result_path"]
-    out_dir = Path(result_path) / "circuits" / "feature_ablation"
+    # Route output to a separate directory when using a non-legacy
+    # act-normalisation so existing results are preserved.
+    if args.act_norm == "log_max":
+        out_dir = Path(result_path) / "circuits" / "feature_ablation_logact"
+    else:
+        out_dir = Path(result_path) / "circuits" / "feature_ablation"
     out_dir.mkdir(parents=True, exist_ok=True)
     out_npz_final = out_dir / "S_loo.npz"
     out_json = out_dir / "loo_summary.json"
