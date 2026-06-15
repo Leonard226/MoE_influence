@@ -1,30 +1,30 @@
 #!/bin/bash
-#SBATCH --array=0-63
-#SBATCH --nodelist=piora3,piora4
+#SBATCH --array=0-127
+#SBATCH --nodelist=piora3,piora4,piora7,piora8
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=4
 #SBATCH --job-name="abQ-sweep"
 #SBATCH --output=logs/abQ_sweep_%A_%a.log
 #
-# Headline α × β=0.5 × Q sweep under the new log-max load and log-max act
-# normalisations. One SLURM array task per source-idx (64 sources total).
+# Headline α × β=0.5 × Q sweep under log-max load + log-max act normalisations.
+#
+# Parallelism layout:
+#   - 64 sources × 2 target chunks = 128 SLURM array tasks.
+#   - 4 nodes (piora3, piora4, piora7, piora8) × 128 cores / 4 cpus-per-task
+#     = 128 concurrent slots → all 128 tasks run in a single wave.
+#   - OMP/MKL/OPENBLAS pinned to 1 thread (POT/scipy is single-threaded).
+#
+# ARRAY_IDX mapping: SOURCE_IDX = ARRAY_IDX // 2,  TARGET_CHUNK = ARRAY_IDX % 2.
 #
 # Submit:
 #   sbatch experiments/launch_alpha_beta_sweep.sh
 #
-# Layout on the cluster:
-#   - 64 array tasks, distributed across piora3 + piora4.
-#   - Each task: --cpus-per-task=4. With 128 cores/node, 32 tasks fit per
-#     node = 64 concurrent across the two nodes (one per source-idx).
-#   - OMP/MKL/OPENBLAS pinned to 1 thread so co-located tasks don't
-#     oversubscribe.
-#
 # Output:
 #   ${result_path}/circuits/alpha_beta_sweep_logact_logload/
-#     sweep_src{NN}_chunk00.npz   (one per source)
+#     sweep_src{SS}_chunk{CC}.npz   (128 slices, two per source)
 #
-# Resume: re-submit the same array; run_alpha_beta_sweep.py resumes from the
-#     existing sweep_src{NN}_chunk00.npz file (per-Q checkpointing).
+# Resume: re-submit the same array; run_alpha_beta_sweep.py picks up partial
+# slice files via per-Q checkpointing.
 #
 # Aggregate after the array finishes:
 #   python experiments/aggregate_alpha_beta_sweep.py \
@@ -53,12 +53,16 @@ export OMP_NUM_THREADS=1
 export MKL_NUM_THREADS=1
 export OPENBLAS_NUM_THREADS=1
 
+NUM_CHUNKS=2
 ARRAY_IDX=${SLURM_ARRAY_TASK_ID:-0}
-echo "[$ARRAY_IDX] source-idx=$ARRAY_IDX  host=$(hostname)  t=$(date +%H:%M:%S)"
+SOURCE_IDX=$(( ARRAY_IDX / NUM_CHUNKS ))
+TARGET_CHUNK=$(( ARRAY_IDX % NUM_CHUNKS ))
+
+echo "[$ARRAY_IDX] source-idx=$SOURCE_IDX  target-chunk=$TARGET_CHUNK/$((NUM_CHUNKS-1))  host=$(hostname)  t=$(date +%H:%M:%S)"
 
 ${ENV_BIN}/python experiments/run_alpha_beta_sweep.py \
-    --source-idx "$ARRAY_IDX" \
-    --target-chunk 0 \
-    --num-chunks 1 \
+    --source-idx "$SOURCE_IDX" \
+    --target-chunk "$TARGET_CHUNK" \
+    --num-chunks "$NUM_CHUNKS" \
     --act-norm log_max \
     --load-norm log_max
