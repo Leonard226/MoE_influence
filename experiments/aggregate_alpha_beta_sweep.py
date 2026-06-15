@@ -31,10 +31,25 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--input-dir", default=None)
     parser.add_argument("--output", default=None)
+    parser.add_argument("--act-norm", type=str, default="rank",
+                        choices=["rank", "log_max"],
+                        help="Match the value used in the sweep. Selects the "
+                             "default input subdirectory (legacy: rank).")
+    parser.add_argument("--load-norm", type=str, default="raw",
+                        choices=["raw", "log_max"],
+                        help="Match the value used in the sweep. Selects the "
+                             "default input subdirectory (legacy: raw).")
     args = parser.parse_args()
 
+    suffix_parts: list[str] = []
+    if args.act_norm == "log_max":
+        suffix_parts.append("logact")
+    if args.load_norm == "log_max":
+        suffix_parts.append("logload")
+    default_in_name = ("alpha_beta_sweep_" + "_".join(suffix_parts)
+                       if suffix_parts else "alpha_beta_sweep")
     input_dir = args.input_dir or os.path.join(
-        config["result_path"], "circuits", "alpha_beta_sweep"
+        config["result_path"], "circuits", default_in_name
     )
     output_path = args.output or os.path.join(input_dir, "S_full_with_act.npz")
 

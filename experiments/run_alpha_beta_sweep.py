@@ -117,7 +117,9 @@ def load_dag(model, task):
 EDGE_TENSOR = "W_softmax"   # primary edge weight used throughout the sweep
 
 
-def build_triple_at_Q(model, task, classification, Q):
+def build_triple_at_Q(model, task, classification, Q,
+                      act_norm_method: str = "rank",
+                      load_norm_method: str = "raw"):
     """Build one triple at β = FIXED_BETA with:
       - F, mass        : computed on the DENSE routing DAG (intrinsic features).
       - C_path         : computed on the SPARSIFIED graph (edges with
@@ -153,7 +155,9 @@ def build_triple_at_Q(model, task, classification, Q):
     # filters edges fed into the C_path shortest-path computation.
     triple = build_triple(dag, classification,
                           beta=FIXED_BETA, edge_threshold=threshold,
-                          edge_tensor=EDGE_TENSOR)
+                          edge_tensor=EDGE_TENSOR,
+                          act_norm_method=act_norm_method,
+                          load_norm_method=load_norm_method)
 
     # Identify vertices isolated in the SPARSIFIED graph (no surviving in-
     # or out-edge above threshold). This is the ONLY vertex filter. Strict
@@ -184,10 +188,31 @@ def main():
     parser.add_argument("--output-dir", default=None)
     parser.add_argument("--n-init", type=int, default=N_INIT,
                         help="Number of random initialisations for FGW")
+    parser.add_argument("--act-norm", type=str, default="rank",
+                        choices=["rank", "log_max"],
+                        help="Normalisation for the activation feature passed "
+                             "through to fgw.build_triple. Default 'rank' "
+                             "reproduces the legacy sweep. 'log_max' uses "
+                             "log(1+act)/log(1+max(act)).")
+    parser.add_argument("--load-norm", type=str, default="raw",
+                        choices=["raw", "log_max"],
+                        help="Normalisation for the load feature. Default 'raw' "
+                             "reproduces the legacy sweep (load = n_tok / "
+                             "mean_in_layer). 'log_max' uses per-layer "
+                             "log(1+load) / log(1+max_in_layer(load)).")
     args = parser.parse_args()
 
+    # Route output to a normalisation-specific subdir so legacy results are
+    # never overwritten. Mirrors feature_ablation_sweep.py's convention.
+    suffix_parts: list[str] = []
+    if args.act_norm == "log_max":
+        suffix_parts.append("logact")
+    if args.load_norm == "log_max":
+        suffix_parts.append("logload")
+    default_out_name = ("alpha_beta_sweep_" + "_".join(suffix_parts)
+                        if suffix_parts else "alpha_beta_sweep")
     output_dir = args.output_dir or os.path.join(
-        config["result_path"], "circuits", "alpha_beta_sweep"
+        config["result_path"], "circuits", default_out_name
     )
     Path(output_dir).mkdir(parents=True, exist_ok=True)
 
@@ -209,13 +234,15 @@ def main():
     n_cells = n_a * n_q
 
     print(f"=== α × Q Sweep at β = {FIXED_BETA} ===")
-    print(f"  source : {src_model}/{src_task} (idx {args.source_idx})")
-    print(f"  targets: chunk {args.target_chunk}/{args.num_chunks - 1}  -> {n_tgts} tuples")
-    print(f"  α      : {ALPHAS}")
-    print(f"  Q      : {QUANTILES}")
-    print(f"  cells  : {n_cells} (α × Q) per pair")
-    print(f"  total  : {n_tgts * n_cells} FGW calls")
-    print(f"  output : {output_path}")
+    print(f"  source   : {src_model}/{src_task} (idx {args.source_idx})")
+    print(f"  targets  : chunk {args.target_chunk}/{args.num_chunks - 1}  -> {n_tgts} tuples")
+    print(f"  α        : {ALPHAS}")
+    print(f"  Q        : {QUANTILES}")
+    print(f"  act_norm : {args.act_norm}")
+    print(f"  load_norm: {args.load_norm}")
+    print(f"  cells    : {n_cells} (α × Q) per pair")
+    print(f"  total    : {n_tgts * n_cells} FGW calls")
+    print(f"  output   : {output_path}")
 
     S_mat = np.full((n_tgts, n_a, n_q), np.nan)
     if os.path.exists(output_path):
@@ -239,7 +266,9 @@ def main():
     src_triples_by_Q = {}
     for Q in QUANTILES:
         t0 = time.time()
-        tri, theta = build_triple_at_Q(src_model, src_task, src_class, Q)
+        tri, theta = build_triple_at_Q(src_model, src_task, src_class, Q,
+                                       act_norm_method=args.act_norm,
+                                       load_norm_method=args.load_norm)
         src_triples_by_Q[Q] = tri
         print(f"  Q={Q:5.3g}: built in {time.time() - t0:7.1f}s  "
               f"n_verts={tri[3]['n_verts']:6d}  θ={theta:.4g}", flush=True)
@@ -284,7 +313,9 @@ def main():
             if not np.isnan(S_mat[local_t, :, qi]).any():
                 continue
             try:
-                tgt_tri, _ = build_triple_at_Q(tgt_model, tgt_task, tgt_class, Q)
+                tgt_tri, _ = build_triple_at_Q(tgt_model, tgt_task, tgt_class, Q,
+                                               act_norm_method=args.act_norm,
+                                               load_norm_method=args.load_norm)
             except FileNotFoundError as e:
                 print(f"    [WARN] missing DAG at Q={Q}: {e}")
                 S_mat[local_t, :, qi] = -1.0
