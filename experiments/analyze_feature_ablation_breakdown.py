@@ -41,11 +41,19 @@ ABLATIONS = ["full", "no_depth", "no_out", "no_in", "no_load", "no_act", "no_cla
 
 
 def main() -> None:
+    import argparse
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--subdir", type=str, default="feature_ablation",
+                        help="Subdirectory under {result_path}/circuits/ to "
+                             "read S_loo.npz from and write breakdown.json to. "
+                             "Use 'feature_ablation_logact_logload' for the "
+                             "new log-max-normalised sweep.")
+    args = parser.parse_args()
     with open(ROOT / "config.yaml") as f:
         cfg = yaml.safe_load(f)
     result_path = cfg["result_path"]
-    npz_path = Path(result_path) / "circuits" / "feature_ablation" / "S_loo.npz"
-    json_out = Path(result_path) / "circuits" / "feature_ablation" / "breakdown.json"
+    npz_path = Path(result_path) / "circuits" / args.subdir / "S_loo.npz"
+    json_out = Path(result_path) / "circuits" / args.subdir / "breakdown.json"
 
     d = np.load(npz_path, allow_pickle=True)
     S = d["S"]   # (7, 3, 8, 8, 8): (abl, q, task, mi, mj)
