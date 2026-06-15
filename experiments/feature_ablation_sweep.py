@@ -94,6 +94,11 @@ N_INIT = 5          # matches headline sweep
 # directory (see main()) so the legacy results are preserved untouched.
 _ACT_NORM_METHOD = "rank"
 
+# Load feature normalisation. Set from --load-norm CLI flag in main().
+# Defaults to "raw" (legacy: load = n_tok / mean_in_layer, range up to N).
+# With "log_max" the per-layer log-max normalisation is used (range [0, 1]).
+_LOAD_NORM_METHOD = "raw"
+
 # Feature column indices in F (from experiments/fgw.py:324-330).
 #   depth, out, in, load, act = single columns (0..4)
 #   class_hist = 5 columns (5..9), the per-token-class histogram
@@ -162,14 +167,16 @@ def _isolated_keep_mask(dag: dict, theta: float) -> np.ndarray:
 
 
 def _build_filtered_triple(dag: dict, classification, theta: float,
-                           act_norm_method: str = "rank"):
+                           act_norm_method: str = "rank",
+                           load_norm_method: str = "raw"):
     """Build triple at BETA, edge_threshold=theta, then drop isolated vertices.
     PASSES the classification through so class_hist is meaningful (the alpha=0
     Wasserstein term needs it). Matches run_alpha_beta_sweep.build_triple_at_Q.
-    `act_norm_method` selects the activation feature normalisation ("rank" or
-    "log_max"); plumbed through to fgw.build_triple."""
+    `act_norm_method` / `load_norm_method` select the normalisation of the
+    activation / load features; plumbed through to fgw.build_triple."""
     triple = build_triple(dag, classification, beta=BETA, edge_threshold=theta,
-                          act_norm_method=act_norm_method)
+                          act_norm_method=act_norm_method,
+                          load_norm_method=load_norm_method)
     keep_mask = _isolated_keep_mask(dag, theta)
     return _subset_triple(triple, keep_mask), int(keep_mask.sum())
 
@@ -232,7 +239,8 @@ def _get_base_triple(model: str, task: str, q_idx: int, result_path: str):
     Q = QUANTILES[q_idx]
     theta = q_threshold(dag, Q)
     triple, _ = _build_filtered_triple(dag, cls, theta,
-                                       act_norm_method=_ACT_NORM_METHOD)
+                                       act_norm_method=_ACT_NORM_METHOD,
+                                       load_norm_method=_LOAD_NORM_METHOD)
     _WORKER_TRIPLES[key] = triple
     while len(_WORKER_TRIPLES) > _TRIPLE_CACHE_CAP:
         _WORKER_TRIPLES.popitem(last=False)
@@ -332,10 +340,14 @@ def _process_one_pair_task(pair_task_idx: int, result_path: str, out_dir: Path) 
     for q_idx, Q in enumerate(QUANTILES):
         theta_i = q_threshold(dag_i, Q)
         triples_i[q_idx], n_keep_i = _build_filtered_triple(
-            dag_i, cls_i, theta_i, act_norm_method=_ACT_NORM_METHOD)
+            dag_i, cls_i, theta_i,
+            act_norm_method=_ACT_NORM_METHOD,
+            load_norm_method=_LOAD_NORM_METHOD)
         theta_j = q_threshold(dag_j, Q)
         triples_j[q_idx], n_keep_j = _build_filtered_triple(
-            dag_j, cls_j, theta_j, act_norm_method=_ACT_NORM_METHOD)
+            dag_j, cls_j, theta_j,
+            act_norm_method=_ACT_NORM_METHOD,
+            load_norm_method=_LOAD_NORM_METHOD)
         print(f"  built triples at Q={Q}: |V|_i={n_keep_i}, |V|_j={n_keep_j}  "
               f"({time.time() - t0:.1f}s)", flush=True)
 
@@ -405,29 +417,45 @@ def main() -> None:
                         help="Normalisation method for the activation feature "
                              "passed through to fgw.build_triple. "
                              "'rank' (default) reproduces the legacy behaviour. "
-                             "'log_max' uses log(1+act) / log(1+max(act)). "
-                             "When --act-norm log_max is set, results are "
-                             "written to .../feature_ablation_logact/ to keep "
-                             "the legacy rank-based results untouched.")
+                             "'log_max' uses log(1+act) / log(1+max(act)).")
+    parser.add_argument("--load-norm", type=str, default="raw",
+                        choices=["raw", "log_max"],
+                        help="Normalisation method for the load feature passed "
+                             "through to fgw.build_triple. "
+                             "'raw' (default) reproduces the legacy behaviour "
+                             "(load = n_tok / mean_in_layer, range up to N). "
+                             "'log_max' uses per-layer log(1+load) / "
+                             "log(1+max_in_layer(load)), bounded in [0, 1]. "
+                             "Output is routed to a normalisation-specific "
+                             "subdirectory (e.g. .../feature_ablation_logact_logload/) "
+                             "to preserve legacy results.")
     args = parser.parse_args()
 
-    # Apply act-normalisation choice to the module-level global used by the
-    # triple-builder. Workers in per-pair-task mode (each SLURM array task is
-    # its own Python process) see this set; for chunk mode the spawn workers
-    # re-import the module and use its default value -- so chunk mode only
-    # works with the default 'rank'. Use --pair-task-idx for log_max runs.
-    global _ACT_NORM_METHOD
+    # Apply act- and load-normalisation choices to the module-level globals
+    # used by the triple-builder. Workers in per-pair-task mode (each SLURM
+    # array task is its own Python process) see these set; for chunk mode the
+    # spawn workers re-import the module and use the default values -- so
+    # chunk mode only works with the defaults. Use --pair-task-idx for
+    # non-default runs.
+    global _ACT_NORM_METHOD, _LOAD_NORM_METHOD
     _ACT_NORM_METHOD = args.act_norm
+    _LOAD_NORM_METHOD = args.load_norm
 
     with open(ROOT / "config.yaml") as f:
         cfg = yaml.safe_load(f)
     result_path = cfg["result_path"]
-    # Route output to a separate directory when using a non-legacy
-    # act-normalisation so existing results are preserved.
+    # Route output to a normalisation-specific directory so legacy results are
+    # never overwritten. Suffix is built from the non-default normalisations.
+    suffix_parts: list[str] = []
     if args.act_norm == "log_max":
-        out_dir = Path(result_path) / "circuits" / "feature_ablation_logact"
+        suffix_parts.append("logact")
+    if args.load_norm == "log_max":
+        suffix_parts.append("logload")
+    if suffix_parts:
+        out_name = "feature_ablation_" + "_".join(suffix_parts)
     else:
-        out_dir = Path(result_path) / "circuits" / "feature_ablation"
+        out_name = "feature_ablation"
+    out_dir = Path(result_path) / "circuits" / out_name
     out_dir.mkdir(parents=True, exist_ok=True)
     out_npz_final = out_dir / "S_loo.npz"
     out_json = out_dir / "loo_summary.json"

@@ -250,6 +250,7 @@ def build_triple(dag: Dict[str, Any],
                  edge_threshold: float = 0.0,
                  edge_tensor: str = "W_softmax",
                  act_norm_method: str = "rank",
+                 load_norm_method: str = "raw",
                  ) -> Tuple[np.ndarray, np.ndarray, np.ndarray, Dict[str, Any]]:
     """Construct the FGW triple (C, F, mass) for one routing DAG.
 
@@ -310,9 +311,30 @@ def build_triple(dag: Dict[str, Any],
     in_norm = in_strength / in_max
 
     # 4. layer-relative token load
+    #
+    # Two normalisation choices:
+    #   "raw"     : load(v) = n_tok(v) / mean_in_layer(n_tok). Mean = 1 per
+    #                layer, range up to N. (Legacy; structurally heavier-weighted
+    #                than other features in Euclidean L_2 because N varies from
+    #                8 (Mixtral) to 128+ (Qwen3-235B). Audit at 2026-06-15
+    #                showed 6/8 models have heavy-tailed load distributions.)
+    #   "log_max" : per-layer log-max compression
+    #                load(v) = log(1 + load_raw(v)) / log(1 + max_n' load_raw(ell, n'))
+    #               Range [0, 1] per layer, scales comparably across N.
     n_tok = dag["n_tokens_selected"].float()  # [L, N]
     layer_mean = n_tok.mean(dim=1, keepdim=True).clamp(min=1e-12)  # [L, 1]
-    load = n_tok / layer_mean  # [L, N], ~1 = average
+    load_raw = n_tok / layer_mean  # [L, N], mean = 1 per layer
+    if load_norm_method == "raw":
+        load = load_raw
+    elif load_norm_method == "log_max":
+        log_load = torch.log1p(load_raw)  # [L, N]
+        log_max = torch.log1p(load_raw.max(dim=1, keepdim=True).values).clamp(min=1e-12)  # [L, 1]
+        load = log_load / log_max  # [L, N], range [0, 1]
+    else:
+        raise ValueError(
+            f"Unknown load_norm_method={load_norm_method!r}; "
+            "expected 'raw' or 'log_max'."
+        )
 
     # 5. activation magnitude (Su et al. super-expert feature).
     # Raw `act` spans 3-5 orders of magnitude within a graph and another
