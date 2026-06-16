@@ -2,30 +2,19 @@
 class feature in §3 of main.tex.
 
 Reads:  results/circuits/feature_ablation/class_curves_c4.json
-Writes: 6a154a47401c9f4881c67a3f/figures/class_specialization.pdf
-        6a154a47401c9f4881c67a3f/figures/class_diversity.pdf
+Writes: 6a154a47401c9f4881c67a3f/figures/class_distribution.pdf
 
-Two figures:
+Single 2-panel figure:
 
-  Figure A (class_specialization.pdf)   -- WITHIN-vertex specialization.
-    Two panels, both with log x (vertex rank) and 8 family-coloured curves.
-    Panel A1: peak magnitude  max_c class(v)_c, sorted descending.
-              Captures the DOMINANT class fraction.
-    Panel A2: entropy bits H(class(v)) = -sum_c class(v)_c log2 class(v)_c,
-              sorted ascending. Captures the overall SPREAD of the histogram
-              (a vertex with class = (0.5, 0.5, 0, 0, 0) and one with
-              class = (0.5, 0.125 x4) both have max=0.5 but very different H).
+  Panel A (left)  -- WITHIN-vertex specialization.
+    Per-vertex max_c class(v)_c sorted descending across all active vertices.
+    Log x (vertex rank), linear y in [0.2, 1].  8 family-coloured curves.
+    Mirrors plot_load_distribution / plot_act_distribution.
 
-  Figure B (class_diversity.pdf)        -- ACROSS-vertex diversity.
+  Panel B (right) -- ACROSS-vertex diversity.
     For each model, the fraction of vertices whose argmax class is each of the
-    5 macro-classes, shown as one horizontal stacked bar per model. Entropy
-    H[bits] of the argmax distribution is annotated on the right.
-
-    Two stacked-bar groups:
-      - all active vertices (left subplot)
-      - vertices with max_c >= 0.5 only (right subplot)
-    so the reader can see how diversity changes when restricted to the
-    honestly-specialized subset.
+    5 macro-classes (content, functional, punctuation, numeric, special), as
+    one horizontal stacked bar per model. Colorblind-safe palette.
 """
 from __future__ import annotations
 
@@ -40,8 +29,7 @@ JSON = ROOT / "results" / "circuits" / "feature_ablation" / "class_curves_c4.jso
 FIG_DIR = ROOT / "6a154a47401c9f4881c67a3f" / "figures"
 FIG_DIR.mkdir(parents=True, exist_ok=True)
 
-FIG_A = FIG_DIR / "class_specialization.pdf"
-FIG_B = FIG_DIR / "class_diversity.pdf"
+FIG = FIG_DIR / "class_distribution.pdf"
 
 
 # Same palette as plot_load / plot_act for visual consistency.
@@ -56,92 +44,50 @@ MODEL_STYLE = {
     "phi-3.5-moe":      {"color": "#7B2F8B", "ls": "-",  "lw": 1.6, "label": "Phi-3.5-MoE"},
 }
 
-# Distinct palette for the 5 token classes (categorical, not family-themed).
+# Colorblind-safe palette for the 5 token classes (Wong 2011 — used widely in
+# scientific publications; each pair of colours remains distinguishable under
+# deuteranopia / protanopia / tritanopia).
 CLASS_COLORS = {
-    "content":     "#2E7D32",   # green-dark
-    "functional":  "#1565C0",   # blue
-    "punctuation": "#EF6C00",   # orange
-    "numeric":     "#6A1B9A",   # purple
-    "special":     "#9E9E9E",   # grey (sentinel + unmapped)
+    "content":     "#0072B2",   # blue       (main lexical content)
+    "functional":  "#009E73",   # bluish-green (syntactic glue)
+    "punctuation": "#E69F00",   # orange
+    "numeric":     "#CC79A7",   # reddish-purple
+    "special":     "#999999",   # neutral grey (sentinel / unmapped)
 }
 
 
-def _entropy_bits(counts: list[int]) -> float:
-    total = sum(counts) or 1
-    frac = np.array(counts) / total
-    nz = frac[frac > 0]
-    return float(-np.sum(nz * np.log2(nz)))
-
-
-def plot_specialization(curves: dict) -> None:
-    """Figure A: per-vertex specialization in two complementary views.
-
-    Panel 1 (max-prob, sorted descending) — magnitude of the dominant class.
-    Panel 2 (entropy in bits, sorted ascending) — overall spread of the
-        histogram. Same visual convention: left = most specialized in both.
-    """
-    log2_5 = float(np.log2(5))                          # uniform reference
-
-    fig, (ax_max, ax_ent) = plt.subplots(1, 2, figsize=(13.5, 4.8))
-
-    # ---- Panel 1: max-class probability sorted descending ------------------
+def plot_specialization(ax) -> None:
+    """Panel A: per-vertex max-class probability, sorted descending."""
     for model, style in MODEL_STYLE.items():
         values = np.array(curves[model]["max_prob_sorted"])
         ranks = np.arange(1, len(values) + 1)
-        ax_max.plot(ranks, values, **style)
+        ax.plot(ranks, values, **style)
 
-    ax_max.axhline(y=0.2, color="gray", linestyle=":", linewidth=1.0, alpha=0.7)
-    ax_max.text(1.05, 0.2, " uniform (0.2)", fontsize=8.5, color="gray", va="center")
+    # Reference line at 0.2 = uniform-over-5 baseline.
+    ax.axhline(y=0.2, color="gray", linestyle=":", linewidth=1.0, alpha=0.7)
+    ax.text(1.05, 0.2, " uniform (0.2)", fontsize=8.5, color="gray", va="center")
 
-    ax_max.set_xscale("log")
-    ax_max.set_xlabel(r"Vertex rank (sorted by $\max_c \mathrm{ class}(v)_c$, descending)",
-                      fontsize=14)
-    ax_max.set_ylabel(r"$\max_c \mathrm{ class}(v)_c$", fontsize=14)
-    ax_max.set_ylim(0.15, 1.02)
-    ax_max.set_title(r"Panel A: peak magnitude", fontsize=14, pad=8)
-    ax_max.grid(True, which="major", alpha=0.35, linestyle="-",  linewidth=0.5)
-    ax_max.grid(True, which="minor", alpha=0.15, linestyle=":",  linewidth=0.4)
-    ax_max.set_axisbelow(True)
-    ax_max.legend(loc="lower left", framealpha=0.95, fontsize=9, ncol=2)
-
-    # ---- Panel 2: entropy (bits) sorted ascending --------------------------
-    for model, style in MODEL_STYLE.items():
-        values = np.array(curves[model]["entropy_sorted"])
-        ranks = np.arange(1, len(values) + 1)
-        ax_ent.plot(ranks, values, **style)
-
-    # Uniform reference line at log2(5).
-    ax_ent.axhline(y=log2_5, color="gray", linestyle=":", linewidth=1.0, alpha=0.7)
-    ax_ent.text(1.05, log2_5, r" uniform ($\log_2 5$)", fontsize=8.5,
-                color="gray", va="center")
-
-    ax_ent.set_xscale("log")
-    ax_ent.set_xlabel(r"Vertex rank (sorted by $H(\mathrm{ class}(v))$, ascending)",
-                      fontsize=14)
-    ax_ent.set_ylabel(r"$H(\mathrm{ class}(v)) = -\sum_c \mathrm{ class}(v)_c \log_2 \mathrm{ class}(v)_c$  [bits]",
-                      fontsize=12)
-    ax_ent.set_ylim(-0.05, log2_5 + 0.1)
-    ax_ent.set_title(r"Panel B: histogram spread (entropy)", fontsize=14, pad=8)
-    ax_ent.grid(True, which="major", alpha=0.35, linestyle="-",  linewidth=0.5)
-    ax_ent.grid(True, which="minor", alpha=0.15, linestyle=":",  linewidth=0.4)
-    ax_ent.set_axisbelow(True)
-
-    plt.tight_layout()
-    plt.savefig(FIG_A, format="pdf", bbox_inches="tight")
-    print(f"Saved: {FIG_A}")
+    ax.set_xscale("log")
+    ax.set_xlabel(r"Vertex rank (sorted by $\max_c \mathrm{ class}(v)_c$, descending)",
+                  fontsize=13)
+    ax.set_ylabel(r"$\max_c \mathrm{ class}(v)_c$", fontsize=13)
+    ax.set_ylim(0.15, 1.02)
+    ax.set_title(r"Panel A: within-vertex specialization", fontsize=13, pad=8)
+    ax.grid(True, which="major", alpha=0.35, linestyle="-",  linewidth=0.5)
+    ax.grid(True, which="minor", alpha=0.15, linestyle=":",  linewidth=0.4)
+    ax.set_axisbelow(True)
+    ax.legend(loc="lower left", framealpha=0.95, fontsize=9, ncol=2)
 
 
-def _stacked_bars(ax, models: list[str], counts_key: str,
-                  curves: dict, classes: list[str], title: str) -> None:
-    """One horizontal stacked-bar subplot."""
-    y_pos = np.arange(len(models))[::-1]   # top-to-bottom = model order
+def plot_diversity(ax, classes: list[str]) -> None:
+    """Panel B: dominant-class composition across vertices (stacked bars)."""
+    models = list(MODEL_STYLE.keys())
+    y_pos = np.arange(len(models))[::-1]      # top-to-bottom = MODEL_STYLE order
 
     for yi, model in zip(y_pos, models):
-        counts = curves[model][counts_key]
+        counts = curves[model]["argmax_counts"]
         total = sum(counts) or 1
         frac = np.array(counts) / total
-        ent = _entropy_bits(counts)
-
         left = 0.0
         for ci, cls in enumerate(classes):
             ax.barh(yi, frac[ci], left=left,
@@ -150,70 +96,46 @@ def _stacked_bars(ax, models: list[str], counts_key: str,
                     label=cls.capitalize() if yi == y_pos[0] else None)
             left += frac[ci]
 
-        # Entropy + N annotation on the right.
-        ax.text(1.01, yi, f"H={ent:4.2f}  N={total}",
-                fontsize=8.5, va="center", ha="left",
-                family="monospace", color="#333333")
-
     ax.set_yticks(y_pos)
     ax.set_yticklabels([MODEL_STYLE[m]["label"] for m in models], fontsize=9.5)
     ax.set_xlim(0, 1.0)
-    ax.set_xlabel("fraction of vertices", fontsize=10)
-    ax.set_title(title, fontsize=11, pad=8)
+    ax.set_xlabel("fraction of vertices", fontsize=13)
+    ax.set_title(r"Panel B: across-vertex diversity (dominant class)",
+                 fontsize=13, pad=8)
     ax.grid(True, axis="x", which="major", alpha=0.25, linestyle=":")
     ax.set_axisbelow(True)
 
-
-def plot_diversity(curves: dict) -> None:
-    """Figure B: stacked bars of dominant-class fractions, two views."""
-    classes = curves[next(iter(MODEL_STYLE))]["classes"]
-    fig, (ax_all, ax_spec) = plt.subplots(1, 2, figsize=(14.0, 4.6),
-                                          gridspec_kw={"wspace": 0.45})
-
-    _stacked_bars(ax_all, list(MODEL_STYLE.keys()),
-                  counts_key="argmax_counts",
-                  curves=curves, classes=classes,
-                  title="(A) all active vertices")
-    _stacked_bars(ax_spec, list(MODEL_STYLE.keys()),
-                  counts_key="argmax_counts_specialized",
-                  curves=curves, classes=classes,
-                  title=r"(B) specialized vertices ($\max_c \geq 0.5$)")
-
-    # Single shared legend at top.
-    handles, labels = ax_all.get_legend_handles_labels()
-    fig.legend(handles, labels,
-               loc="lower center", ncol=len(classes),
-               bbox_to_anchor=(0.5, -0.02),
-               fontsize=10, frameon=False,
-               title="dominant class $\\arg\\max_c \\mathrm{ class}(v)_c$",
-               title_fontsize=10)
-
-    fig.suptitle("Across-vertex diversity: dominant-class composition on c4",
-                 fontsize=13, y=1.02)
-    plt.savefig(FIG_B, format="pdf", bbox_inches="tight")
-    print(f"Saved: {FIG_B}")
+    ax.legend(loc="lower left",
+              bbox_to_anchor=(0.0, -0.35), ncol=len(classes),
+              fontsize=9, frameon=False,
+              title=r"dominant class $\arg\max_c \mathrm{ class}(v)_c$",
+              title_fontsize=10)
 
 
 def main() -> None:
+    global curves
     with open(JSON) as f:
         curves = json.load(f)
 
-    plot_specialization(curves)
-    plot_diversity(curves)
+    classes = curves[next(iter(MODEL_STYLE))]["classes"]
 
-    # Diagnostic printout for the LaTeX text.
+    fig, (ax_left, ax_right) = plt.subplots(1, 2, figsize=(14.5, 5.0),
+                                            gridspec_kw={"wspace": 0.30})
+    plot_specialization(ax_left)
+    plot_diversity(ax_right, classes)
+
+    plt.savefig(FIG, format="pdf", bbox_inches="tight")
+    print(f"Saved: {FIG}")
+
+    # Diagnostic printout for the §3 motivation text.
     print("\nDiagnostic (for §3 motivation text):")
-    print(f"{'model':<20s}  {'rank1_max':>10s}  {'pct_specialized':>16s}  "
-          f"{'H_argmax_all':>13s}  {'H_argmax_spec':>14s}")
-    print("-" * 84)
+    print(f"{'model':<20s}  {'rank1_max':>10s}  {'pct_specialized':>16s}")
+    print("-" * 52)
     for model in MODEL_STYLE:
         d = curves[model]
         rank1 = d["max_prob_sorted"][0]
         pct_spec = 100.0 * d["n_specialized"] / max(d["n_active"], 1)
-        h_all  = _entropy_bits(d["argmax_counts"])
-        h_spec = _entropy_bits(d["argmax_counts_specialized"])
-        print(f"  {model:<18s}  {rank1:>10.4f}  {pct_spec:>15.1f}%  "
-              f"{h_all:>13.3f}  {h_spec:>14.3f}")
+        print(f"  {model:<18s}  {rank1:>10.4f}  {pct_spec:>15.1f}%")
 
 
 if __name__ == "__main__":
