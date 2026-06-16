@@ -55,22 +55,16 @@ def main() -> None:
         # Replace 0 with a tiny floor for log-scale plotting
         values = np.clip(values, 1e-6, None)
         ax_raw.plot(ranks, values, **style)
-
-    # Reference line at load = 1 (the layer mean).
-    ax_raw.axhline(y=1.0, color="gray", linestyle=":", linewidth=1.0, alpha=0.7)
-    ax_raw.text(1.05, 1.0, " layer mean", fontsize=8.5, color="gray", va="center")
-
+        
     ax_raw.set_xscale("log")
     ax_raw.set_yscale("log")
-    ax_raw.set_xlabel(r"Vertex rank (sorted by $\mathrm{load}$, descending)", fontsize=11)
-    ax_raw.set_ylabel(r"$\mathrm{load}_{\mathrm{raw}}(v) = n_{\mathrm{tok}}(v)\,/\,$mean$_{\ell}\,n_{\mathrm{tok}}$",
-                      fontsize=11)
-    ax_raw.set_title("Panel A: raw $\\mathrm{load}$ (current definition)",
-                     fontsize=12, pad=8)
+    ax_raw.set_xlabel(r"Vertex rank (sorted by $\mathrm{load}$, descending)", fontsize=14)
+    ax_raw.set_ylabel(r"$\mathrm{load}(v)$", fontsize=14)
+    ax_raw.set_title("Panel A: $\\mathrm{load}$ (raw)", fontsize=14, pad=8)
     ax_raw.grid(True, which="major", alpha=0.35, linestyle="-",  linewidth=0.5)
     ax_raw.grid(True, which="minor", alpha=0.15, linestyle=":",  linewidth=0.4)
     ax_raw.set_axisbelow(True)
-    ax_raw.legend(loc="lower left", framealpha=0.95, fontsize=9, ncol=1)
+    ax_raw.legend(loc="lower left", framealpha=0.95, fontsize=10, ncol=1)
 
     # ---- Panel B: log-max normalised load ----------------------------------
     for model, style in MODEL_STYLE.items():
@@ -79,16 +73,14 @@ def main() -> None:
         ax_norm.plot(ranks, values, **style)
 
     ax_norm.set_xscale("log")
-    ax_norm.set_xlabel(r"Vertex rank (sorted by $\widetilde{\mathrm{load}}$, descending)",
-                       fontsize=11)
-    ax_norm.set_ylabel(r"$\widetilde{\mathrm{load}}(v) = \log(1+\mathrm{load}_{\mathrm{raw}}(v))\,/\,\log(1+\max_{n'}\mathrm{load}_{\mathrm{raw}}(\ell, n'))$",
-                       fontsize=10)
-    ax_norm.set_title("Panel B: per-layer log-max normalised $\\widetilde{\\mathrm{load}}$",
-                      fontsize=12, pad=8)
+    ax_norm.set_xlabel(r"Vertex rank (sorted by $\hat{\mathrm{load}}$, descending)", fontsize=14)
+    ax_norm.set_ylabel(r"$\hat{\mathrm{load}}(v)$", fontsize=14)
+    ax_norm.set_title("Panel B: $\hat{\\mathrm{load}}$ (per-layer log-max normalised)", fontsize=14, pad=8)
     ax_norm.set_ylim(0, 1.05)
     ax_norm.grid(True, which="major", alpha=0.35, linestyle="-",  linewidth=0.5)
     ax_norm.grid(True, which="minor", alpha=0.15, linestyle=":",  linewidth=0.4)
     ax_norm.set_axisbelow(True)
+    ax_norm.legend(loc="lower left", framealpha=0.95, fontsize=10, ncol=1)
 
     plt.tight_layout()
     plt.savefig(FIG, format="pdf", bbox_inches="tight")

@@ -1,12 +1,16 @@
-"""Extract sorted raw activation values per model (c4 task) for the
-Zipf-style distribution plot.
+"""Extract sorted activation values per model (c4 task) for the
+2-panel activation-distribution visualisation.
 
-For each model, loads the c4 DAG, extracts the per-vertex `act` values,
-drops zeros (unused vertices), sorts descending, and saves the resulting
-array as a JSON.
+For each model on c4, computes:
+  - act_raw(v) : raw activation magnitude from dag["act"], zeros dropped
+                 (unused vertices). Range spans 3-5 orders of magnitude within
+                 a graph and another 100-10000x across models.
+  - act_lognorm(v) = log(1 + act_raw(v)) / log(1 + max(act_raw))
+                 Global log-max normalisation matching fgw.py's "log_max"
+                 mode. Range [0, 1]; preserves super-expert dominance shape.
 
-The output is read by experiments/plot_act_distribution.py locally to
-render the per-model distribution figure.
+Both arrays are sorted descending and saved as JSON. Plotted by
+experiments/plot_act_distribution.py locally.
 
 Writes: results/circuits/feature_ablation/act_curves_c4.json
 """
@@ -40,18 +44,38 @@ def main() -> None:
     out_path = Path(result_path) / "circuits" / "feature_ablation" / "act_curves_c4.json"
     out_path.parent.mkdir(parents=True, exist_ok=True)
 
-    curves: dict[str, list[float]] = {}
-    print(f"Extracting raw act curves on task='{TASK}'")
-    print(f"{'model':<20s}  {'n_nonzero':>10s}  {'min':>10s}  {'max':>10s}")
-    print("-" * 60)
+    curves: dict[str, dict] = {}
+    print(f"Extracting act curves on task='{TASK}'")
+    print(f"{'model':<20s}  {'n_active':>10s}  "
+          f"{'raw_max':>11s}  {'raw_min':>11s}  "
+          f"{'lognorm_max':>12s}  {'lognorm_min':>12s}")
+    print("-" * 88)
     for model in MODELS:
         dag_path = Path(result_path) / "circuits" / f"dag_{model}_{TASK}.pt"
         dag = torch.load(dag_path, weights_only=False)
-        act = dag["act"].cpu().numpy().reshape(-1)
-        a = act[act > 0].astype(np.float64)
-        a_sorted = np.sort(a)[::-1]  # descending: rank 1 = max
-        curves[model] = a_sorted.tolist()
-        print(f"{model:<20s}  {len(a):>10d}  {a.min():>10.3e}  {a.max():>10.3e}")
+        act = dag["act"].cpu().numpy().reshape(-1).astype(np.float64)
+
+        active = act > 0
+        a = act[active]
+
+        # Global log-max normalisation: matches fgw.py "log_max" path.
+        a_max = float(a.max())
+        log_max = float(np.log1p(a_max))
+        log_max = log_max if log_max > 1e-12 else 1e-12
+        a_lognorm = np.log1p(a) / log_max     # in [0, 1]
+
+        a_sorted        = np.sort(a)[::-1]            # descending
+        a_lognorm_sorted = np.sort(a_lognorm)[::-1]   # descending
+
+        curves[model] = {
+            "n_active":            int(a.size),
+            "n_total":             int(act.size),
+            "act_raw_sorted":      a_sorted.tolist(),
+            "act_lognorm_sorted":  a_lognorm_sorted.tolist(),
+        }
+        print(f"{model:<20s}  {a.size:>10d}  "
+              f"{a_sorted[0]:>11.3e}  {a_sorted[-1]:>11.3e}  "
+              f"{a_lognorm_sorted[0]:>12.4f}  {a_lognorm_sorted[-1]:>12.4f}")
 
     with open(out_path, "w") as f:
         json.dump(curves, f)

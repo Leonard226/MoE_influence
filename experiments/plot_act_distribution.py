@@ -1,17 +1,22 @@
-"""Plot per-model raw-activation distribution as a Zipf-style curve.
+"""Plot the per-vertex activation distribution as a 2-panel Zipf-style figure.
 
 Reads:  results/circuits/feature_ablation/act_curves_c4.json
 Writes: 6a154a47401c9f4881c67a3f/figures/act_distribution.pdf
 
-Single-panel log-log:
-  x-axis: vertex rank (descending, so rank 1 = the super-expert)
-  y-axis: raw activation value
-  8 lines, one per model, colour-coded by family.
+Two-panel design (mirrors plot_load_distribution.py):
+  Left  (Panel A): raw act magnitude from dag["act"].
+                   Both axes log-scale: shows the 3-5 orders of dynamic
+                   range within a graph and the additional ~10000x scale
+                   asymmetry across models.
+  Right (Panel B): log-max normalised act = log(1+act)/log(1+max(act)),
+                   matching fgw.py's "log_max" mode.
+                   x-axis log (vertex rank), y-axis linear in [0, 1]:
+                   every model's super-expert maps to 1 by construction,
+                   the tail shape is preserved, and the curves now occupy
+                   a common y-range so cross-model comparison is meaningful.
 
-The figure replaces the table in §3 of main.tex: it shows BOTH
-  (a) the dynamic range (y-axis span) — orders of magnitude
-  (b) the tail heaviness (slope at low ranks) — super-expert dominance
-in a single glance.
+Each panel: sorted activation values plotted descending on a log x-axis
+(vertex rank).  8 lines, family-coloured.
 """
 from __future__ import annotations
 
@@ -28,7 +33,8 @@ FIG_DIR.mkdir(parents=True, exist_ok=True)
 FIG = FIG_DIR / "act_distribution.pdf"
 
 
-# Family-coloured palette. Within a family, the larger model is dashed.
+# Family-coloured palette; within a family, the larger model is dashed.
+# Identical to plot_load_distribution.py.
 MODEL_STYLE = {
     "mixtral-8x7b":     {"color": "#5B8BC6", "ls": "-",  "lw": 1.6, "label": "Mixtral-8x7B"},
     "mixtral-8x22b":    {"color": "#1F4E79", "ls": "--", "lw": 1.6, "label": "Mixtral-8x22B"},
@@ -43,35 +49,59 @@ MODEL_STYLE = {
 
 def main() -> None:
     with open(JSON) as f:
-        curves: dict[str, list[float]] = json.load(f)
+        curves = json.load(f)
 
-    fig, ax = plt.subplots(figsize=(7.6, 5.0))
+    fig, (ax_raw, ax_norm) = plt.subplots(1, 2, figsize=(13.5, 4.8))
 
+    # ---- Panel A: raw act --------------------------------------------------
     for model, style in MODEL_STYLE.items():
-        values = np.array(curves[model])
+        values = np.array(curves[model]["act_raw_sorted"])
         ranks = np.arange(1, len(values) + 1)
-        ax.plot(ranks, values, **style)
+        # Replace 0 with a tiny floor for log-scale plotting.
+        values = np.clip(values, 1e-30, None)
+        ax_raw.plot(ranks, values, **style)
 
-    ax.set_xscale("log")
-    ax.set_yscale("log")
-    ax.set_xlabel(r"Vertex rank (sorted by $\mathrm{act}$, descending)", fontsize=11)
-    ax.set_ylabel(r"Activation magnitude $\mathrm{act}^{m, \mathrm{c4}}(v)$", fontsize=11)
-    ax.grid(True, which="major", alpha=0.35, linestyle="-",  linewidth=0.5)
-    ax.grid(True, which="minor", alpha=0.15, linestyle=":",  linewidth=0.4)
-    ax.set_axisbelow(True)
-    ax.legend(loc="lower left", framealpha=0.95, fontsize=9.5, ncol=1)
-    ax.set_title("Raw per-vertex activation on c4 (log-log)", fontsize=12, pad=8)
+    ax_raw.set_xscale("log")
+    ax_raw.set_yscale("log")
+    ax_raw.set_xlabel(r"Vertex rank (sorted by $\mathrm{act}$, descending)", fontsize=11)
+    ax_raw.set_ylabel(r"$\mathrm{act}^{m,\mathrm{c4}}(v)$", fontsize=11)
+    ax_raw.set_title("Panel A: raw $\\mathrm{act}$ (current definition)",
+                     fontsize=12, pad=8)
+    ax_raw.grid(True, which="major", alpha=0.35, linestyle="-",  linewidth=0.5)
+    ax_raw.grid(True, which="minor", alpha=0.15, linestyle=":",  linewidth=0.4)
+    ax_raw.set_axisbelow(True)
+    ax_raw.legend(loc="lower left", framealpha=0.95, fontsize=9, ncol=1)
+
+    # ---- Panel B: log-max normalised act -----------------------------------
+    for model, style in MODEL_STYLE.items():
+        values = np.array(curves[model]["act_lognorm_sorted"])
+        ranks = np.arange(1, len(values) + 1)
+        ax_norm.plot(ranks, values, **style)
+
+    ax_norm.set_xscale("log")
+    ax_norm.set_xlabel(r"Vertex rank (sorted by $\hat{\mathrm{act}}$, descending)",
+                       fontsize=11)
+    ax_norm.set_ylabel(r"$\hat{\mathrm{act}}(v) = \log(1+\mathrm{act}(v))\,/\,\log(1+\max_{v'}\mathrm{act}(v'))$",
+                       fontsize=10)
+    ax_norm.set_title("Panel B: log-max normalised $\\hat{\\mathrm{act}}$",
+                      fontsize=12, pad=8)
+    ax_norm.set_ylim(0, 1.05)
+    ax_norm.grid(True, which="major", alpha=0.35, linestyle="-",  linewidth=0.5)
+    ax_norm.grid(True, which="minor", alpha=0.15, linestyle=":",  linewidth=0.4)
+    ax_norm.set_axisbelow(True)
 
     plt.tight_layout()
     plt.savefig(FIG, format="pdf", bbox_inches="tight")
     print(f"Saved: {FIG}")
 
-    # Quick diagnostic printout for the LaTeX text.
-    print("\nFor reference, the rank-1 (super-expert) and rank-N values per model:")
+    # Diagnostic: peak / median per model (useful for the LaTeX text).
+    print("\nDiagnostic (rank-1 / median act, raw and log-max-normalised):")
     for model in MODEL_STYLE:
-        values = np.array(curves[model])
-        print(f"  {model:<20s}  N={len(values):>5d}  rank1={values[0]:>10.2e}  "
-              f"rankN={values[-1]:>10.2e}  dyn_range={values[0]/max(values[-1], 1e-30):>10.2e}")
+        raw  = np.array(curves[model]["act_raw_sorted"])
+        norm = np.array(curves[model]["act_lognorm_sorted"])
+        print(f"  {model:<20s}  N={len(raw):>5d}  "
+              f"raw_peak={raw[0]:>10.2e}  raw_min={raw[-1]:>10.2e}  "
+              f"norm_peak={norm[0]:.4f}  norm_median={float(np.median(norm)):.4f}")
 
 
 if __name__ == "__main__":
