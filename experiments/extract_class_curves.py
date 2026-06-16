@@ -6,9 +6,13 @@ For each model on c4, computes class_hist[v] in R^5 via fgw.compute_class_histog
 (top-100 routed events per vertex, UPOS-mapped to 5 macro-classes, normalised to
 sum=1 per vertex). Then derives:
 
-  - max_prob_sorted     : sorted descending of max_c class_hist[v, c] over all
-                          vertices. Range [0.2, 1]. Used for Figure A
-                          (within-vertex specialization).
+  - max_prob_sorted     : sorted descending of max_c class(v)_c over all
+                          vertices. Range [0.2, 1]. Used for Figure A panel 1
+                          (within-vertex specialization, peak magnitude).
+  - entropy_sorted      : sorted ASCENDING of H(class(v)) in bits over all
+                          vertices. Range [0, log2(5) ~= 2.32]. Used for
+                          Figure A panel 2 (within-vertex specialization,
+                          overall spread of the histogram beyond the peak).
   - argmax_counts       : 5-vector, count of vertices whose argmax class is each
                           of {content, functional, punctuation, numeric, special}.
                           Used for Figure B (across-vertex diversity).
@@ -60,8 +64,8 @@ def main() -> None:
     print(f"  classes: {TOKEN_CLASSES}")
     print(f"  specialized threshold: max_c >= {SPECIALIZED_THRESHOLD}\n")
     print(f"{'model':<20s}  {'n_active':>9s}  {'n_special':>10s}  "
-          f"{'rank1_max':>10s}  {'median_max':>11s}")
-    print("-" * 70)
+          f"{'rank1_max':>10s}  {'median_max':>11s}  {'median_H':>10s}")
+    print("-" * 82)
 
     for model in MODELS:
         dag_path = Path(result_path) / "circuits" / f"dag_{model}_{TASK}.pt"
@@ -87,6 +91,12 @@ def main() -> None:
         max_prob = hist_active.max(axis=1)                # [n_active]
         argmax = hist_active.argmax(axis=1)               # [n_active]
 
+        # Per-vertex entropy of class(v) in bits. Zero-probability classes
+        # contribute 0 by convention (0 * log 0 := 0); mask to avoid log2(0).
+        with np.errstate(divide="ignore", invalid="ignore"):
+            log_hist = np.where(hist_active > 0, np.log2(hist_active), 0.0)
+        entropy = -(hist_active * log_hist).sum(axis=1)   # [n_active], bits
+
         # Argmax counts over all active vertices.
         argmax_counts = np.bincount(argmax, minlength=len(TOKEN_CLASSES)).tolist()
 
@@ -97,6 +107,7 @@ def main() -> None:
         ).tolist()
 
         max_prob_sorted = np.sort(max_prob)[::-1]         # descending
+        entropy_sorted  = np.sort(entropy)                # ascending
 
         # Diagnostic: how many vertices fell back to the "all special" sentinel
         # (these were already filtered).
@@ -110,12 +121,14 @@ def main() -> None:
             "n_specialized":           int(specialized.sum()),
             "classes":                 TOKEN_CLASSES,
             "max_prob_sorted":         max_prob_sorted.tolist(),
+            "entropy_sorted":          entropy_sorted.tolist(),
             "argmax_counts":           argmax_counts,
             "argmax_counts_specialized": argmax_counts_specialized,
         }
         print(f"{model:<20s}  {n_active:>9d}  {n_fallback_filtered:>10d}  "
               f"{max_prob_sorted[0]:>10.4f}  "
-              f"{float(np.median(max_prob_sorted)):>11.4f}")
+              f"{float(np.median(max_prob_sorted)):>11.4f}  "
+              f"{float(np.median(entropy_sorted)):>10.4f}")
 
     with open(out_path, "w") as f:
         json.dump(curves, f)

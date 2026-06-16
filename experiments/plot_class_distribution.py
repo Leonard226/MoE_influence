@@ -8,9 +8,13 @@ Writes: 6a154a47401c9f4881c67a3f/figures/class_specialization.pdf
 Two figures:
 
   Figure A (class_specialization.pdf)   -- WITHIN-vertex specialization.
-    Per-vertex max_c class(v, c) sorted descending across all active vertices.
-    Log x (vertex rank), linear y in [0.2, 1].  8 family-coloured curves.
-    Mirrors plot_load_distribution / plot_act_distribution.
+    Two panels, both with log x (vertex rank) and 8 family-coloured curves.
+    Panel A1: peak magnitude  max_c class(v)_c, sorted descending.
+              Captures the DOMINANT class fraction.
+    Panel A2: entropy bits H(class(v)) = -sum_c class(v)_c log2 class(v)_c,
+              sorted ascending. Captures the overall SPREAD of the histogram
+              (a vertex with class = (0.5, 0.5, 0, 0, 0) and one with
+              class = (0.5, 0.125 x4) both have max=0.5 but very different H).
 
   Figure B (class_diversity.pdf)        -- ACROSS-vertex diversity.
     For each model, the fraction of vertices whose argmax class is each of the
@@ -65,32 +69,62 @@ CLASS_COLORS = {
 def _entropy_bits(counts: list[int]) -> float:
     total = sum(counts) or 1
     frac = np.array(counts) / total
-    return float(-np.sum(np.where(frac > 0, frac * np.log2(frac), 0.0)))
+    nz = frac[frac > 0]
+    return float(-np.sum(nz * np.log2(nz)))
 
 
 def plot_specialization(curves: dict) -> None:
-    """Figure A: per-vertex max-class probability, sorted descending."""
-    fig, ax = plt.subplots(figsize=(7.6, 5.0))
+    """Figure A: per-vertex specialization in two complementary views.
 
+    Panel 1 (max-prob, sorted descending) — magnitude of the dominant class.
+    Panel 2 (entropy in bits, sorted ascending) — overall spread of the
+        histogram. Same visual convention: left = most specialized in both.
+    """
+    log2_5 = float(np.log2(5))                          # uniform reference
+
+    fig, (ax_max, ax_ent) = plt.subplots(1, 2, figsize=(13.5, 4.8))
+
+    # ---- Panel 1: max-class probability sorted descending ------------------
     for model, style in MODEL_STYLE.items():
         values = np.array(curves[model]["max_prob_sorted"])
         ranks = np.arange(1, len(values) + 1)
-        ax.plot(ranks, values, **style)
+        ax_max.plot(ranks, values, **style)
 
-    # Reference line at 0.2 = uniform-over-5 baseline.
-    ax.axhline(y=0.2, color="gray", linestyle=":", linewidth=1.0, alpha=0.7)
-    ax.text(1.05, 0.2, " uniform (0.2)", fontsize=8.5, color="gray", va="center")
+    ax_max.axhline(y=0.2, color="gray", linestyle=":", linewidth=1.0, alpha=0.7)
+    ax_max.text(1.05, 0.2, " uniform (0.2)", fontsize=8.5, color="gray", va="center")
 
-    ax.set_xscale("log")
-    ax.set_xlabel(r"Vertex rank (sorted by $\max_c \mathrm{class}(v, c)$, descending)",
-                  fontsize=14)
-    ax.set_ylabel(r"$\max_c \mathrm{class}(v, c)$", fontsize=14)
-    ax.set_ylim(0.15, 1.02)
-    ax.set_title("Within-vertex class specialization on c4", fontsize=14, pad=8)
-    ax.grid(True, which="major", alpha=0.35, linestyle="-",  linewidth=0.5)
-    ax.grid(True, which="minor", alpha=0.15, linestyle=":",  linewidth=0.4)
-    ax.set_axisbelow(True)
-    ax.legend(loc="upper right", framealpha=0.95, fontsize=9, ncol=2)
+    ax_max.set_xscale("log")
+    ax_max.set_xlabel(r"Vertex rank (sorted by $\max_c \mathrm{ class}(v)_c$, descending)",
+                      fontsize=14)
+    ax_max.set_ylabel(r"$\max_c \mathrm{ class}(v)_c$", fontsize=14)
+    ax_max.set_ylim(0.15, 1.02)
+    ax_max.set_title(r"Panel A: peak magnitude", fontsize=14, pad=8)
+    ax_max.grid(True, which="major", alpha=0.35, linestyle="-",  linewidth=0.5)
+    ax_max.grid(True, which="minor", alpha=0.15, linestyle=":",  linewidth=0.4)
+    ax_max.set_axisbelow(True)
+    ax_max.legend(loc="lower left", framealpha=0.95, fontsize=9, ncol=2)
+
+    # ---- Panel 2: entropy (bits) sorted ascending --------------------------
+    for model, style in MODEL_STYLE.items():
+        values = np.array(curves[model]["entropy_sorted"])
+        ranks = np.arange(1, len(values) + 1)
+        ax_ent.plot(ranks, values, **style)
+
+    # Uniform reference line at log2(5).
+    ax_ent.axhline(y=log2_5, color="gray", linestyle=":", linewidth=1.0, alpha=0.7)
+    ax_ent.text(1.05, log2_5, r" uniform ($\log_2 5$)", fontsize=8.5,
+                color="gray", va="center")
+
+    ax_ent.set_xscale("log")
+    ax_ent.set_xlabel(r"Vertex rank (sorted by $H(\mathrm{ class}(v))$, ascending)",
+                      fontsize=14)
+    ax_ent.set_ylabel(r"$H(\mathrm{ class}(v)) = -\sum_c \mathrm{ class}(v)_c \log_2 \mathrm{ class}(v)_c$  [bits]",
+                      fontsize=12)
+    ax_ent.set_ylim(-0.05, log2_5 + 0.1)
+    ax_ent.set_title(r"Panel B: histogram spread (entropy)", fontsize=14, pad=8)
+    ax_ent.grid(True, which="major", alpha=0.35, linestyle="-",  linewidth=0.5)
+    ax_ent.grid(True, which="minor", alpha=0.15, linestyle=":",  linewidth=0.4)
+    ax_ent.set_axisbelow(True)
 
     plt.tight_layout()
     plt.savefig(FIG_A, format="pdf", bbox_inches="tight")
@@ -151,7 +185,7 @@ def plot_diversity(curves: dict) -> None:
                loc="lower center", ncol=len(classes),
                bbox_to_anchor=(0.5, -0.02),
                fontsize=10, frameon=False,
-               title="dominant class $\\arg\\max_c \\mathrm{class}(v, c)$",
+               title="dominant class $\\arg\\max_c \\mathrm{ class}(v)_c$",
                title_fontsize=10)
 
     fig.suptitle("Across-vertex diversity: dominant-class composition on c4",
