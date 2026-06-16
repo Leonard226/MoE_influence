@@ -63,14 +63,13 @@ def main() -> None:
 
     ax_raw.set_xscale("log")
     ax_raw.set_yscale("log")
-    ax_raw.set_xlabel(r"Vertex rank (sorted by $\mathrm{act}$, descending)", fontsize=11)
-    ax_raw.set_ylabel(r"$\mathrm{act}^{m,\mathrm{c4}}(v)$", fontsize=11)
-    ax_raw.set_title("Panel A: raw $\\mathrm{act}$ (current definition)",
-                     fontsize=12, pad=8)
+    ax_raw.set_xlabel(r"Vertex rank (sorted by $\mathrm{act}$, descending)", fontsize=14)
+    ax_raw.set_ylabel(r"$\mathrm{act}(v)$", fontsize=14)
+    ax_raw.set_title("Panel A: $\\mathrm{act}$ (raw)", fontsize=14, pad=8)
     ax_raw.grid(True, which="major", alpha=0.35, linestyle="-",  linewidth=0.5)
     ax_raw.grid(True, which="minor", alpha=0.15, linestyle=":",  linewidth=0.4)
     ax_raw.set_axisbelow(True)
-    ax_raw.legend(loc="lower left", framealpha=0.95, fontsize=9, ncol=1)
+    ax_raw.legend(loc="lower left", framealpha=0.95, fontsize=10, ncol=1)
 
     # ---- Panel B: log-max normalised act -----------------------------------
     for model, style in MODEL_STYLE.items():
@@ -79,16 +78,14 @@ def main() -> None:
         ax_norm.plot(ranks, values, **style)
 
     ax_norm.set_xscale("log")
-    ax_norm.set_xlabel(r"Vertex rank (sorted by $\hat{\mathrm{act}}$, descending)",
-                       fontsize=11)
-    ax_norm.set_ylabel(r"$\hat{\mathrm{act}}(v) = \log(1+\mathrm{act}(v))\,/\,\log(1+\max_{v'}\mathrm{act}(v'))$",
-                       fontsize=10)
-    ax_norm.set_title("Panel B: log-max normalised $\\hat{\\mathrm{act}}$",
-                      fontsize=12, pad=8)
+    ax_norm.set_xlabel(r"Vertex rank (sorted by $\hat{\mathrm{act}}$, descending)", fontsize=14)
+    ax_norm.set_ylabel(r"$\hat{\mathrm{act}}(v)$", fontsize=14)
+    ax_norm.set_title("Panel B: $\\hat{\\mathrm{act}}$ (log-max normalised)", fontsize=14, pad=8)
     ax_norm.set_ylim(0, 1.05)
     ax_norm.grid(True, which="major", alpha=0.35, linestyle="-",  linewidth=0.5)
     ax_norm.grid(True, which="minor", alpha=0.15, linestyle=":",  linewidth=0.4)
     ax_norm.set_axisbelow(True)
+    ax_norm.legend(loc="lower left", framealpha=0.95, fontsize=10, ncol=1)
 
     plt.tight_layout()
     plt.savefig(FIG, format="pdf", bbox_inches="tight")
