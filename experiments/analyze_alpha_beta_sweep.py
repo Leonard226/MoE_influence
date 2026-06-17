@@ -2,7 +2,7 @@
 
 Reads S_full_with_act.npz produced by aggregate_alpha_beta_sweep.py
 (shape (64, 64, len(ALPHAS), len(QUANTILES))) and writes to
-{result_path}/circuits/alpha_beta_sweep/analysis/with_act/:
+{result_path}/circuits/<sweep_dir>/analysis/with_act/:
 
     summary.txt
         Coverage, global aggregates per (α, Q), per-task CMS, per-model WM,
@@ -10,10 +10,11 @@ Reads S_full_with_act.npz produced by aggregate_alpha_beta_sweep.py
     heatmap_a{α}_Q{Q}.pdf    (9 PDFs, one per (α, Q) cell)
         Per-task 2×4 grid of 8×8 model×model heatmaps, cell values overlaid.
 
-The 'with_act' suffix reflects the current schema (W_softmax edge weight,
-F includes rank-normalised Su et al. activation). The legacy 'no_act'
-results are archived alongside under analysis/no_act/.
+The sweep input directory is selected by --act-norm / --load-norm (mirrors the
+aggregator's routing): default (rank, raw) -> 'alpha_beta_sweep/' (legacy),
+log_max + log_max -> 'alpha_beta_sweep_logact_logload/'.
 """
+import argparse
 import os
 import sys
 
@@ -32,7 +33,28 @@ from experiments.run_alpha_beta_sweep import (  # noqa: E402
 with open(os.path.join(ROOT, "config.yaml")) as f:
     config = yaml.safe_load(f)
 
-INPUT_DIR = os.path.join(config["result_path"], "circuits", "alpha_beta_sweep")
+_parser = argparse.ArgumentParser(description=__doc__)
+_parser.add_argument("--input-dir", default=None,
+                     help="Override the auto-routed sweep directory.")
+_parser.add_argument("--act-norm", type=str, default="rank",
+                     choices=["rank", "log_max"],
+                     help="Match the value used in the sweep. Selects the "
+                          "default input subdirectory (legacy: rank).")
+_parser.add_argument("--load-norm", type=str, default="raw",
+                     choices=["raw", "log_max"],
+                     help="Match the value used in the sweep. Selects the "
+                          "default input subdirectory (legacy: raw).")
+_args = _parser.parse_args()
+
+_suffix_parts: list[str] = []
+if _args.act_norm == "log_max":
+    _suffix_parts.append("logact")
+if _args.load_norm == "log_max":
+    _suffix_parts.append("logload")
+_sweep_name = ("alpha_beta_sweep_" + "_".join(_suffix_parts)
+               if _suffix_parts else "alpha_beta_sweep")
+INPUT_DIR = _args.input_dir or os.path.join(
+    config["result_path"], "circuits", _sweep_name)
 INPUT_PATH = os.path.join(INPUT_DIR, "S_full_with_act.npz")
 OUT_DIR = os.path.join(INPUT_DIR, "analysis", "with_act")
 Path(OUT_DIR).mkdir(parents=True, exist_ok=True)
@@ -278,13 +300,13 @@ def draw_per_task_heatmaps(S_slice, fig_title, fname):
         idx = [tuple_idx(m, t) for m in MODELS]
         sub = S_slice[np.ix_(idx, idx)]
         im = ax.imshow(sub, cmap="viridis", vmin=0.0, vmax=1.0)
-        ax.set_title(t, fontsize=12, fontweight="bold")
+        ax.set_title(t, fontsize=18, fontweight="bold")
         ax.set_xticks(range(len(MODELS)))
         ax.set_yticks(range(len(MODELS)))
-        ax.set_xticklabels(MODELS, rotation=45, ha="right", fontsize=8)
+        ax.set_xticklabels(MODELS, rotation=45, ha="right", fontsize=12)
         # Only label y-axis on the leftmost column; rows are identical across.
         if ti % 4 == 0:
-            ax.set_yticklabels(MODELS, fontsize=8)
+            ax.set_yticklabels(MODELS, fontsize=12)
         else:
             ax.set_yticklabels([])
         # Cell value overlays.
@@ -293,20 +315,19 @@ def draw_per_task_heatmaps(S_slice, fig_title, fname):
                 v = sub[i, j]
                 if not np.isnan(v):
                     ax.text(j, i, f"{v:.2f}",
-                            ha="center", va="center", fontsize=7,
+                            ha="center", va="center", fontsize=8,
                             color="white" if v < 0.6 else "black")
     # Title position has to compensate for bbox_inches='tight': the trim
     # removes more whitespace on the right (past the colorbar) than on the
     # left (where y-tick labels are flush against the figure edge), so the
     # visual centre of the trimmed PDF sits slightly LEFT of the original
     # figure centre x=0.5. x=0.49 puts the title at the visible centre.
-    fig.suptitle(fig_title, fontsize=15, fontweight="bold",
+    fig.suptitle(fig_title, fontsize=16, fontweight="bold",
                  x=0.43, y=0.96, ha="center")
     fig.subplots_adjust(top=0.88, bottom=0.10, left=0.06, right=0.92,
-                        wspace=0.25, hspace=0.40)
-    cbar = fig.colorbar(im, ax=axes.tolist(), shrink=0.7, location="right")
-    cbar.set_label("FGW similarity (higher means greater similarity)",
-                   fontsize=13)
+                        wspace=0.25, hspace=0.60)
+    cbar = fig.colorbar(im, ax=axes.tolist(), shrink=0.7, pad=0.02, location="right")
+    cbar.set_label("FGW similarity (higher means greater similarity)", fontsize=12)
     out = os.path.join(OUT_DIR, fname)
     # bbox_inches='tight' trims the empty right margin after the colorbar.
     # y=0.96 keeps the suptitle inside the bbox so it's preserved by the trim.
@@ -324,8 +345,7 @@ def _q_tag(q):
 for alpha in ALPHAS:
     for Q in QUANTILES:
         sl = S[:, :, alpha_idx(alpha), q_idx(Q)]
-        title = (f"Cross-model FGW similarity\n"
-                 f"α = {alpha}, Q = {Q}, β = {FIXED_BETA}")
+        title = (f"Cross-model FGW similarity (Sparsification Q = {Q}, α = {alpha}, β = {FIXED_BETA})")
         fname = f"heatmap_a{alpha:g}_Q{_q_tag(Q)}.pdf"
         draw_per_task_heatmaps(sl, title, fname)
 

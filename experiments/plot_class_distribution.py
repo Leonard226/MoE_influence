@@ -57,7 +57,7 @@ CLASS_COLORS = {
 
 
 def plot_specialization(ax) -> None:
-    """Panel A: per-vertex max-class probability, sorted descending."""
+    """Panel A: per-expert max-class probability, sorted descending."""
     for model, style in MODEL_STYLE.items():
         values = np.array(curves[model]["max_prob_sorted"])
         ranks = np.arange(1, len(values) + 1)
@@ -68,11 +68,11 @@ def plot_specialization(ax) -> None:
     ax.text(1.05, 0.2, " uniform (0.2)", fontsize=8.5, color="gray", va="center")
 
     ax.set_xscale("log")
-    ax.set_xlabel(r"Vertex rank (sorted by $\max_c \mathrm{ class}(v)_c$, descending)",
+    ax.set_xlabel(r"Expert rank (sorted by $\max_c \, \mathrm{class}(v)_c$, descending)",
                   fontsize=13)
-    ax.set_ylabel(r"$\max_c \mathrm{ class}(v)_c$", fontsize=13)
+    ax.set_ylabel(r"$\max_c \, \mathrm{class}(v)_c$", fontsize=13)
     ax.set_ylim(0.15, 1.02)
-    ax.set_title(r"Panel A: within-vertex specialization", fontsize=13, pad=8)
+    ax.set_title(r"Panel A: within-expert specialization", fontsize=13, pad=8)
     ax.grid(True, which="major", alpha=0.35, linestyle="-",  linewidth=0.5)
     ax.grid(True, which="minor", alpha=0.15, linestyle=":",  linewidth=0.4)
     ax.set_axisbelow(True)
@@ -99,16 +99,14 @@ def plot_diversity(ax, classes: list[str]) -> None:
     ax.set_yticks(y_pos)
     ax.set_yticklabels([MODEL_STYLE[m]["label"] for m in models], fontsize=9.5)
     ax.set_xlim(0, 1.0)
-    ax.set_xlabel("fraction of vertices", fontsize=13)
-    ax.set_title(r"Panel B: across-vertex diversity (dominant class)",
+    ax.set_xlabel("fraction of experts", fontsize=13)
+    ax.set_title(r"Panel B: cross-expert diversity (dominant class)",
                  fontsize=13, pad=8)
     ax.grid(True, axis="x", which="major", alpha=0.25, linestyle=":")
     ax.set_axisbelow(True)
-
     ax.legend(loc="lower left",
-              bbox_to_anchor=(0.0, -0.35), ncol=len(classes),
+              bbox_to_anchor=(-0.1, -0.2), ncol=len(classes),
               fontsize=9, frameon=False,
-              title=r"dominant class $\arg\max_c \mathrm{ class}(v)_c$",
               title_fontsize=10)
 
 

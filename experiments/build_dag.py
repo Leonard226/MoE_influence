@@ -206,6 +206,14 @@ parser.add_argument("--model", choices=list(MODELS), default="olmoe", help="Whic
 parser.add_argument("--dataset", choices=list(DATASETS), default="c4", help="Which dataset to build the DAG on (default: c4).")
 parser.add_argument("--n_prompts", type=int, default=500, help="Number of prompts to use; capped to min(this, len(loaded_prompts)).")
 parser.add_argument("--B", type=int, default=32, help="Batch size (lower if you OOM; default 32).")
+parser.add_argument("--random-init", action="store_true",
+                    help="Build the model with architecture-default init (Kaiming/scaled-normal/...) "
+                         "instead of loading pretrained weights. Used for the null-baseline experiment. "
+                         "Tokenizer is still loaded from MODEL_ID (we still tokenise real text).")
+parser.add_argument("--seed", type=int, default=0,
+                    help="Random seed for --random-init weight initialisation. Recorded in the output "
+                         "filename as dag_<model>_<dataset>_rand_s{seed}.pt. Ignored when --random-init "
+                         "is not set.")
 args = parser.parse_args()
 
 device = "cuda:0"
@@ -240,7 +248,64 @@ print(f"  CUDA_VISIBLE_DEVICES = {os.environ.get('CUDA_VISIBLE_DEVICES', '<unset
 t0 = time.time()
 load_kwargs = dict(attn_implementation="eager", torch_dtype=torch.bfloat16)
 
-if MODEL.get("quantization") in ("int8", "nf4"):
+if args.random_init:
+    # ------------------------------------------------------------------
+    # Null-baseline path: build the model with the architecture's default
+    # init scheme (no pretrained weights loaded). For multi_gpu=True models
+    # we still shard across GPUs via accelerate's dispatch_model; for
+    # single-GPU models we just instantiate on the target device.
+    # ------------------------------------------------------------------
+    print(f"  random-init mode: seed={args.seed}", flush=True)
+    cfg = MODEL["cls"].config_class.from_pretrained(MODEL_ID, trust_remote_code=True)
+    cfg.torch_dtype = torch.bfloat16
+
+    # Seed RNG before any tensor allocation so the init is deterministic.
+    torch.manual_seed(args.seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(args.seed)
+
+    if MODEL.get("multi_gpu", False):
+        try:
+            from accelerate import dispatch_model, init_empty_weights, infer_auto_device_map
+        except ImportError:
+            raise RuntimeError("--random-init for multi_gpu models requires accelerate")
+
+        # Step 1: plan device map on a meta-device skeleton.
+        print("  planning device map on meta skeleton ...", flush=True)
+        with init_empty_weights():
+            empty_model = MODEL["cls"](cfg)
+        no_split = empty_model._no_split_modules
+        max_mem = MODEL.get("max_memory", {0: "75GiB"})
+        computed_map = infer_auto_device_map(
+            empty_model, max_memory=max_mem,
+            no_split_module_classes=no_split, dtype=torch.bfloat16,
+        )
+        print(f"  computed device_map: {computed_map}", flush=True)
+        del empty_model
+
+        # Step 2: build the actual model on CPU with the architecture's
+        # default _init_weights (called by PreTrainedModel.__init__), then
+        # re-apply _init_weights once more under the seeded RNG to make
+        # initialisation order-deterministic across PyTorch versions.
+        print(f"  materializing model on CPU with architecture-default init "
+              f"(seed={args.seed}) ...", flush=True)
+        model = MODEL["cls"](cfg).to(torch.bfloat16).eval()
+        torch.manual_seed(args.seed)
+        if hasattr(model, "_init_weights"):
+            model.apply(model._init_weights)
+
+        print("  dispatching to GPUs ...", flush=True)
+        model = dispatch_model(model, device_map=computed_map)
+        print(f"  hf_device_map = {getattr(model, 'hf_device_map', '<not present>')}", flush=True)
+    else:
+        # Single-GPU random-init.
+        print(f"  building model on {device} with architecture-default init "
+              f"(seed={args.seed}) ...", flush=True)
+        model = MODEL["cls"](cfg).to(torch.bfloat16).to(device).eval()
+        torch.manual_seed(args.seed)
+        if hasattr(model, "_init_weights"):
+            model.apply(model._init_weights)
+elif MODEL.get("quantization") in ("int8", "nf4"):
     # Bitsandbytes quantization. HF handles device_map automatically; we skip the
     # manual init_empty_weights / dispatch_model dance. Router gate and lm_head are
     # in the skip list so the score-decomposition reads them in their native dtype.
@@ -584,7 +649,12 @@ del W_softmax_E_sq
 for _h in _down_proj_hooks:
     _h.remove()
 
-out_path = os.path.join(output_dir, f"dag_{args.model}_{args.dataset}.pt")
+if args.random_init:
+    out_path = os.path.join(
+        output_dir, f"dag_{args.model}_{args.dataset}_rand_s{args.seed}.pt"
+    )
+else:
+    out_path = os.path.join(output_dir, f"dag_{args.model}_{args.dataset}.pt")
 torch.save({
     "APS":               APS.cpu(),                       # [c, j, l, n]
     "ANS":               ANS.cpu(),                       # [c, j, l, n]
@@ -606,5 +676,7 @@ torch.save({
     "model":             MODEL_ID,
     "moe_layers":        MOE_LAYERS,
     "dataset":           args.dataset,
+    "random_init":       bool(args.random_init),
+    "seed":              int(args.seed) if args.random_init else None,
 }, out_path)
 print(f"Saved {out_path}")

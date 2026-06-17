@@ -36,13 +36,22 @@ import time
 from pathlib import Path
 
 import numpy as np
-import torch
+try:
+    import torch    # only used by the FGW build/run functions, not at import time
+except ImportError:
+    torch = None    # allow importing module-level constants on torch-free hosts
 import yaml
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 
-from experiments.fgw import build_triple, fgw_similarity
+try:
+    from experiments.fgw import build_triple, fgw_similarity
+except ImportError:
+    # torch-free hosts can still import this module for the constants
+    # (MODELS, TASKS, TUPLES, ALPHAS, QUANTILES, FIXED_BETA) used by the
+    # downstream analysis scripts.
+    build_triple = fgw_similarity = None
 
 with open(os.path.join(ROOT, "config.yaml")) as f:
     config = yaml.safe_load(f)
