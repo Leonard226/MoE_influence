@@ -283,33 +283,26 @@ if args.random_init:
         print(f"  computed device_map: {computed_map}", flush=True)
         del empty_model
 
-        # Step 2: build the actual model on CPU directly in bf16. Setting the
-        # default dtype before construction halves peak CPU RAM (no fp32
-        # allocation followed by a bf16 cast) and shaves several minutes for
-        # 47B-param models. PreTrainedModel.__init__ calls _init_weights under
-        # the RNG we seeded above, so no second apply pass is needed.
-        print(f"  materializing model on CPU directly in bf16 "
-              f"(seed={args.seed}) ...", flush=True)
-        prev_dtype = torch.get_default_dtype()
-        torch.set_default_dtype(torch.bfloat16)
-        try:
-            model = MODEL["cls"](cfg).eval()
-        finally:
-            torch.set_default_dtype(prev_dtype)
+        # Step 2: build the model on CPU in fp32 (architecture-default), then
+        # cast to bf16. We do NOT set torch.set_default_dtype(torch.bfloat16)
+        # before construction because that would silently put the rotary
+        # embedding precomputation (inv_freq = 1 / theta^(...) ) in bf16,
+        # whose dynamic range can produce subnormals/NaNs. fp32 + cast is the
+        # same pattern HF's from_pretrained(torch_dtype=bf16) uses.
+        # PreTrainedModel.__init__ calls _init_weights under the RNG we seeded
+        # above, so no second apply pass is needed.
+        print(f"  materializing model on CPU (fp32 init -> bf16 cast, "
+              f"seed={args.seed}) ...", flush=True)
+        model = MODEL["cls"](cfg).to(torch.bfloat16).eval()
 
         print("  dispatching to GPUs ...", flush=True)
         model = dispatch_model(model, device_map=computed_map)
         print(f"  hf_device_map = {getattr(model, 'hf_device_map', '<not present>')}", flush=True)
     else:
         # Single-GPU random-init.
-        print(f"  building model on {device} with architecture-default init "
-              f"(seed={args.seed}) ...", flush=True)
-        prev_dtype = torch.get_default_dtype()
-        torch.set_default_dtype(torch.bfloat16)
-        try:
-            model = MODEL["cls"](cfg).to(device).eval()
-        finally:
-            torch.set_default_dtype(prev_dtype)
+        print(f"  building model on {device} (fp32 init -> bf16 cast, "
+              f"seed={args.seed}) ...", flush=True)
+        model = MODEL["cls"](cfg).to(torch.bfloat16).to(device).eval()
 elif MODEL.get("quantization") in ("int8", "nf4"):
     # Bitsandbytes quantization. HF handles device_map automatically; we skip the
     # manual init_empty_weights / dispatch_model dance. Router gate and lm_head are
