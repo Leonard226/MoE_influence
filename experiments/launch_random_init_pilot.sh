@@ -40,10 +40,12 @@ export LD_LIBRARY_PATH="/scratch/sleonard/miniconda3/envs/megatron/lib:${LD_LIBR
 # Preserve the HF cache path.
 export HF_HOME="${HF_HOME:-$HOME/.hugging_face}"
 
-# Pin BLAS threads to keep CPU build of the model from oversubscribing.
-export OMP_NUM_THREADS=1
-export MKL_NUM_THREADS=1
-export OPENBLAS_NUM_THREADS=1
+# Parallelise CPU init (kaiming_uniform_ / dtype-cast benefit from OpenMP).
+# Match --cpus-per-task above so we don't oversubscribe across array tasks
+# running on the same node.
+export OMP_NUM_THREADS="${SLURM_CPUS_PER_TASK:-8}"
+export MKL_NUM_THREADS="${SLURM_CPUS_PER_TASK:-8}"
+export OPENBLAS_NUM_THREADS="${SLURM_CPUS_PER_TASK:-8}"
 
 SEED=${SLURM_ARRAY_TASK_ID:-0}
 MODEL="mixtral-8x7b"

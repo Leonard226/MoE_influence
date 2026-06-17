@@ -283,16 +283,19 @@ if args.random_init:
         print(f"  computed device_map: {computed_map}", flush=True)
         del empty_model
 
-        # Step 2: build the actual model on CPU with the architecture's
-        # default _init_weights (called by PreTrainedModel.__init__), then
-        # re-apply _init_weights once more under the seeded RNG to make
-        # initialisation order-deterministic across PyTorch versions.
-        print(f"  materializing model on CPU with architecture-default init "
+        # Step 2: build the actual model on CPU directly in bf16. Setting the
+        # default dtype before construction halves peak CPU RAM (no fp32
+        # allocation followed by a bf16 cast) and shaves several minutes for
+        # 47B-param models. PreTrainedModel.__init__ calls _init_weights under
+        # the RNG we seeded above, so no second apply pass is needed.
+        print(f"  materializing model on CPU directly in bf16 "
               f"(seed={args.seed}) ...", flush=True)
-        model = MODEL["cls"](cfg).to(torch.bfloat16).eval()
-        torch.manual_seed(args.seed)
-        if hasattr(model, "_init_weights"):
-            model.apply(model._init_weights)
+        prev_dtype = torch.get_default_dtype()
+        torch.set_default_dtype(torch.bfloat16)
+        try:
+            model = MODEL["cls"](cfg).eval()
+        finally:
+            torch.set_default_dtype(prev_dtype)
 
         print("  dispatching to GPUs ...", flush=True)
         model = dispatch_model(model, device_map=computed_map)
@@ -301,10 +304,12 @@ if args.random_init:
         # Single-GPU random-init.
         print(f"  building model on {device} with architecture-default init "
               f"(seed={args.seed}) ...", flush=True)
-        model = MODEL["cls"](cfg).to(torch.bfloat16).to(device).eval()
-        torch.manual_seed(args.seed)
-        if hasattr(model, "_init_weights"):
-            model.apply(model._init_weights)
+        prev_dtype = torch.get_default_dtype()
+        torch.set_default_dtype(torch.bfloat16)
+        try:
+            model = MODEL["cls"](cfg).to(device).eval()
+        finally:
+            torch.set_default_dtype(prev_dtype)
 elif MODEL.get("quantization") in ("int8", "nf4"):
     # Bitsandbytes quantization. HF handles device_map automatically; we skip the
     # manual init_empty_weights / dispatch_model dance. Router gate and lm_head are
