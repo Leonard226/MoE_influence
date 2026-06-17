@@ -258,6 +258,11 @@ if args.random_init:
     print(f"  random-init mode: seed={args.seed}", flush=True)
     cfg = MODEL["cls"].config_class.from_pretrained(MODEL_ID, trust_remote_code=True)
     cfg.torch_dtype = torch.bfloat16
+    # Force eager attention so the customized model receives real attn weights;
+    # sdpa/flash returns None there, which the customized forward stores into a
+    # pre-allocated CUDA tensor and crashes (matches the load_kwargs the trained
+    # path passes to from_pretrained).
+    cfg._attn_implementation = "eager"
 
     # Seed RNG before any tensor allocation so the init is deterministic.
     torch.manual_seed(args.seed)
