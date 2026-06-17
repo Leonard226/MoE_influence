@@ -1,5 +1,6 @@
 #!/bin/bash
 #SBATCH --job-name="null-pilot"
+#SBATCH --nodelist=piora1,piora2,piora5,piora6
 #SBATCH --gres=gpu:4
 #SBATCH --cpus-per-task=8
 #SBATCH --output=logs/null_pilot_%A_%a.log

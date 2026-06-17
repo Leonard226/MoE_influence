@@ -1,5 +1,6 @@
 #!/bin/bash
 #SBATCH --job-name="null-small"
+#SBATCH --nodelist=piora1,piora2,piora5,piora6
 #SBATCH --gres=gpu:4
 #SBATCH --cpus-per-task=8
 #SBATCH --output=logs/null_small_%A_%a.log
