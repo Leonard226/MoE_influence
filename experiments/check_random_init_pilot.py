@@ -21,6 +21,7 @@ Writes nothing; prints a pass/fail report.
 """
 from __future__ import annotations
 
+import argparse
 import sys
 from pathlib import Path
 
@@ -31,9 +32,8 @@ import yaml
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-MODEL = "mixtral-8x7b"
 DATASET = "c4"
-SEEDS = [0, 1, 2]
+DEFAULT_SEEDS = [0, 1, 2]
 GINI_MAX = 0.5
 ENTROPY_NORM_MIN = 0.7
 ACT_MAX = 1e4
@@ -114,16 +114,25 @@ def check_one(path: Path) -> tuple[bool, str]:
 
 
 def main() -> None:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--model", default="mixtral-8x7b",
+                        help="Model name to sanity-check (default: mixtral-8x7b).")
+    parser.add_argument("--seeds", type=int, nargs="+", default=DEFAULT_SEEDS,
+                        help="Random-init seeds to check (default: 0 1 2).")
+    parser.add_argument("--dataset", default=DATASET,
+                        help=f"Dataset suffix in the DAG filename (default: {DATASET}).")
+    args = parser.parse_args()
+
     with open(ROOT / "config.yaml") as f:
         cfg = yaml.safe_load(f)
     circuits_dir = Path(cfg["result_path"]) / "circuits"
 
-    print("Sanity-check: Mixtral-8x7B random-init pilot DAGs")
+    print(f"Sanity-check: {args.model} random-init DAGs on {args.dataset}")
     print("=" * 70)
 
     results = []
-    for seed in SEEDS:
-        p = circuits_dir / f"dag_{MODEL}_{DATASET}_rand_s{seed}.pt"
+    for seed in args.seeds:
+        p = circuits_dir / f"dag_{args.model}_{args.dataset}_rand_s{seed}.pt"
         ok, msg = check_one(p)
         results.append((seed, ok, msg))
 
@@ -135,10 +144,10 @@ def main() -> None:
 
     all_ok = all(ok for _, ok, _ in results)
     if all_ok:
-        print("\nAll seeds passed sanity checks. Ready to scale to other architectures.")
+        print(f"\nAll seeds passed sanity checks for {args.model}.")
         sys.exit(0)
     else:
-        print("\nAt least one seed failed. Investigate before scaling.")
+        print(f"\nAt least one seed failed for {args.model}. Investigate before proceeding.")
         sys.exit(1)
 
 
