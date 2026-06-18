@@ -447,28 +447,39 @@ def load_partitioned_model_random_init(model_cfg, rank, world_size, local_rank, 
     rprint(rank, f"[rank {rank}] materialised {n_materialized} params with random init")
 
     # ----- TEMPORARY DEBUG: verify init actually stuck -----
-    if rank == 0 and owned:
-        sample_layer = owned[0]
-        try:
-            mlp = model.model.layers[sample_layer].mlp
-            if hasattr(mlp, "gate"):
+    if rank == 0:
+        rprint(rank, f"  [debug] entered weight-probe; owned={owned[:3]}{'...' if len(owned) > 3 else ''}  "
+                     f"(len={len(owned)})")
+        # Find the first OWNED MoE layer (skips dense layers like DeepSeek's layer 0).
+        sample_layer = None
+        for L in owned:
+            try:
+                if hasattr(model.model.layers[L].mlp, "gate"):
+                    sample_layer = L
+                    break
+            except Exception:
+                continue
+        if sample_layer is None:
+            rprint(rank, f"  [debug] no MoE layer found in owned; skipping weight probe")
+        else:
+            try:
+                mlp = model.model.layers[sample_layer].mlp
                 gw = mlp.gate.weight
                 rprint(rank, f"  [debug] layers[{sample_layer}].mlp.gate.weight: "
                              f"device={gw.device}, "
                              f"[0,:4]={gw[0,:4].tolist() if gw.device.type != 'meta' else 'META'}")
-            if hasattr(mlp, "experts") and len(mlp.experts) > 0 and mlp.experts[0] is not None:
-                # First Linear inside the first expert (gate_proj or w1 depending on arch).
-                expert = mlp.experts[0]
-                for sub_name in ("gate_proj", "w1", "up_proj", "w3", "down_proj", "w2"):
-                    sub = getattr(expert, sub_name, None)
-                    if sub is not None and hasattr(sub, "weight"):
-                        ew = sub.weight
-                        rprint(rank, f"  [debug] layers[{sample_layer}].mlp.experts[0].{sub_name}.weight: "
-                                     f"device={ew.device}, "
-                                     f"[0,:4]={ew[0,:4].tolist() if ew.device.type != 'meta' else 'META'}")
-                        break
-        except Exception as e:
-            rprint(rank, f"  [debug] sample-weight probe failed: {type(e).__name__}: {e}")
+                if hasattr(mlp, "experts") and len(mlp.experts) > 0 and mlp.experts[0] is not None:
+                    expert = mlp.experts[0]
+                    for sub_name in ("gate_proj", "w1", "up_proj", "w3", "down_proj", "w2"):
+                        sub = getattr(expert, sub_name, None)
+                        if sub is not None and hasattr(sub, "weight"):
+                            ew = sub.weight
+                            rprint(rank, f"  [debug] layers[{sample_layer}].mlp.experts[0].{sub_name}.weight: "
+                                         f"device={ew.device}, "
+                                         f"[0,:4]={ew[0,:4].tolist() if ew.device.type != 'meta' else 'META'}")
+                            break
+            except Exception as e:
+                rprint(rank, f"  [debug] sample-weight probe failed: {type(e).__name__}: {e}")
     # ------------------------------------------------------
 
     # Replace non-owned decoder layers with None so our custom forward skips them.
