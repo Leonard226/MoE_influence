@@ -1,6 +1,6 @@
 #!/bin/bash
 #SBATCH --job-name="null-m22b"
-#SBATCH --nodelist=piora1,piora2,piora5,piora6
+#SBATCH --nodelist=piora1,piora2
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --gres=gpu:4

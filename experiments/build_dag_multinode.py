@@ -444,7 +444,26 @@ def load_partitioned_model_random_init(model_cfg, rank, world_size, local_rank, 
         # place.
         model._init_weights(module)
 
-    rprint(rank, f"[rank {rank}] materialised {n_materialized} params with random init")
+    # Workaround for custom *RMSNorm / *LayerNorm classes that set weight to ones
+    # inside __init__ (no reset_parameters method) -- under init_empty_weights()
+    # that __init__ is a no-op on meta tensors, so after materialisation the
+    # weight is left as undefined empty memory (often zero), which zeroes the
+    # residual stream at the first normalisation and forces uniform-logit
+    # routing. Restore the designed identity init explicitly here.
+    n_norm_fixed = 0
+    for nm_name, nm in model.named_modules():
+        cls_name = type(nm).__name__
+        if "RMSNorm" not in cls_name and "LayerNorm" not in cls_name:
+            continue
+        w = getattr(nm, "weight", None)
+        if w is not None and w.device.type != "meta":
+            w.data.fill_(1.0)
+            n_norm_fixed += 1
+        b = getattr(nm, "bias", None)
+        if b is not None and b.device.type != "meta":
+            b.data.zero_()
+    rprint(rank, f"[rank {rank}] materialised {n_materialized} params with random init "
+                 f"(+{n_norm_fixed} norm weights reset to identity)")
 
     # ----- TEMPORARY DEBUG: verify init actually stuck -----
     if rank == 0:
