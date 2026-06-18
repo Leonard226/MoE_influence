@@ -1,13 +1,13 @@
 """Null-baseline FGW sweep on c4.
 
 For each (alpha, Q) cell, compute four null distributions of FGW similarity:
-  1. trained_vs_random_same    -- 5 archs x 3 seeds = 15 pairs
-  2. trained_vs_random_cross   -- 5 x 4 archs x 3 seeds = 60 pairs
-  3. random_vs_random_cross    -- C(5,2) x 3 x 3 = 90 pairs
-  4. random_vs_random_same     -- 5 archs x C(3,2) = 15 pairs   (seed variance)
+  1. trained_vs_random_same    -- 8 archs x 3 seeds = 24 pairs
+  2. trained_vs_random_cross   -- 8 x 7 archs x 3 seeds = 168 pairs
+  3. random_vs_random_cross    -- C(8,2) x 3 x 3 = 252 pairs
+  4. random_vs_random_same     -- 8 archs x C(3,2) = 24 pairs    (seed variance)
 
-Total per (alpha, Q): 180 pairs x 3 alpha = 540 FGW calls.
-Total over (alpha, Q): 1620 FGW calls. ~hours on a single CPU node.
+Total per (alpha, Q): 468 pairs x 3 alpha = 1404 FGW calls.
+Total over (alpha, Q): 4212 FGW calls. ~hours-to-day on a single CPU node.
 
 SLURM-array friendly: --q-idx selects one of the 3 quantile values; each task
 builds its 20 triples (5 archs x [trained + 3 seeds]) once for its Q and runs
@@ -59,6 +59,9 @@ ARCHS = [
     "deepseek-v2-lite",
     "qwen3-30b-a3b",
     "phi-3.5-moe",
+    "mixtral-8x22b",
+    "deepseek-v2",
+    "qwen3-235b-a22b",
 ]
 SEEDS = [0, 1, 2]
 ALPHAS = [0.0, 0.5, 1.0]
