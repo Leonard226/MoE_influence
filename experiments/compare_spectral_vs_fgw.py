@@ -149,13 +149,13 @@ def main() -> None:
             rho_sp[ai, qi], _ = scipy.stats.spearmanr(s_spec[valid], s_fgw[valid])
             rho_pe[ai, qi], _ = scipy.stats.pearsonr(s_spec[valid], s_fgw[valid])
 
-    w(f"  Spearman:  {'alpha\\Q':<10s}  " + "  ".join(f"Q={Q:5.3g}" for Q in QUANTILES))
+    w(f"  Spearman:  {'alpha/Q':<10s}  " + "  ".join(f"Q={Q:5.3g}" for Q in QUANTILES))
     w("  " + "-" * 60)
     for ai, alpha in enumerate(ALPHAS):
         w(f"             alpha = {alpha:.2f}  " +
           "  ".join(f"{rho_sp[ai, qi]:+7.3f}" for qi in range(n_q)))
     w("")
-    w(f"  Pearson:   {'alpha\\Q':<10s}  " + "  ".join(f"Q={Q:5.3g}" for Q in QUANTILES))
+    w(f"  Pearson:   {'alpha/Q':<10s}  " + "  ".join(f"Q={Q:5.3g}" for Q in QUANTILES))
     w("  " + "-" * 60)
     for ai, alpha in enumerate(ALPHAS):
         w(f"             alpha = {alpha:.2f}  " +
