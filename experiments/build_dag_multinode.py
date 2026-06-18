@@ -446,6 +446,31 @@ def load_partitioned_model_random_init(model_cfg, rank, world_size, local_rank, 
 
     rprint(rank, f"[rank {rank}] materialised {n_materialized} params with random init")
 
+    # ----- TEMPORARY DEBUG: verify init actually stuck -----
+    if rank == 0 and owned:
+        sample_layer = owned[0]
+        try:
+            mlp = model.model.layers[sample_layer].mlp
+            if hasattr(mlp, "gate"):
+                gw = mlp.gate.weight
+                rprint(rank, f"  [debug] layers[{sample_layer}].mlp.gate.weight: "
+                             f"device={gw.device}, "
+                             f"[0,:4]={gw[0,:4].tolist() if gw.device.type != 'meta' else 'META'}")
+            if hasattr(mlp, "experts") and len(mlp.experts) > 0 and mlp.experts[0] is not None:
+                # First Linear inside the first expert (gate_proj or w1 depending on arch).
+                expert = mlp.experts[0]
+                for sub_name in ("gate_proj", "w1", "up_proj", "w3", "down_proj", "w2"):
+                    sub = getattr(expert, sub_name, None)
+                    if sub is not None and hasattr(sub, "weight"):
+                        ew = sub.weight
+                        rprint(rank, f"  [debug] layers[{sample_layer}].mlp.experts[0].{sub_name}.weight: "
+                                     f"device={ew.device}, "
+                                     f"[0,:4]={ew[0,:4].tolist() if ew.device.type != 'meta' else 'META'}")
+                        break
+        except Exception as e:
+            rprint(rank, f"  [debug] sample-weight probe failed: {type(e).__name__}: {e}")
+    # ------------------------------------------------------
+
     # Replace non-owned decoder layers with None so our custom forward skips them.
     inner = model.model
     new_layers = torch.nn.ModuleList()
