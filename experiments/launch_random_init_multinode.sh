@@ -59,8 +59,10 @@ export OPENBLAS_NUM_THREADS="${SLURM_CPUS_PER_TASK:-8}"
 nodes=( $(scontrol show hostnames "$SLURM_JOB_NODELIST") )
 export MASTER_ADDR="${nodes[0]}"
 # Unique port per array task to avoid c10d rendezvous collisions when
-# multiple tasks run concurrently.
-export MASTER_PORT=$(( 29500 + SLURM_ARRAY_TASK_ID ))
+# multiple tasks run concurrently. PORT_BASE can be overridden on re-launch
+# (e.g. `sbatch --export=ALL,PORT_BASE=39500 ...`) to dodge stale binds left
+# by a prior failed run.
+export MASTER_PORT=$(( ${PORT_BASE:-29500} + SLURM_ARRAY_TASK_ID ))
 
 # NCCL: prefer InfiniBand, quiet logs unless requested.
 export NCCL_IB_DISABLE=0

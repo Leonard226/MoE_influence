@@ -424,7 +424,24 @@ def load_partitioned_model_random_init(model_cfg, rank, world_size, local_rank, 
                                         dtype=torch.bfloat16)
             n_materialized += 1
 
+        # Custom modules (DeepSeek's MoEGate, etc.) define `reset_parameters`
+        # in their __init__ but it runs as a no-op under init_empty_weights().
+        # Call it now on the materialised tensors so the architecture's own
+        # init scheme fires. For modules without reset_parameters this is a
+        # no-op. For modules whose `_init_weights` overrides (nn.Linear,
+        # nn.Embedding, nn.LayerNorm) the subsequent `_init_weights(module)`
+        # call still applies the HF-intended scheme.
+        if hasattr(module, "reset_parameters"):
+            try:
+                module.reset_parameters()
+            except Exception as e:
+                rprint(rank, f"  [warn] reset_parameters failed on {module_name}: "
+                             f"{type(e).__name__}: {str(e)[:120]}")
+
         # Apply architecture-default init on the now-materialised tensors.
+        # Overrides reset_parameters for the standard modules HF's
+        # `_init_weights` handles; leaves custom modules' reset_parameters in
+        # place.
         model._init_weights(module)
 
     rprint(rank, f"[rank {rank}] materialised {n_materialized} params with random init")
