@@ -128,7 +128,8 @@ EDGE_TENSOR = "W_softmax"   # primary edge weight used throughout the sweep
 
 def build_triple_at_Q(model, task, classification, Q,
                       act_norm_method: str = "rank",
-                      load_norm_method: str = "raw"):
+                      load_norm_method: str = "raw",
+                      structural_mode: str = "path"):
     """Build one triple at β = FIXED_BETA with:
       - F, mass        : computed on the DENSE routing DAG (intrinsic features).
       - C_path         : computed on the SPARSIFIED graph (edges with
@@ -166,7 +167,8 @@ def build_triple_at_Q(model, task, classification, Q,
                           beta=FIXED_BETA, edge_threshold=threshold,
                           edge_tensor=EDGE_TENSOR,
                           act_norm_method=act_norm_method,
-                          load_norm_method=load_norm_method)
+                          load_norm_method=load_norm_method,
+                          structural_mode=structural_mode)
 
     # Identify vertices isolated in the SPARSIFIED graph (no surviving in-
     # or out-edge above threshold). This is the ONLY vertex filter. Strict
@@ -209,6 +211,14 @@ def main():
                              "reproduces the legacy sweep (load = n_tok / "
                              "mean_in_layer). 'log_max' uses per-layer "
                              "log(1+load) / log(1+max_in_layer(load)).")
+    parser.add_argument("--structural-mode", type=str, default="path",
+                        choices=["path", "local"],
+                        help="Structural cost C: 'path' = shortest-path on the "
+                             "Q-sparsified DAG with edge cost 1 - |W| (legacy). "
+                             "'local' = direct-edge cost only (1 - |W| for "
+                             "surviving direct edges, 1 otherwise); honours "
+                             "the local-influence semantics of W_softmax "
+                             "(main.tex §3). Output goes to a separate dir.")
     args = parser.parse_args()
 
     # Route output to a normalisation-specific subdir so legacy results are
@@ -218,6 +228,8 @@ def main():
         suffix_parts.append("logact")
     if args.load_norm == "log_max":
         suffix_parts.append("logload")
+    if args.structural_mode == "local":
+        suffix_parts.append("local")
     default_out_name = ("alpha_beta_sweep_" + "_".join(suffix_parts)
                         if suffix_parts else "alpha_beta_sweep")
     output_dir = args.output_dir or os.path.join(
@@ -249,6 +261,7 @@ def main():
     print(f"  Q        : {QUANTILES}")
     print(f"  act_norm : {args.act_norm}")
     print(f"  load_norm: {args.load_norm}")
+    print(f"  struct.  : {args.structural_mode}")
     print(f"  cells    : {n_cells} (α × Q) per pair")
     print(f"  total    : {n_tgts * n_cells} FGW calls")
     print(f"  output   : {output_path}")
@@ -277,7 +290,8 @@ def main():
         t0 = time.time()
         tri, theta = build_triple_at_Q(src_model, src_task, src_class, Q,
                                        act_norm_method=args.act_norm,
-                                       load_norm_method=args.load_norm)
+                                       load_norm_method=args.load_norm,
+                                       structural_mode=args.structural_mode)
         src_triples_by_Q[Q] = tri
         print(f"  Q={Q:5.3g}: built in {time.time() - t0:7.1f}s  "
               f"n_verts={tri[3]['n_verts']:6d}  θ={theta:.4g}", flush=True)
@@ -324,7 +338,8 @@ def main():
             try:
                 tgt_tri, _ = build_triple_at_Q(tgt_model, tgt_task, tgt_class, Q,
                                                act_norm_method=args.act_norm,
-                                               load_norm_method=args.load_norm)
+                                               load_norm_method=args.load_norm,
+                                               structural_mode=args.structural_mode)
             except FileNotFoundError as e:
                 print(f"    [WARN] missing DAG at Q={Q}: {e}")
                 S_mat[local_t, :, qi] = -1.0

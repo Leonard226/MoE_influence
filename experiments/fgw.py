@@ -197,6 +197,40 @@ def compute_class_histogram(
 # Structural cost: weighted shortest path with edge cost (1 - W).
 # ---------------------------------------------------------------------------
 
+def _local_costs(W_fwd: torch.Tensor, L: int, N: int,
+                 edge_threshold: float = 0.0) -> np.ndarray:
+    """Direct-edge structural cost on the forward DAG (no path aggregation).
+
+    Justification: W(u -> v) is defined as the first-order counterfactual
+    influence of ablating u on v's router output (main.tex §3, "edge weight
+    definition"). The paper explicitly states this is NOT propagated through
+    intermediate MoE layers, so multi-hop products / sums / hitting times /
+    effective resistances do not correspond to any well-defined composite
+    influence. The only locally-justified pairwise structural quantity is the
+    direct edge magnitude itself.
+
+    C_local(u, v) = 1 - |W_uv|       for forward edges with |W| > threshold
+                  = 1                otherwise (no direct measured influence)
+
+    Symmetrised by direction-mirroring (forward DAG: at most one direction
+    per unordered pair has a non-zero entry).
+
+    Returns: [n_verts, n_verts] symmetric float64 in [0, 1], zero on diagonal.
+    """
+    n_verts = L * N
+    W_abs = W_fwd.abs().cpu().numpy().reshape(n_verts, n_verts).astype(np.float64)
+
+    C = np.ones((n_verts, n_verts), dtype=np.float64)
+    mask = W_abs > edge_threshold
+    C[mask] = 1.0 - W_abs[mask]
+
+    # At most one of (u, v), (v, u) has a non-zero W (forward-only DAG); the
+    # other side is still at 1. min gives the forward-direction value.
+    C = np.minimum(C, C.T)
+    np.fill_diagonal(C, 0.0)
+    return C
+
+
 def _shortest_path_costs(W_fwd: torch.Tensor, L: int, N: int,
                          edge_threshold: float = 0.0) -> np.ndarray:
     """All-pairs weighted shortest-path distances on the forward DAG.
@@ -251,6 +285,7 @@ def build_triple(dag: Dict[str, Any],
                  edge_tensor: str = "W_softmax",
                  act_norm_method: str = "rank",
                  load_norm_method: str = "raw",
+                 structural_mode: str = "path",
                  ) -> Tuple[np.ndarray, np.ndarray, np.ndarray, Dict[str, Any]]:
     """Construct the FGW triple (C, F, mass) for one routing DAG.
 
@@ -391,15 +426,25 @@ def build_triple(dag: Dict[str, Any],
     C_depth = np.abs(depth_flat[:, None] - depth_flat[None, :])      # [n, n]
 
     if beta < 1.0:
-        C_path_raw = _shortest_path_costs(W_fwd, L, N, edge_threshold=edge_threshold)
-        C_path = C_path_raw / max(L - 1, 1)  # normalise to [0, 1]
+        if structural_mode == "path":
+            C_struct_raw = _shortest_path_costs(W_fwd, L, N, edge_threshold=edge_threshold)
+            C_struct = C_struct_raw / max(L - 1, 1)  # normalise to [0, 1]
+        elif structural_mode == "local":
+            # Already in [0, 1]: 1 - |W| on direct edges, 1 elsewhere.
+            C_struct = _local_costs(W_fwd, L, N, edge_threshold=edge_threshold)
+        else:
+            raise ValueError(
+                f"Unknown structural_mode={structural_mode!r}; "
+                "expected 'path' or 'local'."
+            )
     else:
-        C_path = np.zeros_like(C_depth)
+        C_struct = np.zeros_like(C_depth)
 
-    C = beta * C_depth + (1.0 - beta) * C_path
+    C = beta * C_depth + (1.0 - beta) * C_struct
 
     meta = {"L": L, "N": N, "n_verts": n_verts, "D": F.shape[1],
-            "beta": beta, "edge_threshold": edge_threshold}
+            "beta": beta, "edge_threshold": edge_threshold,
+            "structural_mode": structural_mode}
     return C.astype(np.float64), F, mass, meta
 
 
