@@ -30,10 +30,12 @@ from __future__ import annotations
 import argparse
 import csv
 import itertools
+import multiprocessing as mp
 import os
 import pickle
 import sys
 import time
+from concurrent.futures import ProcessPoolExecutor, as_completed
 from pathlib import Path
 
 import numpy as np
@@ -156,13 +158,30 @@ COMPARISONS = [
 ]
 
 
+# --- Worker (fork-inherited triples) -------------------------------------
+# Triples are populated in the parent before the worker pool is started.
+# With mp_context='fork', workers see this module-level dict via copy-on-write
+# without serialisation (triples can be ~1 GB each for Qwen3-235B).
+_TRIPLES: dict[tuple[str, int | None], tuple] = {}
+
+
+def _fgw_worker(args):
+    """Run one FGW call. Returns (work_idx, S, err_msg_or_None)."""
+    work_idx, key_i, key_j, alpha, n_init = args
+    try:
+        S, _ = fgw_similarity(_TRIPLES[key_i], _TRIPLES[key_j],
+                              alpha=alpha, n_init=n_init)
+        return work_idx, float(S), None
+    except Exception as e:
+        return work_idx, float("nan"), f"{type(e).__name__}: {str(e)[:160]}"
+
+
 # --- Main per-Q routine ---------------------------------------------------
 def _run_one_Q(Q: float, circuits_dir: Path, out_path: Path,
-               n_init: int = N_INIT) -> None:
-    """Build triples for one Q and run all 540 FGW calls."""
-    # Build all 20 triples for this Q in sequence (memory-bounded).
-    print(f"\n=== Q = {Q} ===", flush=True)
-    triples: dict[tuple[str, int | None], tuple] = {}
+               n_init: int = N_INIT, n_workers: int = 1) -> None:
+    """Build triples for one Q and run all FGW calls in a worker pool."""
+    print(f"\n=== Q = {Q}   (n_workers = {n_workers}) ===", flush=True)
+    _TRIPLES.clear()
     t_build = time.time()
     for arch in ARCHS:
         cls_path = _classification_path(circuits_dir, arch)
@@ -170,56 +189,69 @@ def _run_one_Q(Q: float, circuits_dir: Path, out_path: Path,
             raise FileNotFoundError(f"missing classification: {cls_path}")
         with open(cls_path, "rb") as f:
             cls = pickle.load(f)
-        # Trained triple.
         tri = _build_triple_at_Q(_dag_path(circuits_dir, arch, None), cls, Q)
-        triples[(arch, None)] = tri
+        _TRIPLES[(arch, None)] = tri
         print(f"  built ({arch}, trained) @Q={Q}  n_verts={tri[3]['n_verts']:6d}  "
               f"({time.time() - t_build:6.1f}s)", flush=True)
-        # Random triples.
         for s in SEEDS:
             tri = _build_triple_at_Q(_dag_path(circuits_dir, arch, s), cls, Q)
-            triples[(arch, s)] = tri
+            _TRIPLES[(arch, s)] = tri
             print(f"  built ({arch}, s={s})    @Q={Q}  n_verts={tri[3]['n_verts']:6d}  "
                   f"({time.time() - t_build:6.1f}s)", flush=True)
+    print(f"\n  triples built in {time.time() - t_build:.0f}s; "
+          f"resident triples: {len(_TRIPLES)}", flush=True)
 
-    # Run FGW calls.
-    rows: list[dict] = []
-    n_done, n_failed = 0, 0
-    t0 = time.time()
+    # Enumerate ALL work items across comparisons up front so we can drive
+    # one shared worker pool (better load balancing than per-comparison pools).
+    work_items: list[tuple[int, tuple[str, int | None], tuple[str, int | None],
+                            float, int]] = []
+    item_meta: list[dict] = []   # parallel array: row schema for each work item
     for comparison in COMPARISONS:
-        pairs = list(_enumerate_pairs(comparison))
-        print(f"\n--- {comparison}: {len(pairs)} pairs, "
-              f"{len(ALPHAS)} alphas = {len(pairs) * len(ALPHAS)} FGW calls ---",
-              flush=True)
-        for pi, ((a_i, s_i), (a_j, s_j)) in enumerate(pairs):
-            t_i = triples[(a_i, s_i)]
-            t_j = triples[(a_j, s_j)]
+        for ((a_i, s_i), (a_j, s_j)) in _enumerate_pairs(comparison):
             for alpha in ALPHAS:
-                try:
-                    S, _ = fgw_similarity(t_i, t_j, alpha=alpha, n_init=n_init)
-                except Exception as e:
-                    print(f"  FAIL  {comparison}  {a_i}/{s_i} x {a_j}/{s_j}  "
-                          f"alpha={alpha}  Q={Q}  : {type(e).__name__}: "
-                          f"{str(e)[:160]}", flush=True)
-                    S = float("nan")
-                    n_failed += 1
-                rows.append({
+                idx = len(work_items)
+                work_items.append((idx, (a_i, s_i), (a_j, s_j),
+                                   float(alpha), int(n_init)))
+                item_meta.append({
                     "comparison": comparison,
                     "arch_i": a_i, "seed_i": "" if s_i is None else int(s_i),
                     "arch_j": a_j, "seed_j": "" if s_j is None else int(s_j),
-                    "alpha": float(alpha), "Q": float(Q), "S": float(S),
-                    "n_verts_i": int(t_i[3]["n_verts"]),
-                    "n_verts_j": int(t_j[3]["n_verts"]),
+                    "alpha": float(alpha), "Q": float(Q),
+                    "n_verts_i": int(_TRIPLES[(a_i, s_i)][3]["n_verts"]),
+                    "n_verts_j": int(_TRIPLES[(a_j, s_j)][3]["n_verts"]),
                 })
-                n_done += 1
-            # Checkpoint after each pair finishes its alpha sweep.
-            if (pi + 1) % 5 == 0 or pi == len(pairs) - 1:
-                _save_rows(out_path, rows)
-                print(f"  [{comparison}]  pair {pi + 1:3d}/{len(pairs)}  "
-                      f"n_done={n_done}  failed={n_failed}  "
+
+    total = len(work_items)
+    print(f"\n  {total} FGW calls scheduled across {n_workers} workers", flush=True)
+
+    rows: list[dict] = [None] * total      # type: ignore[list-item]
+    n_done = n_failed = 0
+    t0 = time.time()
+    checkpoint_every = max(50, total // 50)   # ~50 checkpoints total
+
+    ctx = mp.get_context("fork")
+    with ProcessPoolExecutor(max_workers=n_workers, mp_context=ctx) as pool:
+        futures = {pool.submit(_fgw_worker, w): w[0] for w in work_items}
+        for fut in as_completed(futures):
+            work_idx, S, err = fut.result()
+            meta = item_meta[work_idx]
+            rows[work_idx] = {**meta, "S": S}
+            n_done += 1
+            if err is not None:
+                n_failed += 1
+                print(f"  FAIL  {meta['comparison']}  "
+                      f"{meta['arch_i']}/{meta['seed_i']} x "
+                      f"{meta['arch_j']}/{meta['seed_j']}  "
+                      f"alpha={meta['alpha']}  Q={Q}  : {err}", flush=True)
+            if n_done % checkpoint_every == 0 or n_done == total:
+                _save_rows(out_path, [r for r in rows if r is not None])
+                rate = n_done / max(time.time() - t0, 1e-6)
+                eta = (total - n_done) / max(rate, 1e-9)
+                print(f"  progress  {n_done:4d}/{total}  failed={n_failed}  "
+                      f"rate={rate:5.2f} call/s  ETA={eta:6.0f}s  "
                       f"({time.time() - t0:.0f}s elapsed)", flush=True)
 
-    _save_rows(out_path, rows)
+    _save_rows(out_path, [r for r in rows if r is not None])
     print(f"\n=== Q={Q} done in {time.time() - t0:.0f}s "
           f"({n_done} cells, {n_failed} failures) ===", flush=True)
 
@@ -271,6 +303,12 @@ def main() -> None:
                              "Defaults to $SLURM_ARRAY_TASK_ID. Required unless "
                              "--merge is set.")
     parser.add_argument("--n-init", type=int, default=N_INIT)
+    parser.add_argument("--n-workers", type=int, default=None,
+                        help="Number of parallel FGW workers (fork-based). "
+                             "Defaults to $SLURM_CPUS_PER_TASK or 1. Workers "
+                             "share the triples dict via copy-on-write, so "
+                             "memory overhead per worker is just its current "
+                             "FGW solver state.")
     parser.add_argument("--merge", action="store_true",
                         help="Concatenate the three per-Q CSVs into null_S.csv.")
     args = parser.parse_args()
@@ -295,6 +333,10 @@ def main() -> None:
     Q = QUANTILES[q_idx]
     out_path = out_dir / f"null_S_Q{Q:g}.csv"
 
+    if args.n_workers is None:
+        args.n_workers = int(os.environ.get("SLURM_CPUS_PER_TASK", 1))
+    args.n_workers = max(1, args.n_workers)
+
     print(f"Null-baseline sweep")
     print(f"  Q              : {Q}  (--q-idx={q_idx})")
     print(f"  archs          : {ARCHS}")
@@ -303,9 +345,11 @@ def main() -> None:
     print(f"  beta, n_init   : {BETA}, {args.n_init}")
     print(f"  act_norm       : {ACT_NORM}")
     print(f"  load_norm      : {LOAD_NORM}")
+    print(f"  n_workers      : {args.n_workers}")
     print(f"  out_path       : {out_path}")
 
-    _run_one_Q(Q, circuits_dir, out_path, n_init=args.n_init)
+    _run_one_Q(Q, circuits_dir, out_path, n_init=args.n_init,
+               n_workers=args.n_workers)
 
 
 if __name__ == "__main__":
