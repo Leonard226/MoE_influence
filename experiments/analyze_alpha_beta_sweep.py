@@ -44,6 +44,10 @@ _parser.add_argument("--load-norm", type=str, default="raw",
                      choices=["raw", "log_max"],
                      help="Match the value used in the sweep. Selects the "
                           "default input subdirectory (legacy: raw).")
+_parser.add_argument("--structural-mode", type=str, default="path",
+                     choices=["path", "local"],
+                     help="Match the value used in the sweep. 'local' "
+                          "appends '_local' to the input subdir name.")
 _args = _parser.parse_args()
 
 _suffix_parts: list[str] = []
@@ -51,6 +55,8 @@ if _args.act_norm == "log_max":
     _suffix_parts.append("logact")
 if _args.load_norm == "log_max":
     _suffix_parts.append("logload")
+if _args.structural_mode == "local":
+    _suffix_parts.append("local")
 _sweep_name = ("alpha_beta_sweep_" + "_".join(_suffix_parts)
                if _suffix_parts else "alpha_beta_sweep")
 INPUT_DIR = _args.input_dir or os.path.join(
