@@ -231,6 +231,72 @@ def _local_costs(W_fwd: torch.Tensor, L: int, N: int,
     return C
 
 
+def _conn_costs(W_fwd: torch.Tensor, L: int, N: int,
+                edge_threshold: float = 0.0,
+                eps: float = 1e-12) -> np.ndarray:
+    """Katz / Neumann path-sum structural cost on the forward DAG.
+
+    Phi(u, v) := sum over forward paths p from u to v of prod_{e in p} |W_e|
+              =  ((I - W_sparse)^{-1})_{uv}                  (Neumann series)
+
+    Phi is a *topological descriptor* of pairwise coupling: large = many short
+    strong-edged paths between u, v; small = few/weak paths; zero = unreachable.
+    No claim of mass-flow / influence-flow semantics; the semantic role is
+    handled by the features F (cf. main.tex on FGW's labour split).
+
+    Computation: since our vertex indexing is (layer * N + n) and edges go
+    strictly forward (sender_layer < receiver_layer), W is upper-triangular and
+    (I - W_sparse) is upper-triangular with unit diagonal. The Neumann series
+    terminates exactly (W nilpotent on a DAG), and the all-pairs solution is
+    a single triangular back-substitution: O(V^3 / 2) FLOPs but BLAS-accelerated.
+
+    Transform Phi -> cost in [0, 1]:
+        C(u, v) = clip( -log(max(Phi, eps)) / -log(eps), 0, 1 )
+
+    Behaviour:
+        Phi = 0   (unreachable)         -> C = 1   (max cost)
+        Phi small (loosely coupled)     -> C close to 1
+        Phi = 1   (e.g. direct strong)  -> C = 0
+        Phi > 1   (super-connected)     -> C = 0   (clipped)
+        diagonal                        -> C = 0
+
+    The -log transform is essential: Phi values typically span many orders of
+    magnitude (paths multiply), so a linear transform would crush most pairs
+    into a thin sliver of the cost range. -log converts multiplicative
+    variation into additive variation, giving the GW term meaningful
+    separability across pairs.
+
+    Direction-mirrored: for any unordered pair (u, v), at most one of
+    Phi(u,v), Phi(v,u) is non-zero on a strict forward DAG.
+
+    Returns: [n_verts, n_verts] symmetric float64 in [0, 1], zero on diagonal.
+    """
+    import scipy.linalg
+
+    n_verts = L * N
+    W_abs = W_fwd.abs().cpu().numpy().reshape(n_verts, n_verts).astype(np.float64)
+
+    # Q-sparsify (matches the rest of the sweep).
+    W_sparse = np.where(W_abs > edge_threshold, W_abs, 0.0)
+
+    # Solve (I - W_sparse) Phi = I. Upper-triangular back-substitution exploits
+    # the DAG structure; W's nilpotency means the Neumann series is exact.
+    A = np.eye(n_verts, dtype=np.float64) - W_sparse
+    Phi = scipy.linalg.solve_triangular(A, np.eye(n_verts, dtype=np.float64),
+                                        lower=False)
+
+    # Forward DAG: only one of (u,v), (v,u) has Phi > 0; max picks the
+    # forward-direction value and yields a symmetric coupling matrix.
+    Phi = np.maximum(Phi, Phi.T)
+
+    # -log transform with clamped floor; normalise by -log(eps) to bring into [0, 1].
+    log_floor = -np.log(eps)
+    C = -np.log(np.clip(Phi, eps, None)) / log_floor
+    C = np.clip(C, 0.0, 1.0)
+    np.fill_diagonal(C, 0.0)
+    return C
+
+
 def _shortest_path_costs(W_fwd: torch.Tensor, L: int, N: int,
                          edge_threshold: float = 0.0) -> np.ndarray:
     """All-pairs weighted shortest-path distances on the forward DAG.
@@ -432,10 +498,13 @@ def build_triple(dag: Dict[str, Any],
         elif structural_mode == "local":
             # Already in [0, 1]: 1 - |W| on direct edges, 1 elsewhere.
             C_struct = _local_costs(W_fwd, L, N, edge_threshold=edge_threshold)
+        elif structural_mode == "conn":
+            # Already in [0, 1]: -log(Phi) / -log(eps), clipped.
+            C_struct = _conn_costs(W_fwd, L, N, edge_threshold=edge_threshold)
         else:
             raise ValueError(
                 f"Unknown structural_mode={structural_mode!r}; "
-                "expected 'path' or 'local'."
+                "expected 'path', 'local', or 'conn'."
             )
     else:
         C_struct = np.zeros_like(C_depth)

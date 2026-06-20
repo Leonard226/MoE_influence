@@ -40,9 +40,10 @@ def main():
                         help="Match the value used in the sweep. Selects the "
                              "default input subdirectory (legacy: raw).")
     parser.add_argument("--structural-mode", type=str, default="path",
-                        choices=["path", "local"],
-                        help="Match the value used in the sweep. 'local' "
-                             "appends '_local' to the input subdir name.")
+                        choices=["path", "local", "conn"],
+                        help="Match the value used in the sweep. 'local' / "
+                             "'conn' append a matching suffix to the input "
+                             "subdir name.")
     args = parser.parse_args()
 
     suffix_parts: list[str] = []
@@ -52,6 +53,8 @@ def main():
         suffix_parts.append("logload")
     if args.structural_mode == "local":
         suffix_parts.append("local")
+    elif args.structural_mode == "conn":
+        suffix_parts.append("conn")
     default_in_name = ("alpha_beta_sweep_" + "_".join(suffix_parts)
                        if suffix_parts else "alpha_beta_sweep")
     input_dir = args.input_dir or os.path.join(

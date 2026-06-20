@@ -212,13 +212,16 @@ def main():
                              "mean_in_layer). 'log_max' uses per-layer "
                              "log(1+load) / log(1+max_in_layer(load)).")
     parser.add_argument("--structural-mode", type=str, default="path",
-                        choices=["path", "local"],
+                        choices=["path", "local", "conn"],
                         help="Structural cost C: 'path' = shortest-path on the "
                              "Q-sparsified DAG with edge cost 1 - |W| (legacy). "
                              "'local' = direct-edge cost only (1 - |W| for "
-                             "surviving direct edges, 1 otherwise); honours "
-                             "the local-influence semantics of W_softmax "
-                             "(main.tex §3). Output goes to a separate dir.")
+                             "surviving direct edges, 1 otherwise). "
+                             "'conn' = Katz/Neumann path-sum: "
+                             "C = -log(((I-W_sparse)^-1)_uv) / -log(eps), "
+                             "rewards path-redundancy + edge-weight + length "
+                             "all in one closed-form descriptor. Output goes "
+                             "to a separate dir.")
     args = parser.parse_args()
 
     # Route output to a normalisation-specific subdir so legacy results are
@@ -230,6 +233,8 @@ def main():
         suffix_parts.append("logload")
     if args.structural_mode == "local":
         suffix_parts.append("local")
+    elif args.structural_mode == "conn":
+        suffix_parts.append("conn")
     default_out_name = ("alpha_beta_sweep_" + "_".join(suffix_parts)
                         if suffix_parts else "alpha_beta_sweep")
     output_dir = args.output_dir or os.path.join(
