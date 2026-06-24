@@ -187,48 +187,77 @@ def _save_per_model_panels(rows: list[dict], kind: str, task: str,
 
 def _save_overlay(rows: list[dict], kind: str, task: str,
                   out_dir: Path, dpi: int) -> Path:
-    """All-models overlay on a log-scale x-axis (raw values, not log10)."""
+    """All-models overlay: filled stepped histograms with transparency,
+    z-ordered so narrower (higher-peak) distributions sit on top of wider
+    ones. Log-scale x-axis, raw values on ticks."""
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
 
     rows = [r for r in rows if not r.get("missing")]
     fig, ax = plt.subplots(figsize=(14, 8))
-    colors = plt.cm.tab10(np.linspace(0, 1, len(rows)))
 
-    # Compute global min/max across all models for shared log-binning.
+    # Stable model→color map: each model keeps its color regardless of plot order.
+    base_colors = plt.cm.tab10(np.linspace(0, 1, len(rows)))
+    model_color = {r["model"]: c for r, c in zip(rows, base_colors)}
+
+    # Data extraction.
     if kind == "edges":
-        all_arrays = [r["edges"] for r in rows if len(r["edges"]) > 0]
+        get_data = lambda r: r["edges"]
         xlabel = "|W|  (forward, nonzero edges only; log-scale)"
-        title = f"Forward edge-weight distribution: overlay across 8 models   (task = {task})"
+        title = (f"Forward edge-weight distribution: overlay across 8 models   "
+                 f"(task = {task})")
         fname = f"edge_weights_overlay_{task}.pdf"
     else:
-        all_arrays = [r["out_mass"][r["out_mass"] > 0] for r in rows]
-        all_arrays = [a for a in all_arrays if len(a) > 0]
+        get_data = lambda r: r["out_mass"][r["out_mass"] > 0]
         xlabel = "outgoing mass per expert  (log-scale)"
-        title = f"Per-expert outgoing-mass distribution: overlay across 8 models   (task = {task})"
+        title = (f"Per-expert outgoing-mass distribution: overlay across 8 models   "
+                 f"(task = {task})")
         fname = f"outgoing_mass_overlay_{task}.pdf"
-    if not all_arrays:
+
+    arrays = [(r["model"], get_data(r)) for r in rows]
+    arrays = [(m, a) for m, a in arrays if len(a) > 0]
+    if not arrays:
         ax.text(0.5, 0.5, "(no data)", ha="center", transform=ax.transAxes)
         out_path = out_dir / fname
         fig.savefig(out_path, dpi=dpi)
         plt.close(fig)
         return out_path
-    global_min = min(a.min() for a in all_arrays)
-    global_max = max(a.max() for a in all_arrays)
-    bins = np.geomspace(global_min, global_max, 120)
 
-    for r, c in zip(rows, colors):
-        data = r["edges"] if kind == "edges" else r["out_mass"][r["out_mass"] > 0]
-        if len(data) == 0:
-            continue
-        ax.hist(data, bins=bins, histtype="step", linewidth=1.6,
-                color=c, label=r["model"], density=True, alpha=0.85)
+    global_min = min(a.min() for _, a in arrays)
+    global_max = max(a.max() for _, a in arrays)
+    bins = np.geomspace(global_min, global_max, 100)
+
+    # Pre-bin so we can sort models by peak density. Narrowest (highest peak)
+    # is drawn LAST so it stays visible above wider distributions.
+    binned = []
+    for model, data in arrays:
+        counts, _ = np.histogram(data, bins=bins, density=True)
+        binned.append((model, data, counts.max()))
+    binned.sort(key=lambda x: x[2])      # ascending: widest first, narrowest last
+
+    for model, data, _ in binned:
+        c = model_color[model]
+        ax.hist(data, bins=bins,
+                histtype="stepfilled",
+                facecolor=c, edgecolor=c,
+                linewidth=1.4, alpha=0.35,
+                label=model, density=True)
+
     ax.set_xscale("log")
     ax.set_xlabel(xlabel)
     ax.set_ylabel("density")
     ax.set_title(title, fontsize=13)
-    ax.legend(loc="upper left", fontsize=9)
+
+    # Legend ordered to match the canonical MODELS list (not the draw order),
+    # so the user always sees the same models in the same legend position.
+    handles, labels = ax.get_legend_handles_labels()
+    order = sorted(range(len(labels)),
+                   key=lambda i: (MODELS.index(labels[i])
+                                  if labels[i] in MODELS else 99))
+    ax.legend([handles[i] for i in order], [labels[i] for i in order],
+              loc="upper right", fontsize=9, framealpha=0.92)
+
     fig.tight_layout()
     out_path = out_dir / fname
     fig.savefig(out_path, dpi=dpi)
