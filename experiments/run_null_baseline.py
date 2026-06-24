@@ -89,7 +89,10 @@ def _classification_path(circuits_dir: Path, arch: str) -> Path:
     return circuits_dir / "classifications" / f"classify_{arch}_{TASK}.pkl"
 
 
-def _build_triple_at_Q(dag_path: Path, classification: dict, Q: float):
+def _build_triple_at_Q(dag_path: Path, classification: dict, Q: float,
+                        beta: float = BETA,
+                        structural_mode: str = "path",
+                        gamma: float = 1.0):
     """Build the (C, F, mass, meta) triple at the given Q, with the same
     isolated-vertex filter the headline sweep uses."""
     dag = torch.load(dag_path, weights_only=False, map_location="cpu")
@@ -100,8 +103,9 @@ def _build_triple_at_Q(dag_path: Path, classification: dict, Q: float):
 
     triple = build_triple(
         dag, classification,
-        beta=BETA, edge_threshold=threshold, edge_tensor=EDGE_TENSOR,
+        beta=beta, edge_threshold=threshold, edge_tensor=EDGE_TENSOR,
         act_norm_method=ACT_NORM, load_norm_method=LOAD_NORM,
+        structural_mode=structural_mode, gamma=gamma,
     )
 
     # Isolated-vertex filter: drop vertices with no surviving forward edge.
@@ -178,9 +182,12 @@ def _fgw_worker(args):
 
 # --- Main per-Q routine ---------------------------------------------------
 def _run_one_Q(Q: float, circuits_dir: Path, out_path: Path,
-               n_init: int = N_INIT, n_workers: int = 1) -> None:
+               n_init: int = N_INIT, n_workers: int = 1,
+               beta: float = BETA, structural_mode: str = "path",
+               gamma: float = 1.0) -> None:
     """Build triples for one Q and run all FGW calls in a worker pool."""
-    print(f"\n=== Q = {Q}   (n_workers = {n_workers}) ===", flush=True)
+    print(f"\n=== Q = {Q}   (n_workers = {n_workers})   "
+          f"struct={structural_mode}  beta={beta}  gamma={gamma} ===", flush=True)
     _TRIPLES.clear()
     t_build = time.time()
     for arch in ARCHS:
@@ -189,12 +196,16 @@ def _run_one_Q(Q: float, circuits_dir: Path, out_path: Path,
             raise FileNotFoundError(f"missing classification: {cls_path}")
         with open(cls_path, "rb") as f:
             cls = pickle.load(f)
-        tri = _build_triple_at_Q(_dag_path(circuits_dir, arch, None), cls, Q)
+        tri = _build_triple_at_Q(_dag_path(circuits_dir, arch, None), cls, Q,
+                                 beta=beta, structural_mode=structural_mode,
+                                 gamma=gamma)
         _TRIPLES[(arch, None)] = tri
         print(f"  built ({arch}, trained) @Q={Q}  n_verts={tri[3]['n_verts']:6d}  "
               f"({time.time() - t_build:6.1f}s)", flush=True)
         for s in SEEDS:
-            tri = _build_triple_at_Q(_dag_path(circuits_dir, arch, s), cls, Q)
+            tri = _build_triple_at_Q(_dag_path(circuits_dir, arch, s), cls, Q,
+                                     beta=beta, structural_mode=structural_mode,
+                                     gamma=gamma)
             _TRIPLES[(arch, s)] = tri
             print(f"  built ({arch}, s={s})    @Q={Q}  n_verts={tri[3]['n_verts']:6d}  "
                   f"({time.time() - t_build:6.1f}s)", flush=True)
@@ -311,13 +322,38 @@ def main() -> None:
                              "FGW solver state.")
     parser.add_argument("--merge", action="store_true",
                         help="Concatenate the three per-Q CSVs into null_S.csv.")
+    parser.add_argument("--structural-mode", type=str, default="path",
+                        choices=["path", "local", "conn"],
+                        help="Match the value used in the headline sweep "
+                             "(default 'path'). 'conn' enables Katz path-sum.")
+    parser.add_argument("--beta", type=float, default=BETA,
+                        help=f"Depth/structural mixing in C (default {BETA}). "
+                             "Set 0 to drop the depth term from C (depth then "
+                             "lives only in F via the Wasserstein channel).")
+    parser.add_argument("--gamma", type=float, default=1.0,
+                        help="Katz per-hop discount in (0, 1] (default 1.0; "
+                             "only used by structural-mode=conn).")
     args = parser.parse_args()
 
     with open(ROOT / "config.yaml") as f:
         cfg = yaml.safe_load(f)
     result_path = cfg["result_path"]
     circuits_dir = Path(result_path) / "circuits"
-    out_dir = circuits_dir / OUT_SUBDIR
+
+    # Suffix the output subdir to reflect non-default metric choices, so this
+    # run doesn't clobber the previous path-mode null data on disk.
+    suffix_parts: list[str] = []
+    if args.structural_mode == "local":
+        suffix_parts.append("local")
+    elif args.structural_mode == "conn":
+        suffix_parts.append("conn")
+    if args.beta != BETA:
+        suffix_parts.append(f"b{args.beta:g}")
+    if args.structural_mode == "conn" and args.gamma != 1.0:
+        suffix_parts.append(f"g{args.gamma:g}")
+    out_subdir_name = (OUT_SUBDIR + "_" + "_".join(suffix_parts)
+                       if suffix_parts else OUT_SUBDIR)
+    out_dir = circuits_dir / out_subdir_name
     out_dir.mkdir(parents=True, exist_ok=True)
 
     if args.merge:
@@ -342,14 +378,18 @@ def main() -> None:
     print(f"  archs          : {ARCHS}")
     print(f"  seeds          : {SEEDS}")
     print(f"  alphas         : {ALPHAS}")
-    print(f"  beta, n_init   : {BETA}, {args.n_init}")
+    print(f"  beta, n_init   : {args.beta}, {args.n_init}")
+    print(f"  structural_mode: {args.structural_mode}")
+    print(f"  gamma          : {args.gamma}")
     print(f"  act_norm       : {ACT_NORM}")
     print(f"  load_norm      : {LOAD_NORM}")
     print(f"  n_workers      : {args.n_workers}")
     print(f"  out_path       : {out_path}")
 
     _run_one_Q(Q, circuits_dir, out_path, n_init=args.n_init,
-               n_workers=args.n_workers)
+               n_workers=args.n_workers,
+               beta=args.beta, structural_mode=args.structural_mode,
+               gamma=args.gamma)
 
 
 if __name__ == "__main__":
