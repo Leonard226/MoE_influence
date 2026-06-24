@@ -65,10 +65,17 @@ CLASSIFY_DIR = CIRCUITS_DIR / "classifications"
 DEFAULT_OUT_DIR = CIRCUITS_DIR / "feature_inspection"
 
 FEATURE_NAMES = [
-    "depth", "out_norm", "in_norm", "load", "act",
-    "class_content", "class_functional", "class_punctuation",
-    "class_numeric", "class_special",
+    "depth", "out", "in", "load", "act",
+    "content", "functional", "punctuation", "numeric", "special",
 ]
+
+
+def _model_palette(n: int):
+    """8 distinct, more-saturated qualitative colours (matplotlib Dark2),
+    suitable for categorical scatter plots. Designed for varied hue AND
+    saturation so models don't all read as 'kind of similar pastel'."""
+    import matplotlib.pyplot as plt
+    return list(plt.get_cmap("Dark2").colors)[:n]
 
 
 # -------------------- per-model F construction -----------------------------
@@ -115,46 +122,80 @@ def _build_all(task: str) -> tuple[np.ndarray, np.ndarray, list[str]]:
 
 
 # -------------------- plots ------------------------------------------------
-def _save_per_feature_ridge(F_all, model_idx, models, out_dir, dpi) -> Path:
-    """One row per feature, ridge of all 8 models within the row."""
+def _save_cosine_similarity(F_all, model_idx, models, out_dir, dpi) -> Path:
+    """Mean pairwise cosine similarity between expert feature vectors across
+    every (model_a, model_b) pair. Uses the identity:
+
+        (1/(N_a N_b)) Σ_{i,j} cos(F_a[i], F_b[j])  =  μ̂_a · μ̂_b
+
+    where μ̂_m is the mean of model m's row-normalised features. So we don't
+    need to materialise the N_a × N_b pairwise matrix — just take the mean
+    of the normalised feature vectors per model and dot them.
+
+    Diagonal cells (i, i): within-model expert similarity. Off-diagonal cells
+    (i, j): cross-model expert similarity. Values are in [0, 1] because all
+    features are in [0, 1] (so normalised vectors live in the non-negative
+    orthant; cosine sim is >= 0).
+    """
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
 
-    D = F_all.shape[1]
-    fnames = (FEATURE_NAMES[:D] if D <= len(FEATURE_NAMES)
-              else [f"feat_{d}" for d in range(D)])
-    base_colors = plt.cm.tab10(np.linspace(0, 1, len(models)))
+    norms = np.linalg.norm(F_all, axis=1, keepdims=True).clip(min=1e-12)
+    F_norm = F_all / norms
 
-    fig, axes = plt.subplots(D, 1, figsize=(14, 1.3 * D + 1), sharex=False)
-    if D == 1:
-        axes = [axes]
-    for d, ax in enumerate(axes):
-        bins = np.linspace(0.0, 1.0, 60)
-        centres = (bins[:-1] + bins[1:]) / 2
-        for i, m in enumerate(models):
-            mask = (model_idx == i)
-            if mask.sum() == 0:
-                continue
-            counts, _ = np.histogram(F_all[mask, d], bins=bins)
-            frac = counts / counts.sum() if counts.sum() > 0 else counts
-            ax.fill_between(centres, 0, frac, step="mid",
-                            facecolor=base_colors[i], edgecolor=base_colors[i],
-                            linewidth=1.0, alpha=0.40,
-                            label=m if d == 0 else None)
-        ax.set_title(fnames[d], loc="left", x=0.01, y=0.78,
-                      fontsize=10, fontweight="bold")
-        ax.set_yticks([])
-        for sp in ("top", "right", "left"):
-            ax.spines[sp].set_visible(False)
-    axes[-1].set_xlabel("feature value (all features in [0, 1])")
-    axes[0].legend(loc="upper right", fontsize=8, ncol=2, framealpha=0.92)
-    fig.suptitle("Feature distributions by model — one row per feature",
-                  fontsize=13)
-    fig.tight_layout(rect=(0, 0, 1, 0.97))
-    out_path = out_dir / "features_per_feature_ridge.pdf"
+    n = len(models)
+    mean_dirs = np.zeros((n, F_all.shape[1]))
+    counts = np.zeros(n, dtype=np.int64)
+    for i in range(n):
+        mask = (model_idx == i)
+        counts[i] = mask.sum()
+        if counts[i] > 0:
+            mean_dirs[i] = F_norm[mask].mean(axis=0)
+
+    sim = mean_dirs @ mean_dirs.T               # (n, n), in [0, 1]
+    # Auto-scale colour limits to the off-diagonal range so the diagonal
+    # (saturated bright) doesn't squash the colour scale.
+    eye = np.eye(n, dtype=bool)
+    off_diag = sim[~eye]
+    vmin = float(off_diag.min()) if off_diag.size else 0.0
+
+    fig, ax = plt.subplots(figsize=(10, 8))
+    im = ax.imshow(sim, cmap="viridis", vmin=vmin, vmax=1.0, aspect="equal")
+    for i in range(n):
+        for j in range(n):
+            val = sim[i, j]
+            # Pick text colour for contrast against the cell.
+            frac = (val - vmin) / max(1.0 - vmin, 1e-12)
+            txt_colour = "black" if frac > 0.55 else "white"
+            ax.text(j, i, f"{val:.3f}", ha="center", va="center",
+                    fontsize=9, color=txt_colour)
+    ax.set_xticks(range(n))
+    ax.set_xticklabels(models, rotation=45, ha="right")
+    ax.set_yticks(range(n))
+    ax.set_yticklabels(models)
+    fig.colorbar(im, ax=ax, label="mean pairwise cosine similarity")
+    ax.set_title(
+        "Mean pairwise cosine similarity between expert feature vectors\n"
+        f"diagonal = within-model expert similarity; "
+        f"off-diagonal = cross-model.   colour-range = [{vmin:.3f}, 1.0]"
+    )
+    fig.tight_layout()
+    out_path = out_dir / "features_cosine_similarity.pdf"
     fig.savefig(out_path, dpi=dpi)
     plt.close(fig)
+
+    # Console summary: who's closest to whom?
+    print("\n  Cross-model closest neighbours by mean cosine similarity:")
+    for i in range(n):
+        # Exclude self
+        sims = sim[i].copy()
+        sims[i] = -np.inf
+        order = np.argsort(-sims)
+        top3 = [(models[j], sim[i, j]) for j in order[:3]]
+        s = ",  ".join(f"{m}: {v:.3f}" for m, v in top3)
+        print(f"    {models[i]:<18s}  →  {s}")
+
     return out_path
 
 
@@ -187,6 +228,9 @@ def _save_correlation(F_all, out_dir, dpi) -> Path:
 
 
 def _save_pca(F_all, model_idx, models, out_dir, dpi) -> Path:
+    """One PCA, 8 panels (one per model). Same global PCA, same x/y limits;
+    each panel shows its model coloured against a faint background of all
+    other experts so you can locate it inside the full point cloud."""
     from sklearn.decomposition import PCA
     import matplotlib
     matplotlib.use("Agg")
@@ -196,24 +240,39 @@ def _save_pca(F_all, model_idx, models, out_dir, dpi) -> Path:
     Z = pca.fit_transform(F_all)
     explained = pca.explained_variance_ratio_
 
-    fig, ax = plt.subplots(figsize=(11, 9))
-    base_colors = plt.cm.tab10(np.linspace(0, 1, len(models)))
-    # Plot small models last so they're visible above the dense Qwen scatter.
-    counts = np.bincount(model_idx, minlength=len(models))
-    order = np.argsort(-counts)             # largest first → drawn at bottom
-    for i in order:
+    # Shared axis limits, derived from the full point cloud.
+    pad = 0.04
+    x_min, x_max = Z[:, 0].min(), Z[:, 0].max()
+    y_min, y_max = Z[:, 1].min(), Z[:, 1].max()
+    xlim = (x_min - pad * (x_max - x_min), x_max + pad * (x_max - x_min))
+    ylim = (y_min - pad * (y_max - y_min), y_max + pad * (y_max - y_min))
+
+    base_colors = _model_palette(len(models))
+    fig, axes = plt.subplots(2, 4, figsize=(20, 10), sharex=True, sharey=True)
+    for i, (model, ax) in enumerate(zip(models, axes.flatten())):
         mask = (model_idx == i)
-        if mask.sum() == 0:
-            continue
-        ax.scatter(Z[mask, 0], Z[mask, 1], s=4,
-                   color=base_colors[i], alpha=0.45,
-                   label=f"{models[i]} (n={int(mask.sum())})",
-                   edgecolors="none")
-    ax.set_xlabel(f"PC1  ({100*explained[0]:.1f}% var)")
-    ax.set_ylabel(f"PC2  ({100*explained[1]:.1f}% var)")
-    ax.set_title("PCA of all experts in feature space, coloured by model")
-    ax.legend(loc="best", fontsize=8, framealpha=0.85, markerscale=2.0)
-    fig.tight_layout()
+        # Faint background = all other models, so the user can see where this
+        # model sits inside the full point cloud.
+        ax.scatter(Z[~mask, 0], Z[~mask, 1], s=2, color="lightgray",
+                   alpha=0.18, edgecolors="none", rasterized=True)
+        ax.scatter(Z[mask, 0], Z[mask, 1], s=5, color=base_colors[i],
+                   alpha=0.7, edgecolors="none", rasterized=True)
+        ax.set_title(f"{model}  (n={int(mask.sum())})", fontsize=11)
+        ax.set_xlim(xlim)
+        ax.set_ylim(ylim)
+        ax.grid(alpha=0.15)
+
+    # Shared axis labels on the outer edges only.
+    for ax in axes[1, :]:
+        ax.set_xlabel(f"PC1   ({100*explained[0]:.1f}% var)")
+    for ax in axes[:, 0]:
+        ax.set_ylabel(f"PC2   ({100*explained[1]:.1f}% var)")
+    fig.suptitle(
+        "PCA of all experts in 10-D feature space — one panel per model\n"
+        "(grey background = experts from the other 7 models; coloured = this model)",
+        fontsize=13,
+    )
+    fig.tight_layout(rect=(0, 0, 1, 0.94))
     out_path = out_dir / "features_pca.pdf"
     fig.savefig(out_path, dpi=dpi)
     plt.close(fig)
@@ -263,20 +322,22 @@ def _save_embedding(F_all, model_idx, models, out_dir, dpi,
         fname = "features_tsne.pdf"
 
     fig, ax = plt.subplots(figsize=(11, 9))
-    base_colors = plt.cm.tab10(np.linspace(0, 1, len(models)))
+    base_colors = _model_palette(len(models))
     counts = np.bincount(idx_sub, minlength=len(models))
     order = np.argsort(-counts)
     for i in order:
         mask = (idx_sub == i)
         if mask.sum() == 0:
             continue
-        ax.scatter(Z[mask, 0], Z[mask, 1], s=5,
-                   color=base_colors[i], alpha=0.55,
+        ax.scatter(Z[mask, 0], Z[mask, 1], s=6,
+                   color=base_colors[i], alpha=0.65,
                    label=f"{models[i]} (n={int(mask.sum())})",
                    edgecolors="none")
     ax.set_title(title)
     ax.legend(loc="best", fontsize=8, framealpha=0.85, markerscale=2.0)
     ax.set_xticks([]); ax.set_yticks([])
+    ax.set_xlabel(f"{method.upper()}-1   (topological coordinate; no semantic units)")
+    ax.set_ylabel(f"{method.upper()}-2   (only relative distance is meaningful)")
     fig.tight_layout()
     out_path = out_dir / fname
     fig.savefig(out_path, dpi=dpi)
@@ -303,9 +364,13 @@ def _kmeans_analysis(F_all, model_idx, models, out_dir, dpi, k) -> Path:
         for mi in range(n_models):
             M[c, mi] = int(((labels == c) & (model_idx == mi)).sum())
 
-    # Row-normalise to "fraction of this cluster from this model".
-    row_sum = M.sum(axis=1, keepdims=True).clip(min=1)
-    M_frac = M / row_sum
+    # Column-normalise: each cell = "fraction of model M's experts in cluster C".
+    # This is the per-model normalisation that correctly accounts for the very
+    # different per-model expert counts (Mixtral 256 vs Qwen 12k). Each column
+    # sums to 1. If model M's experts are spread uniformly, every cell of
+    # column M is ~1/k. If concentrated, one cell of column M dominates.
+    col_sum = M.sum(axis=0, keepdims=True).clip(min=1)
+    M_frac = M / col_sum
 
     fig, ax = plt.subplots(figsize=(12, max(4, 0.5 * k + 2)))
     im = ax.imshow(M_frac, cmap="viridis", vmin=0.0, vmax=1.0, aspect="auto")
@@ -314,31 +379,36 @@ def _kmeans_analysis(F_all, model_idx, models, out_dir, dpi, k) -> Path:
             if M[c, mi] == 0:
                 continue
             colour = "white" if M_frac[c, mi] < 0.55 else "black"
-            ax.text(mi, c, f"{M[c, mi]}", ha="center", va="center",
-                     fontsize=7, color=colour)
+            ax.text(mi, c, f"{100*M_frac[c, mi]:.0f}%\n({M[c, mi]})",
+                     ha="center", va="center", fontsize=6.5, color=colour)
     ax.set_xticks(range(n_models))
     ax.set_xticklabels(models, rotation=45, ha="right")
     ax.set_yticks(range(k))
-    ax.set_yticklabels([f"cluster {c} (n={int(row_sum[c, 0])})" for c in range(k)])
-    fig.colorbar(im, ax=ax, label="fraction of cluster from model")
-    ax.set_title(f"K-means (k={k}) cluster-by-model composition\n"
-                  f"colour = fraction; text = raw count")
+    ax.set_yticklabels([f"cluster {c}" for c in range(k)])
+    fig.colorbar(im, ax=ax, label="fraction of model's experts in this cluster")
+    ax.set_title(
+        f"K-means (k={k}) cluster composition, per-model normalisation\n"
+        "colour = fraction of model's experts; text = fraction + raw count.\n"
+        f"Uniform (no signal) ≈ {100/k:.0f}% in every cell of a column.   "
+        "High signal = one cell of each column dominates."
+    )
     fig.tight_layout()
     out_path = out_dir / "features_kmeans.pdf"
     fig.savefig(out_path, dpi=dpi)
     plt.close(fig)
 
-    # Console summary: cluster purity.
-    print(f"\n  K-means (k={k}) cluster purity (dominant-model fraction):")
-    for c in range(k):
-        sizes = M[c]
-        total = int(sizes.sum())
+    # Console summary: per-model concentration (top cluster's fraction).
+    print(f"\n  K-means (k={k}) per-model concentration:")
+    print(f"    (uniform baseline = {1/k:.3f}; higher = experts cluster together)")
+    for mi in range(n_models):
+        col = M[:, mi]
+        total = int(col.sum())
         if total == 0:
             continue
-        dom = sizes.argmax()
-        purity = sizes[dom] / total
-        print(f"    cluster {c} (n={total:6d}): purity={purity:.2f} "
-              f"(dominant = {models[dom]})")
+        top = col.argmax()
+        frac = col[top] / total
+        print(f"    {models[mi]:<18s} (n={total:6d}): top cluster = {top}, "
+              f"holds {100*frac:.1f}% of this model's experts")
 
     return out_path
 
@@ -366,7 +436,7 @@ def main():
     print(f"\n  Total: {len(F_all)} experts × {F_all.shape[1]} features\n")
 
     paths: list[Path] = []
-    paths.append(_save_per_feature_ridge(F_all, model_idx, models, out_dir, args.dpi))
+    paths.append(_save_cosine_similarity(F_all, model_idx, models, out_dir, args.dpi))
     paths.append(_save_correlation(F_all, out_dir, args.dpi))
     paths.append(_save_pca(F_all, model_idx, models, out_dir, args.dpi))
     if not args.skip_umap:
