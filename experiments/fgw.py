@@ -360,6 +360,7 @@ def build_triple(dag: Dict[str, Any],
                  act_norm_method: str = "rank",
                  load_norm_method: str = "raw",
                  structural_mode: str = "path",
+                 gamma: float = 1.0,
                  ) -> Tuple[np.ndarray, np.ndarray, np.ndarray, Dict[str, Any]]:
     """Construct the FGW triple (C, F, mass) for one routing DAG.
 
@@ -507,8 +508,9 @@ def build_triple(dag: Dict[str, Any],
             # Already in [0, 1]: 1 - |W| on direct edges, 1 elsewhere.
             C_struct = _local_costs(W_fwd, L, N, edge_threshold=edge_threshold)
         elif structural_mode == "conn":
-            # Already in [0, 1]: -log(Phi) / -log(eps), clipped.
-            C_struct = _conn_costs(W_fwd, L, N, edge_threshold=edge_threshold)
+            # Already in [0, 1]: -log(Phi^gamma) / -log(eps), clipped.
+            C_struct = _conn_costs(W_fwd, L, N, edge_threshold=edge_threshold,
+                                   gamma=gamma)
         else:
             raise ValueError(
                 f"Unknown structural_mode={structural_mode!r}; "
@@ -521,7 +523,7 @@ def build_triple(dag: Dict[str, Any],
 
     meta = {"L": L, "N": N, "n_verts": n_verts, "D": F.shape[1],
             "beta": beta, "edge_threshold": edge_threshold,
-            "structural_mode": structural_mode}
+            "structural_mode": structural_mode, "gamma": gamma}
     return C.astype(np.float64), F, mass, meta
 
 

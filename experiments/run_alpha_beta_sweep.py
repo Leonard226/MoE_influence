@@ -129,7 +129,9 @@ EDGE_TENSOR = "W_softmax"   # primary edge weight used throughout the sweep
 def build_triple_at_Q(model, task, classification, Q,
                       act_norm_method: str = "rank",
                       load_norm_method: str = "raw",
-                      structural_mode: str = "path"):
+                      structural_mode: str = "path",
+                      beta: float = 0.5,
+                      gamma: float = 1.0):
     """Build one triple at β = FIXED_BETA with:
       - F, mass        : computed on the DENSE routing DAG (intrinsic features).
       - C_path         : computed on the SPARSIFIED graph (edges with
@@ -164,11 +166,12 @@ def build_triple_at_Q(model, task, classification, Q,
     # build_triple keeps F and mass on the DENSE graph; edge_threshold only
     # filters edges fed into the C_path shortest-path computation.
     triple = build_triple(dag, classification,
-                          beta=FIXED_BETA, edge_threshold=threshold,
+                          beta=beta, edge_threshold=threshold,
                           edge_tensor=EDGE_TENSOR,
                           act_norm_method=act_norm_method,
                           load_norm_method=load_norm_method,
-                          structural_mode=structural_mode)
+                          structural_mode=structural_mode,
+                          gamma=gamma)
 
     # Identify vertices isolated in the SPARSIFIED graph (no surviving in-
     # or out-edge above threshold). This is the ONLY vertex filter. Strict
@@ -217,11 +220,23 @@ def main():
                              "Q-sparsified DAG with edge cost 1 - |W| (legacy). "
                              "'local' = direct-edge cost only (1 - |W| for "
                              "surviving direct edges, 1 otherwise). "
-                             "'conn' = Katz/Neumann path-sum: "
-                             "C = -log(((I-W_sparse)^-1)_uv) / -log(eps), "
-                             "rewards path-redundancy + edge-weight + length "
-                             "all in one closed-form descriptor. Output goes "
-                             "to a separate dir.")
+                             "'conn' = Katz path-sum: "
+                             "C = -log((W(I-gamma W_sparse)^-1)_uv) / -log(eps), "
+                             "rewards path-redundancy + edge-weight all in one "
+                             "closed-form descriptor (gamma controls per-hop "
+                             "discount). Output goes to a separate dir.")
+    parser.add_argument("--beta", type=float, default=FIXED_BETA,
+                        help=f"Depth/structural mixing in C = beta*|Δdepth| + "
+                             f"(1-beta)*C_struct. Default {FIXED_BETA} (legacy). "
+                             "Set 0 to drop the depth term from C entirely so "
+                             "depth lives only in the feature matrix F (avoids "
+                             "double-encoding depth in both F and C).")
+    parser.add_argument("--gamma", type=float, default=1.0,
+                        help="Katz per-hop discount in (0, 1] (default 1.0, no "
+                             "discount; only used by structural-mode=conn). "
+                             "gamma<1 damps combinatorial dominance of long "
+                             "paths in dense graphs (e.g. gamma=0.5 halves the "
+                             "contribution per additional hop).")
     args = parser.parse_args()
 
     # Route output to a normalisation-specific subdir so legacy results are
@@ -235,6 +250,10 @@ def main():
         suffix_parts.append("local")
     elif args.structural_mode == "conn":
         suffix_parts.append("conn")
+    if args.beta != FIXED_BETA:
+        suffix_parts.append(f"b{args.beta:g}")
+    if args.structural_mode == "conn" and args.gamma != 1.0:
+        suffix_parts.append(f"g{args.gamma:g}")
     default_out_name = ("alpha_beta_sweep_" + "_".join(suffix_parts)
                         if suffix_parts else "alpha_beta_sweep")
     output_dir = args.output_dir or os.path.join(
@@ -259,7 +278,7 @@ def main():
     n_a, n_q = len(ALPHAS), len(QUANTILES)
     n_cells = n_a * n_q
 
-    print(f"=== α × Q Sweep at β = {FIXED_BETA} ===")
+    print(f"=== α × Q Sweep at β = {args.beta} ===")
     print(f"  source   : {src_model}/{src_task} (idx {args.source_idx})")
     print(f"  targets  : chunk {args.target_chunk}/{args.num_chunks - 1}  -> {n_tgts} tuples")
     print(f"  α        : {ALPHAS}")
@@ -267,6 +286,8 @@ def main():
     print(f"  act_norm : {args.act_norm}")
     print(f"  load_norm: {args.load_norm}")
     print(f"  struct.  : {args.structural_mode}")
+    print(f"  β        : {args.beta}")
+    print(f"  γ        : {args.gamma}")
     print(f"  cells    : {n_cells} (α × Q) per pair")
     print(f"  total    : {n_tgts * n_cells} FGW calls")
     print(f"  output   : {output_path}")
@@ -296,7 +317,9 @@ def main():
         tri, theta = build_triple_at_Q(src_model, src_task, src_class, Q,
                                        act_norm_method=args.act_norm,
                                        load_norm_method=args.load_norm,
-                                       structural_mode=args.structural_mode)
+                                       structural_mode=args.structural_mode,
+                                       beta=args.beta,
+                                       gamma=args.gamma)
         src_triples_by_Q[Q] = tri
         print(f"  Q={Q:5.3g}: built in {time.time() - t0:7.1f}s  "
               f"n_verts={tri[3]['n_verts']:6d}  θ={theta:.4g}", flush=True)
@@ -305,7 +328,9 @@ def main():
         np.savez(output_path, S=S_mat,
                  alphas=np.array(ALPHAS),
                  quantiles=np.array(QUANTILES),
-                 fixed_beta=np.float64(FIXED_BETA),
+                 fixed_beta=np.float64(args.beta),
+                 gamma=np.float64(args.gamma),
+                 structural_mode=args.structural_mode,
                  source_idx=args.source_idx,
                  source_model=src_model, source_task=src_task,
                  target_indices=np.array(target_indices),
@@ -344,7 +369,9 @@ def main():
                 tgt_tri, _ = build_triple_at_Q(tgt_model, tgt_task, tgt_class, Q,
                                                act_norm_method=args.act_norm,
                                                load_norm_method=args.load_norm,
-                                               structural_mode=args.structural_mode)
+                                               structural_mode=args.structural_mode,
+                                               beta=args.beta,
+                                               gamma=args.gamma)
             except FileNotFoundError as e:
                 print(f"    [WARN] missing DAG at Q={Q}: {e}")
                 S_mat[local_t, :, qi] = -1.0
