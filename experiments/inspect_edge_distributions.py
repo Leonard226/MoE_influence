@@ -76,9 +76,6 @@ def _compute_stats(model: str, task: str) -> dict:
     thresholds = {Q: float(np.quantile(edges, Q)) if len(edges) > 0 else 0.0
                   for Q in QUANTILES}
 
-    log_edges = np.log10(edges) if len(edges) > 0 else np.array([])
-    log_mass = np.log10(out_mass[out_mass > 0]) if (out_mass > 0).any() else np.array([])
-
     return {
         "model": model, "task": task, "missing": False,
         "L": L, "N": N, "V": V,
@@ -89,18 +86,19 @@ def _compute_stats(model: str, task: str) -> dict:
         "edges_max": float(edges.max()) if len(edges) > 0 else 0.0,
         "edges_mean": float(edges.mean()) if len(edges) > 0 else 0.0,
         "edges_median": float(np.median(edges)) if len(edges) > 0 else 0.0,
-        "log_edges_pct": (np.percentile(log_edges, [1, 5, 25, 50, 75, 95, 99]).tolist()
-                          if len(log_edges) > 0 else []),
+        "edges_pct": (np.percentile(edges, [1, 5, 25, 50, 75, 95, 99]).tolist()
+                      if len(edges) > 0 else []),
         "out_mass_zero_count": int((out_mass == 0).sum()),
         "out_mass_min": float(out_mass.min()),
         "out_mass_max": float(out_mass.max()),
         "out_mass_mean": float(out_mass.mean()),
         "out_mass_median": float(np.median(out_mass)),
-        "log_mass_pct": (np.percentile(log_mass, [1, 5, 25, 50, 75, 95, 99]).tolist()
-                         if len(log_mass) > 0 else []),
+        "out_mass_pct": (np.percentile(out_mass[out_mass > 0],
+                                        [1, 5, 25, 50, 75, 95, 99]).tolist()
+                         if (out_mass > 0).any() else []),
         "thresholds": thresholds,
-        "log_edges": log_edges,                # for plotting
-        "out_mass": out_mass,                  # for plotting
+        "edges": edges,                        # raw |W| (plot on log axis)
+        "out_mass": out_mass,                  # raw per-expert mass
     }
 
 
@@ -131,7 +129,8 @@ def _print_summary(rows: list[dict]) -> None:
 
 def _save_per_model_panels(rows: list[dict], kind: str, task: str,
                            out_dir: Path, dpi: int) -> Path:
-    """8-panel multi-model histogram. kind in {'edges', 'mass'}."""
+    """8-panel multi-model histogram. kind in {'edges', 'mass'}.
+    Uses raw values with a log-scale x-axis (ticks like 1e-6, 1e-4, ...)."""
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
@@ -143,26 +142,27 @@ def _save_per_model_panels(rows: list[dict], kind: str, task: str,
     for i, r in enumerate(rows[:8]):
         ax = axes[i]
         if kind == "edges":
-            data = r["log_edges"]
-            xlabel = "log10(|W|)  (forward, nonzero edges only)"
+            data = r["edges"]
+            xlabel = "|W|  (forward, nonzero edges only; log-scale)"
             title = (f"{r['model']}\nV={r['V']}, |E|={r['n_fwd_present']:,} "
                      f"({100*r['edge_density']:.1f}% density)")
         else:  # mass
-            mass_nz = r["out_mass"][r["out_mass"] > 0]
-            data = np.log10(mass_nz) if len(mass_nz) > 0 else np.array([])
-            xlabel = "log10(outgoing mass per expert)"
+            data = r["out_mass"][r["out_mass"] > 0]
+            xlabel = "outgoing mass per expert  (log-scale)"
             title = (f"{r['model']}\n"
                      f"zero-mass experts: {r['out_mass_zero_count']}/{r['V']}")
         if len(data) == 0:
             ax.set_title(title + "\n(no data)")
             ax.set_xlabel(xlabel)
             continue
-        ax.hist(data, bins=80, color="steelblue", alpha=0.85)
-        # Q-threshold markers on the edges panel.
+        bins = np.geomspace(data.min(), data.max(), 80)
+        ax.hist(data, bins=bins, color="steelblue", alpha=0.85)
+        ax.set_xscale("log")
+        # Q-threshold markers on the edges panel (in raw |W| units now).
         if kind == "edges":
             for Q, t in r["thresholds"].items():
                 if t > 0:
-                    ax.axvline(np.log10(t), color="red", linestyle="--",
+                    ax.axvline(t, color="red", linestyle="--",
                                linewidth=1.0, alpha=0.65,
                                label=f"Q={Q}: {t:.1e}")
             ax.legend(loc="upper left", fontsize=7, framealpha=0.85)
@@ -173,8 +173,8 @@ def _save_per_model_panels(rows: list[dict], kind: str, task: str,
         axes[j].axis("off")
 
     fig.suptitle(
-        ("Forward |W| log10-histogram per model" if kind == "edges"
-         else "Outgoing mass log10-histogram per model")
+        ("Forward |W| distribution per model (log x-axis)" if kind == "edges"
+         else "Outgoing mass per expert per model (log x-axis)")
         + f"   (task = {task})",
         fontsize=14,
     )
@@ -185,9 +185,9 @@ def _save_per_model_panels(rows: list[dict], kind: str, task: str,
     return out_path
 
 
-def _save_edges_overlay(rows: list[dict], task: str,
-                        out_dir: Path, dpi: int) -> Path:
-    """All-models edge-weight overlay on log-density axes."""
+def _save_overlay(rows: list[dict], kind: str, task: str,
+                  out_dir: Path, dpi: int) -> Path:
+    """All-models overlay on a log-scale x-axis (raw values, not log10)."""
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
@@ -195,18 +195,42 @@ def _save_edges_overlay(rows: list[dict], task: str,
     rows = [r for r in rows if not r.get("missing")]
     fig, ax = plt.subplots(figsize=(14, 8))
     colors = plt.cm.tab10(np.linspace(0, 1, len(rows)))
+
+    # Compute global min/max across all models for shared log-binning.
+    if kind == "edges":
+        all_arrays = [r["edges"] for r in rows if len(r["edges"]) > 0]
+        xlabel = "|W|  (forward, nonzero edges only; log-scale)"
+        title = f"Forward edge-weight distribution: overlay across 8 models   (task = {task})"
+        fname = f"edge_weights_overlay_{task}.pdf"
+    else:
+        all_arrays = [r["out_mass"][r["out_mass"] > 0] for r in rows]
+        all_arrays = [a for a in all_arrays if len(a) > 0]
+        xlabel = "outgoing mass per expert  (log-scale)"
+        title = f"Per-expert outgoing-mass distribution: overlay across 8 models   (task = {task})"
+        fname = f"outgoing_mass_overlay_{task}.pdf"
+    if not all_arrays:
+        ax.text(0.5, 0.5, "(no data)", ha="center", transform=ax.transAxes)
+        out_path = out_dir / fname
+        fig.savefig(out_path, dpi=dpi)
+        plt.close(fig)
+        return out_path
+    global_min = min(a.min() for a in all_arrays)
+    global_max = max(a.max() for a in all_arrays)
+    bins = np.geomspace(global_min, global_max, 120)
+
     for r, c in zip(rows, colors):
-        if len(r["log_edges"]) == 0:
+        data = r["edges"] if kind == "edges" else r["out_mass"][r["out_mass"] > 0]
+        if len(data) == 0:
             continue
-        ax.hist(r["log_edges"], bins=120, histtype="step", linewidth=1.6,
+        ax.hist(data, bins=bins, histtype="step", linewidth=1.6,
                 color=c, label=r["model"], density=True, alpha=0.85)
-    ax.set_xlabel("log10(|W|)  (forward, nonzero edges only)")
+    ax.set_xscale("log")
+    ax.set_xlabel(xlabel)
     ax.set_ylabel("density")
-    ax.set_title(f"Forward edge-weight distribution: overlay across 8 models   "
-                 f"(task = {task})", fontsize=13)
+    ax.set_title(title, fontsize=13)
     ax.legend(loc="upper left", fontsize=9)
     fig.tight_layout()
-    out_path = out_dir / f"edge_weights_overlay_{task}.pdf"
+    out_path = out_dir / fname
     fig.savefig(out_path, dpi=dpi)
     plt.close(fig)
     return out_path
@@ -238,11 +262,11 @@ def main():
 
     p1 = _save_per_model_panels(rows, "edges", args.task, out_dir, args.dpi)
     p2 = _save_per_model_panels(rows, "mass", args.task, out_dir, args.dpi)
-    p3 = _save_edges_overlay(rows, args.task, out_dir, args.dpi)
+    p3 = _save_overlay(rows, "edges", args.task, out_dir, args.dpi)
+    p4 = _save_overlay(rows, "mass", args.task, out_dir, args.dpi)
     print(f"\n  saved:")
-    print(f"    {p1}")
-    print(f"    {p2}")
-    print(f"    {p3}")
+    for p in (p1, p2, p3, p4):
+        print(f"    {p}")
 
 
 if __name__ == "__main__":
