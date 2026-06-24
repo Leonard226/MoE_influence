@@ -185,6 +185,82 @@ def _save_per_model_panels(rows: list[dict], kind: str, task: str,
     return out_path
 
 
+def _save_ridge(rows: list[dict], kind: str, task: str,
+                out_dir: Path, dpi: int) -> Path:
+    """Ridge plot: one narrow panel per model, all sharing the x-axis (log).
+    Each panel autoscales its own y so the shape of each distribution reads
+    clearly without 8-way overlap. Y-axis is fraction of edges per bin (no
+    bin-width division, so heights are directly interpretable on log x)."""
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    rows = [r for r in rows if not r.get("missing")]
+    if not rows:
+        return out_dir / "ridge_empty.pdf"
+    rows = sorted(rows, key=lambda r: MODELS.index(r["model"])
+                                       if r["model"] in MODELS else 99)
+
+    if kind == "edges":
+        get_data = lambda r: r["edges"]
+        xlabel = "|W|  (forward, nonzero edges only; log-scale)"
+        title = (f"Forward edge-weight distribution per model "
+                 f"(task = {task})")
+        fname = f"edge_weights_ridge_{task}.pdf"
+    else:
+        get_data = lambda r: r["out_mass"][r["out_mass"] > 0]
+        xlabel = "outgoing mass per expert  (log-scale)"
+        title = (f"Per-expert outgoing-mass distribution per model "
+                 f"(task = {task})")
+        fname = f"outgoing_mass_ridge_{task}.pdf"
+
+    arrays = [(r["model"], get_data(r)) for r in rows]
+    arrays = [(m, a) for m, a in arrays if len(a) > 0]
+    if not arrays:
+        return out_dir / fname
+    global_min = min(a.min() for _, a in arrays)
+    global_max = max(a.max() for _, a in arrays)
+    bins = np.geomspace(global_min, global_max, 100)
+
+    base_colors = plt.cm.tab10(np.linspace(0, 1, len(rows)))
+    model_color = {r["model"]: c for r, c in zip(rows, base_colors)}
+
+    fig, axes = plt.subplots(len(arrays), 1,
+                             figsize=(14, 1.3 * len(arrays) + 1),
+                             sharex=True)
+    if len(arrays) == 1:
+        axes = [axes]
+    for ax, (model, data) in zip(axes, arrays):
+        c = model_color[model]
+        # Fraction of edges per bin: count / total. Directly interpretable.
+        counts, _ = np.histogram(data, bins=bins)
+        frac = counts / counts.sum()
+        bin_centres = np.sqrt(bins[:-1] * bins[1:])     # geometric centres
+        ax.fill_between(bin_centres, 0, frac, step="mid",
+                        facecolor=c, edgecolor=c, linewidth=1.2, alpha=0.85)
+        ax.set_ylabel(model, rotation=0, ha="right", va="center",
+                       fontsize=10, labelpad=8)
+        ax.set_yticks([])
+        for sp in ("top", "right", "left"):
+            ax.spines[sp].set_visible(False)
+        # Show the model's Q-threshold markers if this is the edges ridge.
+        if kind == "edges":
+            r = next(rr for rr in rows if rr["model"] == model)
+            for Q, t in r["thresholds"].items():
+                if t > 0:
+                    ax.axvline(t, color="red", linestyle="--",
+                               linewidth=0.7, alpha=0.55)
+
+    axes[-1].set_xscale("log")
+    axes[-1].set_xlabel(xlabel)
+    fig.suptitle(title + "    (y: fraction of edges per bin)", fontsize=13)
+    fig.tight_layout(rect=(0, 0, 1, 0.97))
+    out_path = out_dir / fname
+    fig.savefig(out_path, dpi=dpi)
+    plt.close(fig)
+    return out_path
+
+
 def _save_overlay(rows: list[dict], kind: str, task: str,
                   out_dir: Path, dpi: int) -> Path:
     """All-models overlay: filled stepped histograms with transparency,
@@ -228,25 +304,28 @@ def _save_overlay(rows: list[dict], kind: str, task: str,
     global_max = max(a.max() for _, a in arrays)
     bins = np.geomspace(global_min, global_max, 100)
 
-    # Pre-bin so we can sort models by peak density. Narrowest (highest peak)
-    # is drawn LAST so it stays visible above wider distributions.
+    # Pre-bin (fraction of edges per bin) so we can sort by peak height.
+    # Narrowest (highest peak) is drawn LAST so it stays visible above wider
+    # distributions. y-axis is fraction of edges per bin (not density), which
+    # is directly interpretable on a log-scale x.
     binned = []
     for model, data in arrays:
-        counts, _ = np.histogram(data, bins=bins, density=True)
-        binned.append((model, data, counts.max()))
-    binned.sort(key=lambda x: x[2])      # ascending: widest first, narrowest last
+        counts, _ = np.histogram(data, bins=bins)
+        frac = counts / counts.sum() if counts.sum() > 0 else counts
+        bin_centres = np.sqrt(bins[:-1] * bins[1:])
+        binned.append((model, bin_centres, frac, frac.max()))
+    binned.sort(key=lambda x: x[3])      # ascending: widest first
 
-    for model, data, _ in binned:
+    for model, centres, frac, _ in binned:
         c = model_color[model]
-        ax.hist(data, bins=bins,
-                histtype="stepfilled",
-                facecolor=c, edgecolor=c,
-                linewidth=1.4, alpha=0.35,
-                label=model, density=True)
+        ax.fill_between(centres, 0, frac, step="mid",
+                        facecolor=c, edgecolor=c,
+                        linewidth=1.2, alpha=0.40,
+                        label=model)
 
     ax.set_xscale("log")
     ax.set_xlabel(xlabel)
-    ax.set_ylabel("density")
+    ax.set_ylabel("fraction of edges per bin")
     ax.set_title(title, fontsize=13)
 
     # Legend ordered to match the canonical MODELS list (not the draw order),
@@ -293,8 +372,10 @@ def main():
     p2 = _save_per_model_panels(rows, "mass", args.task, out_dir, args.dpi)
     p3 = _save_overlay(rows, "edges", args.task, out_dir, args.dpi)
     p4 = _save_overlay(rows, "mass", args.task, out_dir, args.dpi)
+    p5 = _save_ridge(rows, "edges", args.task, out_dir, args.dpi)
+    p6 = _save_ridge(rows, "mass", args.task, out_dir, args.dpi)
     print(f"\n  saved:")
-    for p in (p1, p2, p3, p4):
+    for p in (p1, p2, p3, p4, p5, p6):
         print(f"    {p}")
 
 
