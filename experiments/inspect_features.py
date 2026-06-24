@@ -41,6 +41,13 @@ import sys
 import time
 from pathlib import Path
 
+# Clamp BLAS thread fan-out BEFORE numpy / sklearn imports. piora GPU nodes
+# have many more cores than OpenBLAS's 128-thread build cap; k-means with
+# n_init>1 + a many-core box otherwise hits "too many memory regions" and
+# segfaults. 4 threads is plenty for our problem sizes.
+for _var in ("OMP_NUM_THREADS", "MKL_NUM_THREADS", "OPENBLAS_NUM_THREADS"):
+    os.environ.setdefault(_var, "4")
+
 import numpy as np
 import torch
 import yaml
@@ -286,7 +293,7 @@ def _kmeans_analysis(F_all, model_idx, models, out_dir, dpi, k) -> Path:
 
     print(f"  k-means with k={k} on {len(F_all)} points ...", flush=True)
     t0 = time.time()
-    km = KMeans(n_clusters=k, random_state=0, n_init=10)
+    km = KMeans(n_clusters=k, random_state=0, n_init=5, algorithm="lloyd")
     labels = km.fit_predict(F_all)
     print(f"    done in {time.time()-t0:.1f}s", flush=True)
 
