@@ -1,32 +1,37 @@
 """Inspect the C_conn cost-matrix distribution on one or all DAGs.
 
-Reports for each (model, task, Q):
-  - raw Phi = ((I - W_sparse)^-1)_uv distribution: percentiles + histogram of
-    log10(Phi) over upper-triangular forward pairs.
-  - C_conn = -log(max(Phi, eps)) / -log(eps) distribution: percentiles +
-    fraction near 1 (saturated / unreachable), fraction near 0 (strong
-    coupling), histogram.
-  - mean / median / fraction-of-zeros / fraction-of-unities, to flag whether
-    the transform is overly compressing or saturating.
+The metric pipeline (matching what run_alpha_beta_sweep.py does):
+  1. Q-sparsify W on forward edges (|W| > threshold).
+  2. Compute Phi = (I - W_sparse)^-1 via upper-triangular solve.
+  3. C = -log(max(Phi, eps)) / -log(eps),  clipped to [0, 1].
+  4. ISOLATION FILTER: drop vertices with no surviving in- or out-edge in
+     the sparsified graph. FGW only ever sees the surviving sub-matrix.
+
+For each (model, task, Q) we report C statistics computed on the FILTERED
+sub-matrix (matching what FGW sees), and the heatmap shows the full V x V
+matrix with isolated rows/cols masked in grey so you can see which experts
+the filter dropped.
 
 Modes:
   --model <name>          : run on one model (verbose per-Q output)
-  --all-models            : run on all 8 archs at one or all Q values and print
-                            a compact cross-model comparison table.
+  --all-models            : run on all 8 archs at one or all Q values and
+                            print a compact cross-model comparison table.
 
 Extras:
-  --eps <float>           : floor for -log transform (default 1e-12). Lower eps
-                            stretches the "very weak path" tail.
-  --heatmap               : save C_conn heatmap PNG to --out-dir. For graphs
-                            with V > HEATMAP_VERTEX_CAP, aggregate to per-layer
-                            (L x L) means so the image is manageable.
+  --eps <float>           : floor for -log transform (default 1e-12).
+  --heatmap               : save C_conn heatmap PDF per (model, Q). Full
+                            V x V always; lower triangle and isolated rows/
+                            cols are masked grey.
   --out-dir <path>        : where to save heatmaps (default: result_path/
                             circuits/conn_inspection/).
+  --dpi <int>             : raster dpi for the heatmap PDF (default 200; for
+                            full Qwen3-235B-A22B resolution try 600+).
 
 Usage:
-    python experiments/inspect_conn_costs.py --all-models --q 0.9
-    python experiments/inspect_conn_costs.py --model qwen3-235b-a22b --heatmap
-    python experiments/inspect_conn_costs.py --all-models --eps 1e-25
+    python experiments/inspect_conn_costs.py --all-models
+    python experiments/inspect_conn_costs.py --all-models --heatmap
+    python experiments/inspect_conn_costs.py --model qwen3-235b-a22b \\
+        --heatmap --dpi 600
 """
 from __future__ import annotations
 
@@ -52,40 +57,20 @@ with open(os.path.join(ROOT, "config.yaml")) as f:
 CIRCUITS_DIR = Path(_config["result_path"]) / "circuits"
 DEFAULT_OUT_DIR = CIRCUITS_DIR / "conn_inspection"
 
-HEATMAP_VERTEX_CAP = 2000          # plot full matrix below this; else aggregate
-
 
 # -------------------- per-graph computation --------------------------------
-def _build_phi(W_fwd: torch.Tensor, threshold: float) -> np.ndarray:
-    """Build symmetric Phi = (I - W_sparse)^-1 via triangular solve, then
-    direction-mirror. W is upper-triangular (forward DAG)."""
-    import scipy.linalg
-    L, N = W_fwd.shape[0], W_fwd.shape[1]
-    V = L * N
-    W_abs = W_fwd.abs().cpu().numpy().reshape(V, V).astype(np.float64)
-    W_sparse = np.where(W_abs > threshold, W_abs, 0.0)
-    A = np.eye(V, dtype=np.float64) - W_sparse
-    Phi = scipy.linalg.solve_triangular(A, np.eye(V, dtype=np.float64), lower=False)
-    Phi = np.maximum(Phi, Phi.T)
-    return Phi, W_sparse
-
-
-def _phi_to_C(Phi: np.ndarray, eps: float) -> np.ndarray:
-    log_floor = -np.log(eps)
-    C = -np.log(np.clip(Phi, eps, None)) / log_floor
-    C = np.clip(C, 0.0, 1.0)
-    np.fill_diagonal(C, 0.0)
-    return C
-
-
 def _compute_one(model: str, task: str, Q: float, eps: float
-                 ) -> tuple[dict, np.ndarray | None]:
-    """Compute summary stats for (model, task, Q). Returns (stats_dict, C_matrix
-    or None if the build failed). The C_matrix is returned only when needed
-    downstream for heatmap plotting; otherwise discarded by caller."""
+                 ) -> tuple[dict, np.ndarray | None, np.ndarray | None,
+                            np.ndarray | None, np.ndarray | None]:
+    """Returns (stats, C_full, keep_mask, phi_pairs_eff, c_pairs_eff) where
+    phi/c-pairs are taken on the FILTERED V_eff x V_eff sub-matrix, matching
+    what FGW receives. C_full and keep_mask are returned for heatmap plotting."""
+    import scipy.linalg
+
     dag_path = CIRCUITS_DIR / f"dag_{model}_{task}.pt"
     if not dag_path.exists():
-        return {"model": model, "task": task, "Q": Q, "missing": True}, None
+        return ({"model": model, "task": task, "Q": Q, "missing": True},
+                None, None, None, None)
     dag = torch.load(dag_path, weights_only=False, map_location="cpu")
     W = dag[EDGE_TENSOR].float()
     L, N = W.shape[0], W.shape[1]
@@ -96,81 +81,121 @@ def _compute_one(model: str, task: str, Q: float, eps: float
     fwd = (s_idx < r_idx).expand_as(W)
     W_fwd = W * fwd.float()
 
-    t0 = time.time()
-    Phi, W_sparse = _build_phi(W_fwd, threshold)
-    solve_time = time.time() - t0
-    C = _phi_to_C(Phi, eps)
-
-    iu, ju = np.triu_indices(V, k=1)
-    phi_pairs = Phi[iu, ju]
-    c_pairs = C[iu, ju]
+    W_abs = W_fwd.abs().cpu().numpy().reshape(V, V).astype(np.float64)
+    W_sparse = np.where(W_abs > threshold, W_abs, 0.0)
     nnz = int((W_sparse > 0).sum())
-    n_total = len(phi_pairs)
-    n_unreach = int((phi_pairs == 0).sum())
-    n_clip = int((phi_pairs <= eps).sum())
-    n_sat = int((c_pairs >= 1.0 - 1e-12).sum())
+
+    # Isolation filter (matches run_alpha_beta_sweep.py): drop vertices with
+    # no surviving forward in- or out-edge above threshold.
+    survive = W_sparse > 0
+    out_deg = survive.sum(axis=1)
+    in_deg = survive.sum(axis=0)
+    keep_mask = (out_deg > 0) | (in_deg > 0)
+    V_eff = int(keep_mask.sum())
+
+    t0 = time.time()
+    A = np.eye(V, dtype=np.float64) - W_sparse
+    Phi = scipy.linalg.solve_triangular(A, np.eye(V, dtype=np.float64), lower=False)
+    solve_time = time.time() - t0
+    Phi = np.maximum(Phi, Phi.T)
+
+    log_floor = -np.log(eps)
+    C = -np.log(np.clip(Phi, eps, None)) / log_floor
+    C = np.clip(C, 0.0, 1.0)
+    np.fill_diagonal(C, 0.0)
+
+    # Stats on the FILTERED sub-matrix (what FGW sees).
+    keep_idx = np.where(keep_mask)[0]
+    if V_eff >= 2:
+        C_eff = C[np.ix_(keep_idx, keep_idx)]
+        Phi_eff = Phi[np.ix_(keep_idx, keep_idx)]
+        iu, ju = np.triu_indices(V_eff, k=1)
+        phi_pairs = Phi_eff[iu, ju]
+        c_pairs = C_eff[iu, ju]
+        n_total = len(phi_pairs)
+        n_unreach = int((phi_pairs == 0).sum())
+        n_clip = int((phi_pairs <= eps).sum())
+        n_sat = int((c_pairs >= 1.0 - 1e-12).sum())
+        stats_block = {
+            "phi_min": float(phi_pairs.min()),
+            "phi_max": float(phi_pairs.max()),
+            "phi_median": float(np.median(phi_pairs)),
+            "c_mean": float(c_pairs.mean()),
+            "c_std": float(c_pairs.std()),
+            "c_median": float(np.median(c_pairs)),
+            "frac_unreach": n_unreach / max(n_total, 1),
+            "frac_clipped": n_clip / max(n_total, 1),
+            "frac_saturated": n_sat / max(n_total, 1),
+        }
+    else:
+        phi_pairs = np.array([])
+        c_pairs = np.array([])
+        stats_block = {
+            "phi_min": float("nan"), "phi_max": float("nan"),
+            "phi_median": float("nan"),
+            "c_mean": float("nan"), "c_std": float("nan"),
+            "c_median": float("nan"),
+            "frac_unreach": float("nan"),
+            "frac_clipped": float("nan"),
+            "frac_saturated": float("nan"),
+        }
 
     stats = {
         "model": model, "task": task, "Q": Q, "missing": False,
-        "L": L, "N": N, "V": V,
+        "L": L, "N": N, "V": V, "V_eff": V_eff,
         "threshold": float(threshold),
         "W_nnz": nnz,
         "W_max": float(W_sparse.max() if nnz > 0 else 0.0),
         "W_mean_nz": float(W_sparse[W_sparse > 0].mean() if nnz > 0 else 0.0),
         "solve_sec": float(solve_time),
-        "phi_min": float(phi_pairs.min()),
-        "phi_max": float(phi_pairs.max()),
-        "phi_median": float(np.median(phi_pairs)),
-        "phi_p99": float(np.percentile(phi_pairs, 99)),
-        "phi_log10_p50": float(np.log10(np.clip(np.median(phi_pairs[phi_pairs > 0])
-                                                if (phi_pairs > 0).any() else eps,
-                                                eps, None))),
-        "c_mean": float(c_pairs.mean()),
-        "c_std": float(c_pairs.std()),
-        "c_median": float(np.median(c_pairs)),
-        "frac_unreach": n_unreach / n_total,
-        "frac_clipped": n_clip / n_total,
-        "frac_saturated": n_sat / n_total,
+        **stats_block,
     }
-    del dag, W, W_fwd, Phi, W_sparse
-    return stats, C
+    del dag, W, W_fwd, W_sparse, Phi
+    return stats, C, keep_mask, phi_pairs, c_pairs
 
 
 # -------------------- formatting -------------------------------------------
 def _print_compact_table(rows: list[dict]) -> None:
-    """One row per (model, Q). Sorted by V ascending."""
     rows = [r for r in rows if not r.get("missing")]
     rows.sort(key=lambda r: (r["V"], r["Q"]))
     if not rows:
         print("(no rows)")
         return
-    print("\n" + "=" * 124)
-    print(f"  {'model':<18s}  {'V':>6s}  {'Q':>6s}  {'thr':>8s}  "
-          f"{'nnz':>10s}  {'C mean':>7s}  {'C std':>7s}  {'C med':>7s}  "
-          f"{'%unreach':>9s}  {'%clipped':>9s}  {'%C=1':>7s}  {'sec':>5s}")
-    print("  " + "-" * 122)
+    print("\n" + "=" * 134)
+    print(f"  {'model':<18s}  {'V':>6s}  {'V_eff':>6s}  {'%kept':>6s}  "
+          f"{'Q':>6s}  {'thr':>8s}  {'nnz':>10s}  "
+          f"{'C mean':>7s}  {'C std':>7s}  {'C med':>7s}  "
+          f"{'%C=1':>7s}  {'sec':>5s}")
+    print("  " + "-" * 132)
     for r in rows:
-        print(f"  {r['model']:<18s}  {r['V']:>6d}  {r['Q']:>6.3g}  "
-              f"{r['threshold']:>8.2e}  {r['W_nnz']:>10,}  "
+        kept_pct = 100 * r["V_eff"] / max(r["V"], 1)
+        sat = (100 * r["frac_saturated"]) if not np.isnan(r["frac_saturated"]) else float("nan")
+        print(f"  {r['model']:<18s}  {r['V']:>6d}  {r['V_eff']:>6d}  "
+              f"{kept_pct:>5.1f}%  {r['Q']:>6.3g}  {r['threshold']:>8.2e}  "
+              f"{r['W_nnz']:>10,}  "
               f"{r['c_mean']:>7.4f}  {r['c_std']:>7.4f}  {r['c_median']:>7.4f}  "
-              f"{100*r['frac_unreach']:>8.2f}%  "
-              f"{100*r['frac_clipped']:>8.2f}%  "
-              f"{100*r['frac_saturated']:>6.2f}%  {r['solve_sec']:>5.1f}")
+              f"{sat:>6.2f}%  {r['solve_sec']:>5.1f}")
     print()
 
 
-def _print_verbose_one(stats: dict, phi_pairs: np.ndarray, c_pairs: np.ndarray,
-                       eps: float) -> None:
+def _print_verbose_one(stats: dict, phi_pairs: np.ndarray,
+                       c_pairs: np.ndarray, eps: float) -> None:
     print(f"\n{'=' * 78}")
     print(f"model = {stats['model']}   task = {stats['task']}   Q = {stats['Q']}")
     print(f"  L = {stats['L']}   N = {stats['N']}   V = {stats['V']}   "
-          f"threshold = {stats['threshold']:.6g}")
+          f"V_eff (after isolation filter) = {stats['V_eff']}   "
+          f"({100*stats['V_eff']/max(stats['V'],1):.1f}% kept)")
+    print(f"  threshold = {stats['threshold']:.6g}")
     print(f"{'=' * 78}")
     print(f"  W_sparse: nnz = {stats['W_nnz']:,}  max = {stats['W_max']:.4f}  "
           f"mean (nz) = {stats['W_mean_nz']:.4f}")
     print(f"  solve took {stats['solve_sec']:.1f}s")
 
-    print(f"\n--- Raw Phi distribution (upper-triangular, off-diagonal) ---")
+    if len(phi_pairs) == 0:
+        print("  V_eff < 2, no off-diagonal pairs to summarise.")
+        return
+
+    print(f"\n--- Raw Phi distribution (V_eff x V_eff upper-triangular) ---")
     pos = phi_pairs[phi_pairs > 0]
     if len(pos) > 0:
         logx = np.log10(pos)
@@ -188,7 +213,7 @@ def _print_verbose_one(stats: dict, phi_pairs: np.ndarray, c_pairs: np.ndarray,
     print(f"  fraction Phi <= {eps:.0e} (clipped by eps)  : "
           f"{100*stats['frac_clipped']:5.2f}%")
 
-    print(f"\n--- C_conn distribution ---")
+    print(f"\n--- C_conn distribution (V_eff x V_eff) ---")
     pcts = np.percentile(c_pairs, [1, 5, 25, 50, 75, 95, 99])
     print(f"  percentiles [1,5,25,50,75,95,99]: "
           + "  ".join(f"{p:6.4f}" for p in pcts))
@@ -198,36 +223,38 @@ def _print_verbose_one(stats: dict, phi_pairs: np.ndarray, c_pairs: np.ndarray,
           f"{100*stats['frac_saturated']:5.2f}%")
 
 
-# -------------------- heatmap ----------------------------------------------
-def _save_heatmap(C: np.ndarray, model: str, task: str, Q: float,
-                  L: int, N: int, eps: float, out_dir: Path) -> Path:
+# -------------------- heatmap (full V x V, upper triangular, isolated masked)
+def _save_heatmap(C: np.ndarray, keep_mask: np.ndarray, V_eff: int,
+                  model: str, task: str, Q: float,
+                  out_dir: Path, dpi: int) -> Path:
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
 
     out_dir.mkdir(parents=True, exist_ok=True)
     V = C.shape[0]
-    if V <= HEATMAP_VERTEX_CAP:
-        img = C
-        kind = f"full {V}x{V}"
-    else:
-        # Aggregate per-(layer_i, layer_j): mean over the N x N block.
-        C_layer = C.reshape(L, N, L, N).mean(axis=(1, 3))
-        img = C_layer
-        kind = f"layer-aggregated {L}x{L} (from {V}x{V})"
 
-    fig, ax = plt.subplots(figsize=(8, 7))
-    im = ax.imshow(img, cmap="viridis", vmin=0.0, vmax=1.0,
-                   interpolation="nearest")
+    # Build display matrix: NaN for lower triangle AND isolated rows/cols.
+    display = C.copy()
+    tri_idx = np.tril_indices(V, k=-1)
+    display[tri_idx] = np.nan
+    iso = ~keep_mask
+    display[iso, :] = np.nan
+    display[:, iso] = np.nan
+
+    fig, ax = plt.subplots(figsize=(14, 12))
+    cmap = plt.get_cmap("viridis").copy()
+    cmap.set_bad("#d8d8d8")    # light grey for NaN (lower tri + isolated)
+    im = ax.imshow(display, cmap=cmap, vmin=0.0, vmax=1.0,
+                   interpolation="nearest", rasterized=True)
     fig.colorbar(im, ax=ax, label="C_conn")
-    ax.set_title(f"C_conn  ({model}/{task})  Q={Q}  eps={eps:.0e}\n{kind}")
-    ax.set_xlabel("vertex j (receiver)" if V <= HEATMAP_VERTEX_CAP
-                  else "layer j (receiver)")
-    ax.set_ylabel("vertex i (sender)" if V <= HEATMAP_VERTEX_CAP
-                  else "layer i (sender)")
-    out_path = out_dir / f"C_conn_{model}_{task}_Q{Q:g}_eps{eps:.0e}.png"
+    ax.set_title(f"C_conn  ({model}/{task})  Q={Q}  "
+                 f"V={V}, V_eff={V_eff} ({100*V_eff/V:.1f}% kept)")
+    ax.set_xlabel("vertex j (receiver)")
+    ax.set_ylabel("vertex i (sender)")
+    out_path = out_dir / f"C_conn_{model}_{task}_Q{Q:g}.pdf"
     fig.tight_layout()
-    fig.savefig(out_path, dpi=120)
+    fig.savefig(out_path, dpi=dpi)
     plt.close(fig)
     return out_path
 
@@ -245,12 +272,13 @@ def main():
                         help="Single Q to inspect; default = all three "
                              f"({QUANTILES})")
     parser.add_argument("--eps", type=float, default=1e-12,
-                        help="Floor for -log transform (default 1e-12). Lower "
-                             "eps stretches the very-weak-path tail.")
+                        help="Floor for -log transform (default 1e-12).")
     parser.add_argument("--heatmap", action="store_true",
-                        help="Save C_conn heatmap PNG per (model, Q).")
+                        help="Save C_conn heatmap PDF per (model, Q).")
     parser.add_argument("--out-dir", default=str(DEFAULT_OUT_DIR),
-                        help="Directory for heatmap PNGs.")
+                        help="Directory for heatmap PDFs.")
+    parser.add_argument("--dpi", type=int, default=200,
+                        help="Raster dpi for the heatmap PDF (default 200).")
     args = parser.parse_args()
 
     out_dir = Path(args.out_dir)
@@ -260,26 +288,19 @@ def main():
     rows: list[dict] = []
     for model in models:
         for Q in qs:
-            stats, C = _compute_one(model, args.task, Q, args.eps)
+            stats, C, keep_mask, phi_pairs, c_pairs = _compute_one(
+                model, args.task, Q, args.eps)
             rows.append(stats)
             if stats.get("missing"):
                 print(f"  [SKIP missing] {model}/{args.task} Q={Q}")
                 continue
             if not args.all_models:
-                # Verbose mode (single model): show histogram + distributions.
-                dag_path = CIRCUITS_DIR / f"dag_{model}_{args.task}.pt"
-                # Recompute Phi from C to print log10 histogram cleanly.
-                eps = args.eps
-                log_floor = -np.log(eps)
-                Phi_recovered = np.exp(-C * log_floor)
-                iu, ju = np.triu_indices(C.shape[0], k=1)
-                _print_verbose_one(stats, Phi_recovered[iu, ju],
-                                   C[iu, ju], eps)
+                _print_verbose_one(stats, phi_pairs, c_pairs, args.eps)
             if args.heatmap and C is not None:
-                p = _save_heatmap(C, model, args.task, Q,
-                                  stats["L"], stats["N"], args.eps, out_dir)
+                p = _save_heatmap(C, keep_mask, stats["V_eff"],
+                                  model, args.task, Q, out_dir, args.dpi)
                 print(f"  heatmap -> {p}")
-            del C
+            del C, keep_mask, phi_pairs, c_pairs
 
     if args.all_models:
         print(f"\n=== Cross-model summary  (task={args.task}, eps={args.eps:.0e}) ===")
