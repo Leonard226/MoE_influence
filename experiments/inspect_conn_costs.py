@@ -223,35 +223,59 @@ def _print_verbose_one(stats: dict, phi_pairs: np.ndarray,
           f"{100*stats['frac_saturated']:5.2f}%")
 
 
-# -------------------- heatmap (full V x V, upper triangular, isolated masked)
+# -------------------- heatmap (V_eff x V_eff, upper triangular, layer markers)
 def _save_heatmap(C: np.ndarray, keep_mask: np.ndarray, V_eff: int,
                   model: str, task: str, Q: float,
-                  out_dir: Path, dpi: int) -> Path:
+                  L: int, N: int, out_dir: Path, dpi: int) -> Path | None:
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
 
     out_dir.mkdir(parents=True, exist_ok=True)
     V = C.shape[0]
+    if V_eff < 2:
+        return None
 
-    # Build display matrix: NaN for lower triangle AND isolated rows/cols.
-    display = C.copy()
-    tri_idx = np.tril_indices(V, k=-1)
+    # Shrink to the V_eff x V_eff sub-matrix that FGW actually receives.
+    keep_idx = np.where(keep_mask)[0]
+    C_eff = C[np.ix_(keep_idx, keep_idx)]
+
+    # Upper-triangular display: zero out lower triangle.
+    display = C_eff.copy()
+    tri_idx = np.tril_indices(V_eff, k=-1)
     display[tri_idx] = np.nan
-    iso = ~keep_mask
-    display[iso, :] = np.nan
-    display[:, iso] = np.nan
+
+    # Layer boundaries in the reduced indexing. For each kept expert we look
+    # up its ORIGINAL layer (keep_idx // N). After Q-sparsification with the
+    # isolation filter, kept experts per layer are non-uniform, so the
+    # boundary positions in the reduced axis are not at multiples of N.
+    original_layer = keep_idx // N                          # (V_eff,)
+    # Boundary just after position k iff original_layer[k+1] > original_layer[k].
+    diff_idx = np.where(np.diff(original_layer) > 0)[0]
+    boundary_positions = diff_idx + 0.5
+    # Count kept experts per original layer, for the caption.
+    layer_kept = np.bincount(original_layer, minlength=L)
+    n_layers_with_any = int((layer_kept > 0).sum())
 
     fig, ax = plt.subplots(figsize=(14, 12))
     cmap = plt.get_cmap("viridis").copy()
-    cmap.set_bad("#d8d8d8")    # light grey for NaN (lower tri + isolated)
+    cmap.set_bad("#d8d8d8")
     im = ax.imshow(display, cmap=cmap, vmin=0.0, vmax=1.0,
                    interpolation="nearest", rasterized=True)
     fig.colorbar(im, ax=ax, label="C_conn")
-    ax.set_title(f"C_conn  ({model}/{task})  Q={Q}  "
-                 f"V={V}, V_eff={V_eff} ({100*V_eff/V:.1f}% kept)")
-    ax.set_xlabel("vertex j (receiver)")
-    ax.set_ylabel("vertex i (sender)")
+
+    # Layer-boundary markers: thin white grid lines that pop on viridis.
+    for b in boundary_positions:
+        ax.axvline(x=b, color="white", linewidth=0.4, alpha=0.55)
+        ax.axhline(y=b, color="white", linewidth=0.4, alpha=0.55)
+
+    ax.set_title(
+        f"C_conn  ({model}/{task})  Q={Q}\n"
+        f"V={V}, V_eff={V_eff} ({100*V_eff/V:.1f}% kept), "
+        f"L={L} layers ({n_layers_with_any} non-empty)"
+    )
+    ax.set_xlabel("expert j (receiver)")
+    ax.set_ylabel("expert i (sender)")
     out_path = out_dir / f"C_conn_{model}_{task}_Q{Q:g}.pdf"
     fig.tight_layout()
     fig.savefig(out_path, dpi=dpi)
@@ -298,8 +322,14 @@ def main():
                 _print_verbose_one(stats, phi_pairs, c_pairs, args.eps)
             if args.heatmap and C is not None:
                 p = _save_heatmap(C, keep_mask, stats["V_eff"],
-                                  model, args.task, Q, out_dir, args.dpi)
-                print(f"  heatmap -> {p}")
+                                  model, args.task, Q,
+                                  stats["L"], stats["N"],
+                                  out_dir, args.dpi)
+                if p is None:
+                    print(f"  heatmap skipped (V_eff < 2) for "
+                          f"{model}/{args.task} Q={Q}")
+                else:
+                    print(f"  heatmap -> {p}")
             del C, keep_mask, phi_pairs, c_pairs
 
     if args.all_models:
