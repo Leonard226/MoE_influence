@@ -234,7 +234,7 @@ def _save_correlation(F_all, model_idx, models, out_dir, dpi) -> Path:
 
     if im is not None:
         cbar = fig.colorbar(im, ax=axes.ravel().tolist(),
-                            fraction=0.018, pad=0.02)
+                            fraction=0.022, pad=0.06, aspect=40)
         cbar.set_label("Pearson coefficient", fontsize=13)
         cbar.ax.tick_params(labelsize=11)
     fig.suptitle("Pairwise Feature Correlations per Model", fontsize=18, y=0.99)
