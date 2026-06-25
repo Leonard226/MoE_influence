@@ -76,14 +76,14 @@ CATEGORIES = [
     # (key, csv string or "headline:...", display label, colour)
     # Colours from the Wong (2011) categorical palette — designed to be
     # distinguishable under all common forms of colour-vision deficiency.
-    # The two blues group the "trained × trained" pair together; the
+    # The two blues group the trained-trained pair together; the
     # vermillion clearly separates the null.
     ("trained_within", "headline:within",
-        "trained × trained\n(within)",        "#56B4E9"),  # Wong sky blue
+        "within-family",       "#56B4E9"),  # Wong sky blue
     ("trained_cross",  "headline:cross",
-        "trained × trained\n(cross)",         "#0072B2"),  # Wong blue
+        "cross-family",        "#0072B2"),  # Wong blue
     ("tr_vs_rnd_same", "trained_vs_random_same",
-        "trained × random\n(same arch)",      "#D55E00"),  # Wong vermillion
+        "trained vs random",   "#D55E00"),  # Wong vermillion
 ]
 
 
@@ -263,12 +263,11 @@ def _save_violins(S, headline_alphas, headline_Qs, null_rows,
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
 
-    # Rows = Q, columns = α.
+    # Rows = Q, columns = α.  Scaled ~25% smaller than the previous layout.
     n_q, n_a = len(QUANTILES), len(ALPHAS)
-    fig, axes = plt.subplots(n_q, n_a, figsize=(5.2 * n_a, 4 * n_q + 0.6),
-                              squeeze=False, sharey=True, sharex=True)
+    fig, axes = plt.subplots(n_q, n_a, figsize=(3.8 * n_a, 3.0 * n_q + 0.4),
+                              squeeze=False, sharey=True)
 
-    labels_global: list[str] = []
     for qi, Q in enumerate(QUANTILES):
         for ai, alpha in enumerate(ALPHAS):
             ax = axes[qi, ai]
@@ -282,7 +281,6 @@ def _save_violins(S, headline_alphas, headline_Qs, null_rows,
                 data.append(v)
                 colours.append(colour)
                 labels.append(label)
-            labels_global = labels
             data_safe = [v if not np.all(np.isnan(v)) else np.zeros(1)
                          for v in data]
             parts = ax.violinplot(data_safe, showmeans=True, showmedians=False,
@@ -291,43 +289,38 @@ def _save_violins(S, headline_alphas, headline_Qs, null_rows,
                 body.set_facecolor(c)
                 body.set_edgecolor("black")
                 body.set_alpha(0.82)
-                body.set_linewidth(0.7)
+                body.set_linewidth(0.6)
             for k in ("cmeans", "cbars", "cmins", "cmaxes"):
                 if k in parts:
                     parts[k].set_color("black")
-                    parts[k].set_linewidth(0.9)
+                    parts[k].set_linewidth(0.8)
 
+            # Every panel gets its own x-tick labels (kept readable; user request).
             ax.set_xticks(range(1, len(CATEGORIES) + 1))
+            ax.set_xticklabels(labels, fontsize=9, rotation=22, ha="right")
             ax.grid(alpha=0.18, axis="y")
             ax.set_ylim(-0.02, 1.03)
             ax.set_ylabel("")            # no per-panel ylabel; we use supylabel
             ax.set_title("")             # no per-panel title; we use column headers
+            ax.tick_params(axis="y", labelsize=8)
 
-    # X-tick labels only on the bottom row.
-    for ai in range(n_a):
-        axes[-1, ai].set_xticklabels(labels_global, fontsize=11,
-                                      rotation=22, ha="right")
-    for qi in range(n_q - 1):
-        for ai in range(n_a):
-            axes[qi, ai].set_xticklabels([])
-
-    # Column headers at top: α values (fontsize 22).
+    # Column headers at top: α values (fontsize scaled).
     for ai, alpha in enumerate(ALPHAS):
-        axes[0, ai].set_title(f"α = {alpha}", fontsize=22, pad=12)
+        axes[0, ai].set_title(f"α = {alpha}", fontsize=16, pad=8)
 
-    # Row labels on the right: Q values (fontsize 22, vertical top-to-bottom).
+    # Row labels on the right: Q values (vertical top-to-bottom, scaled).
     for qi, Q in enumerate(QUANTILES):
         axes[qi, -1].text(
-            1.04, 0.5, f"Q = {Q}",
-            fontsize=22, rotation=-90, ha="left", va="center",
+            1.05, 0.5, f"Q = {Q}",
+            fontsize=16, rotation=-90, ha="left", va="center",
             transform=axes[qi, -1].transAxes,
         )
 
     # Global y-label on the leftmost side (vertical, bottom-to-top per matplotlib
     # convention — standard ylabel orientation).
-    fig.supylabel("FGW similarity S", fontsize=22)
+    fig.supylabel("FGW similarity S", fontsize=16)
 
-    fig.tight_layout(rect=(0.025, 0, 0.97, 0.98))
+    fig.tight_layout(rect=(0.025, 0, 0.96, 0.98))
     out_path = out_dir / "null_violins.pdf"
     fig.savefig(out_path, dpi=dpi)
     plt.close(fig)
