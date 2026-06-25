@@ -48,7 +48,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 
 from experiments.run_alpha_beta_sweep import (   # noqa: E402
-    MODELS, TUPLES, ALPHAS, QUANTILES, FIXED_BETA,
+    MODELS, TASKS, TUPLES, ALPHAS, QUANTILES, FIXED_BETA,
 )
 
 with open(os.path.join(ROOT, "config.yaml")) as f:
@@ -64,14 +64,22 @@ MODEL_TO_FAMILY = {m: f for f, ms in FAMILIES.items() for m in ms}
 
 NULL_TASK = "c4"     # null baseline was run on c4 only
 
+# Three meaningful categories for the trained-vs-random comparison:
+#   * trained x trained (within)   — same-family, same-task; FROM HEADLINE TENSOR
+#                                    across all 8 tasks  (n = 3 within-family pair-archs × 8 tasks = 24)
+#   * trained x trained (cross)    — different-family, same-task; FROM HEADLINE TENSOR
+#                                    across all 8 tasks  (n = 25 cross-family pair-archs × 8 tasks = 200)
+#   * trained x random (same arch) — null hypothesis: does training imprint
+#                                    structure over random init of the same arch?
+#                                    FROM NULL CSV (c4 only, 8 archs × 3 seeds = 24)
 CATEGORIES = [
-    # (key, csv comparison string or "headline:within|cross", display label, colour)
-    ("trained_within",   "headline:within", "trained\nwithin",         "#1f6cb0"),
-    ("trained_cross",    "headline:cross",  "trained\ncross",          "#5dade2"),
-    ("tr_vs_rnd_same",   "trained_vs_random_same",  "trained vs\nrand-same",  "#f39c12"),
-    ("tr_vs_rnd_cross",  "trained_vs_random_cross", "trained vs\nrand-cross", "#e67e22"),
-    ("rnd_vs_rnd_cross", "random_vs_random_cross",  "rand vs\nrand-cross",    "#c0392b"),
-    ("rnd_vs_rnd_same",  "random_vs_random_same",   "rand vs\nrand-same",     "#7d3c98"),
+    # (key, csv string or "headline:...", display label, colour)
+    ("trained_within", "headline:within",
+        "trained × trained\n(within)",        "#1f6cb0"),
+    ("trained_cross",  "headline:cross",
+        "trained × trained\n(cross)",         "#5dade2"),
+    ("tr_vs_rnd_same", "trained_vs_random_same",
+        "trained × random\n(same arch)",      "#e67e22"),
 ]
 
 
@@ -108,6 +116,7 @@ def _load_headline(structural_mode: str, beta: float, gamma: float
     """Returns (S, alphas, quantiles)."""
     suffix = _sweep_suffix(structural_mode, beta, gamma)
     path = CIRCUITS_DIR / f"alpha_beta_sweep_{suffix}" / "S_full_with_act.npz"
+    print(f"  headline sweep S tensor: {path}")
     if not path.exists():
         raise FileNotFoundError(f"headline sweep S tensor not found: {path}")
     d = np.load(path, allow_pickle=True)
@@ -119,6 +128,7 @@ def _load_null(structural_mode: str, beta: float, gamma: float) -> list[dict]:
     suffix = _null_suffix(structural_mode, beta, gamma)
     subdir = f"null_baseline_{suffix}" if suffix else "null_baseline"
     path = CIRCUITS_DIR / subdir / "null_S.csv"
+    print(f"  null baseline CSV:        {path}")
     if not path.exists():
         raise FileNotFoundError(
             f"null baseline CSV not found: {path}\n"
@@ -140,31 +150,34 @@ def _load_null(structural_mode: str, beta: float, gamma: float) -> list[dict]:
     return rows
 
 
-def _trained_pairs(S: np.ndarray, alpha_idx: int, Q_idx: int,
-                   task: str = NULL_TASK
+def _trained_pairs(S: np.ndarray, alpha_idx: int, Q_idx: int
                    ) -> tuple[np.ndarray, np.ndarray]:
-    """For one (α, Q) cell and one task, return (within_family, cross_family)
-    same-task pair arrays from the headline tensor."""
+    """For one (α, Q) cell, return (within_family, cross_family) same-task
+    pair arrays from the headline tensor, AGGREGATED OVER ALL 8 TASKS.
+    Same-task means both endpoints are on the same task d; we then average
+    across d. Within-family: n = 3 within-family arch-pairs × 8 tasks = 24.
+    Cross-family : n = 25 cross-family arch-pairs × 8 tasks = 200."""
     within, cross = [], []
-    for mi, m1 in enumerate(MODELS):
-        for mj, m2 in enumerate(MODELS):
-            if mj <= mi:
-                continue
-            ti = TUPLES.index((m1, task))
-            tj = TUPLES.index((m2, task))
-            v = S[ti, tj, alpha_idx, Q_idx]
-            if np.isnan(v) or v < 0:        # also skip the -1 = FGW failure sentinel
-                continue
-            fam1 = MODEL_TO_FAMILY.get(m1)
-            fam2 = MODEL_TO_FAMILY.get(m2)
-            same = (fam1 is not None and fam1 == fam2)
-            (within if same else cross).append(float(v))
+    for task in TASKS:
+        for mi, m1 in enumerate(MODELS):
+            for mj, m2 in enumerate(MODELS):
+                if mj <= mi:
+                    continue
+                ti = TUPLES.index((m1, task))
+                tj = TUPLES.index((m2, task))
+                v = S[ti, tj, alpha_idx, Q_idx]
+                if np.isnan(v) or v < 0:    # -1 = FGW solver failure sentinel
+                    continue
+                fam1 = MODEL_TO_FAMILY.get(m1)
+                fam2 = MODEL_TO_FAMILY.get(m2)
+                same = (fam1 is not None and fam1 == fam2)
+                (within if same else cross).append(float(v))
     return np.array(within), np.array(cross)
 
 
 def _collect_cell(S, headline_alphas, headline_Qs, alpha, Q,
                   null_rows) -> dict[str, np.ndarray]:
-    """All six category arrays for one (α, Q) cell."""
+    """Three category arrays for one (α, Q) cell."""
     ai = int(np.argmin(np.abs(np.asarray(headline_alphas) - alpha)))
     qi = int(np.argmin(np.abs(np.asarray(headline_Qs) - Q)))
     within, cross = _trained_pairs(S, ai, qi)
@@ -172,12 +185,14 @@ def _collect_cell(S, headline_alphas, headline_Qs, alpha, Q,
         "trained_within": within,
         "trained_cross":  cross,
     }
-    for key, csv_kind, _, _ in CATEGORIES[2:]:
-        vals = [r["S"] for r in null_rows
-                if abs(r["alpha"] - alpha) < 1e-9
-                and abs(r["Q"] - Q) < 1e-9
-                and r["comparison"] == csv_kind]
-        out[key] = np.array(vals, dtype=np.float64)
+    # Pull trained × random (same arch) from the null CSV. Null was run on
+    # c4 only, so this is c4 only by construction.
+    null_csv_key = "trained_vs_random_same"
+    vals = [r["S"] for r in null_rows
+            if abs(r["alpha"] - alpha) < 1e-9
+            and abs(r["Q"] - Q) < 1e-9
+            and r["comparison"] == null_csv_key]
+    out["tr_vs_rnd_same"] = np.array(vals, dtype=np.float64)
     return out
 
 
@@ -209,20 +224,21 @@ def _print_and_save_summary(S, headline_alphas, headline_Qs, null_rows,
                   f"{np.median(v):>8.4f}  {np.percentile(v, 5):>8.4f}  "
                   f"{np.percentile(v, 95):>8.4f}")
 
-            # Effect-size summary: trained_within vs the most-meaningful null
-            # (tr_vs_rnd_cross — random graphs of arbitrary architecture).
+            # Effect-size summary: does training imprint structural signature
+            # on top of architecture? Compare trained × trained (within-family,
+            # all tasks) against trained × random (same arch, c4-only null).
             tw = cell["trained_within"]
-            null = cell["tr_vs_rnd_cross"]
+            null = cell["tr_vs_rnd_same"]
             if len(tw) > 0 and len(null) > 0:
                 delta = float(tw.mean() - null.mean())
                 pooled = float(np.sqrt(0.5 * (tw.var() + null.var())))
                 d = delta / pooled if pooled > 1e-12 else float("nan")
                 p95_null = float(np.percentile(null, 95))
                 frac_above = float((tw > p95_null).mean())
-                w(f"  >> trained_within vs tr_vs_rnd_cross :  "
-                  f"Δmean = {delta:+.4f},  Cohen d = {d:+.2f},  "
-                  f"fraction of trained_within above null p95 = "
-                  f"{100*frac_above:.0f}%")
+                w(f"  >> trained × trained (within) vs trained × random "
+                  f"(same arch):")
+                w(f"     Δmean = {delta:+.4f},  Cohen d = {d:+.2f},  "
+                  f"fraction above null p95 = {100*frac_above:.0f}%")
 
     w("")
     w("=" * 92)
@@ -280,8 +296,12 @@ def _save_violins(S, headline_alphas, headline_Qs, null_rows,
             ax.grid(alpha=0.18, axis="y")
             ax.set_ylim(-0.02, 1.03)
 
-    fig.suptitle("Trained-trained vs. null distributions per (α, Q)  "
-                  f"(task = {NULL_TASK})", fontsize=15)
+    fig.suptitle(
+        "Trained × Trained vs. Trained × Random null per (α, Q)\n"
+        "trained × trained averaged over all 8 tasks; "
+        f"trained × random on '{NULL_TASK}' only (where the null was sampled)",
+        fontsize=14,
+    )
     fig.tight_layout(rect=(0, 0, 1, 0.96))
     out_path = out_dir / "null_violins.pdf"
     fig.savefig(out_path, dpi=dpi)
@@ -322,8 +342,12 @@ def _save_focus_overlay(S, headline_alphas, headline_Qs, null_rows,
     ax.set_xlabel(r"FGW similarity  $\mathcal{S}_\alpha$", fontsize=13)
     ax.set_ylabel("fraction of pairs per bin", fontsize=13)
     ax.set_xlim(0, 1)
-    ax.set_title(f"α = {focus_alpha},  Q = {focus_Q}   (task = {NULL_TASK})",
-                  fontsize=14)
+    ax.set_title(
+        f"α = {focus_alpha},  Q = {focus_Q}\n"
+        f"trained × trained averaged over all 8 tasks; "
+        f"trained × random on '{NULL_TASK}' only",
+        fontsize=13,
+    )
     ax.legend(loc="upper left", fontsize=9, framealpha=0.9)
     ax.grid(alpha=0.18)
     fig.tight_layout()
