@@ -166,7 +166,9 @@ def _save_cosine_similarity(F_all, model_idx, models, out_dir, dpi) -> Path:
     ax.set_xticklabels(models, rotation=45, ha="right", fontsize=13)
     ax.set_yticks(range(n))
     ax.set_yticklabels(models, fontsize=13)
-    fig.colorbar(im, ax=ax, label="Cosine similarity", fontsize=13)
+    cbar = fig.colorbar(im, ax=ax)
+    cbar.set_label("Cosine similarity", fontsize=13)
+    cbar.ax.tick_params(labelsize=11)
     ax.set_title("Mean pairwise cosine similarity between expert feature vectors", fontsize=18)
     fig.tight_layout()
     out_path = out_dir / "features_cosine_similarity.pdf"
