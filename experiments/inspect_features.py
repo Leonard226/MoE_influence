@@ -233,8 +233,10 @@ def _save_correlation(F_all, model_idx, models, out_dir, dpi) -> Path:
         ax.set_title(f"{model}  (n={int(mask.sum())})", fontsize=13)
 
     if im is not None:
-        fig.colorbar(im, ax=axes.ravel().tolist(), label="Pearson coefficient",
-                     fraction=0.018, pad=0.02, fontsize=13)
+        cbar = fig.colorbar(im, ax=axes.ravel().tolist(),
+                            fraction=0.018, pad=0.02)
+        cbar.set_label("Pearson coefficient", fontsize=13)
+        cbar.ax.tick_params(labelsize=11)
     fig.suptitle("Feature-feature correlation per model", fontsize=18, y=0.97)
     out_path = out_dir / "features_correlation.pdf"
     fig.savefig(out_path, dpi=dpi, bbox_inches="tight")
@@ -369,7 +371,9 @@ def _kmeans_analysis(F_all, model_idx, models, out_dir, dpi, k) -> Path:
     ax.set_xticklabels(models, rotation=45, ha="right", fontsize=13)
     ax.set_yticks(range(k))
     ax.set_yticklabels([f"cluster {c}" for c in range(k)], fontsize=13)
-    fig.colorbar(im, ax=ax, label="fraction of model's experts in this cluster", fontsize=13)
+    cbar = fig.colorbar(im, ax=ax)
+    cbar.set_label("fraction of model's experts in this cluster", fontsize=13)
+    cbar.ax.tick_params(labelsize=11)
     ax.set_title(f"K-means (k={k}) cluster composition", fontsize=18)
     fig.tight_layout()
     out_path = out_dir / "features_kmeans.pdf"
