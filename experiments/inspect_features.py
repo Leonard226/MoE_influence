@@ -224,10 +224,14 @@ def _save_correlation(F_all, model_idx, models, out_dir, dpi) -> Path:
                 ax.text(jj, ii, f"{v:.2f}", ha="center", va="center",
                         fontsize=8,
                         color="white" if abs(v) > 0.5 else "black")
+        col = i % 4
         ax.set_xticks(range(D))
-        ax.set_yticks(range(D))
         ax.set_xticklabels(fnames, rotation=45, ha="right", fontsize=12)
-        ax.set_yticklabels(fnames, fontsize=12)
+        if col == 0:
+            ax.set_yticks(range(D))
+            ax.set_yticklabels(fnames, fontsize=12)
+        else:
+            ax.set_yticks([])
         ax.set_title(f"{model}  (n={int(mask.sum())})", fontsize=13)
 
     if im is not None:
