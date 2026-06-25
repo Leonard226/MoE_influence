@@ -74,12 +74,16 @@ NULL_TASK = "c4"     # null baseline was run on c4 only
 #                                    FROM NULL CSV (c4 only, 8 archs × 3 seeds = 24)
 CATEGORIES = [
     # (key, csv string or "headline:...", display label, colour)
+    # Colours from the Wong (2011) categorical palette — designed to be
+    # distinguishable under all common forms of colour-vision deficiency.
+    # The two blues group the "trained × trained" pair together; the
+    # vermillion clearly separates the null.
     ("trained_within", "headline:within",
-        "trained × trained\n(within)",        "#1f6cb0"),
+        "trained × trained\n(within)",        "#56B4E9"),  # Wong sky blue
     ("trained_cross",  "headline:cross",
-        "trained × trained\n(cross)",         "#5dade2"),
+        "trained × trained\n(cross)",         "#0072B2"),  # Wong blue
     ("tr_vs_rnd_same", "trained_vs_random_same",
-        "trained × random\n(same arch)",      "#e67e22"),
+        "trained × random\n(same arch)",      "#D55E00"),  # Wong vermillion
 ]
 
 
@@ -250,22 +254,27 @@ def _print_and_save_summary(S, headline_alphas, headline_Qs, null_rows,
 # -------------------- plotting ---------------------------------------------
 def _save_violins(S, headline_alphas, headline_Qs, null_rows,
                   out_dir: Path, dpi: int) -> Path:
+    """3×3 grid: rows = Q (sparsification quantile), columns = α (feature
+    vs. structure mixing). Column header at top shows α; row label on the
+    right shows Q (vertical top-to-bottom). Global y-axis label "FGW
+    similarity S" on the leftmost side, vertical (bottom-to-top per
+    matplotlib convention)."""
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
 
-    n_a, n_q = len(ALPHAS), len(QUANTILES)
-    fig, axes = plt.subplots(n_a, n_q, figsize=(5 * n_q, 4 * n_a),
-                              squeeze=False, sharey=True)
+    # Rows = Q, columns = α.
+    n_q, n_a = len(QUANTILES), len(ALPHAS)
+    fig, axes = plt.subplots(n_q, n_a, figsize=(5.2 * n_a, 4 * n_q + 0.6),
+                              squeeze=False, sharey=True, sharex=True)
 
-    for ai, alpha in enumerate(ALPHAS):
-        for qi, Q in enumerate(QUANTILES):
-            ax = axes[ai, qi]
+    labels_global: list[str] = []
+    for qi, Q in enumerate(QUANTILES):
+        for ai, alpha in enumerate(ALPHAS):
+            ax = axes[qi, ai]
             cell = _collect_cell(S, headline_alphas, headline_Qs, alpha, Q,
                                   null_rows)
-            data = []
-            colours = []
-            labels = []
+            data, colours, labels = [], [], []
             for key, _csv, label, colour in CATEGORIES:
                 v = cell[key]
                 if len(v) == 0:
@@ -273,7 +282,7 @@ def _save_violins(S, headline_alphas, headline_Qs, null_rows,
                 data.append(v)
                 colours.append(colour)
                 labels.append(label)
-            # violinplot rejects empty arrays; replace any all-nan placeholders.
+            labels_global = labels
             data_safe = [v if not np.all(np.isnan(v)) else np.zeros(1)
                          for v in data]
             parts = ax.violinplot(data_safe, showmeans=True, showmedians=False,
@@ -281,28 +290,44 @@ def _save_violins(S, headline_alphas, headline_Qs, null_rows,
             for body, c in zip(parts["bodies"], colours):
                 body.set_facecolor(c)
                 body.set_edgecolor("black")
-                body.set_alpha(0.78)
+                body.set_alpha(0.82)
                 body.set_linewidth(0.7)
-            for key in ("cmeans", "cbars", "cmins", "cmaxes"):
-                if key in parts:
-                    parts[key].set_color("black")
-                    parts[key].set_linewidth(0.9)
+            for k in ("cmeans", "cbars", "cmins", "cmaxes"):
+                if k in parts:
+                    parts[k].set_color("black")
+                    parts[k].set_linewidth(0.9)
 
             ax.set_xticks(range(1, len(CATEGORIES) + 1))
-            ax.set_xticklabels(labels, fontsize=8, rotation=25, ha="right")
-            ax.set_title(f"α = {alpha},  Q = {Q}", fontsize=12)
-            if qi == 0:
-                ax.set_ylabel(r"FGW similarity  $\mathcal{S}_\alpha$", fontsize=11)
             ax.grid(alpha=0.18, axis="y")
             ax.set_ylim(-0.02, 1.03)
+            ax.set_ylabel("")            # no per-panel ylabel; we use supylabel
+            ax.set_title("")             # no per-panel title; we use column headers
 
-    fig.suptitle(
-        "Trained × Trained vs. Trained × Random null per (α, Q)\n"
-        "trained × trained averaged over all 8 tasks; "
-        f"trained × random on '{NULL_TASK}' only (where the null was sampled)",
-        fontsize=14,
-    )
-    fig.tight_layout(rect=(0, 0, 1, 0.96))
+    # X-tick labels only on the bottom row.
+    for ai in range(n_a):
+        axes[-1, ai].set_xticklabels(labels_global, fontsize=11,
+                                      rotation=22, ha="right")
+    for qi in range(n_q - 1):
+        for ai in range(n_a):
+            axes[qi, ai].set_xticklabels([])
+
+    # Column headers at top: α values (fontsize 22).
+    for ai, alpha in enumerate(ALPHAS):
+        axes[0, ai].set_title(f"α = {alpha}", fontsize=22, pad=12)
+
+    # Row labels on the right: Q values (fontsize 22, vertical top-to-bottom).
+    for qi, Q in enumerate(QUANTILES):
+        axes[qi, -1].text(
+            1.04, 0.5, f"Q = {Q}",
+            fontsize=22, rotation=-90, ha="left", va="center",
+            transform=axes[qi, -1].transAxes,
+        )
+
+    # Global y-label on the leftmost side (vertical, bottom-to-top per matplotlib
+    # convention — standard ylabel orientation).
+    fig.supylabel("FGW similarity S", fontsize=22)
+
+    fig.tight_layout(rect=(0.025, 0, 0.97, 0.98))
     out_path = out_dir / "null_violins.pdf"
     fig.savefig(out_path, dpi=dpi)
     plt.close(fig)
