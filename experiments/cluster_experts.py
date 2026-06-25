@@ -184,75 +184,42 @@ def _save_signatures(F_all: np.ndarray, labels: np.ndarray,
 
 
 # -------------------- UMAP coloured by cluster -----------------------------
-def _save_umap_by_cluster(F_all: np.ndarray, labels: np.ndarray,
-                          out_dir: Path, dpi: int, subsample: int) -> Path:
+def _save_umap_by_cluster(Z: np.ndarray, labels: np.ndarray,
+                          out_dir: Path, dpi: int) -> Path:
+    """Render the CANONICAL UMAP (from feature_embedding cache) coloured by
+    HDBSCAN cluster. Identical projection coordinates to the model-coloured
+    UMAP in inspect_features.py, so the two are directly comparable.
+
+    Two-panel layout:
+      Left  — all experts; noise faded grey, clusters in colour.
+      Right — clusters only (noise hidden), axes auto-zoomed."""
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
     import colorsys
 
-    try:
-        from umap import UMAP
-    except ImportError:
-        print("WARNING: umap-learn not installed; falling back to t-SNE.")
-        from sklearn.manifold import TSNE as _Embedding
-        embedder_name = "t-SNE"
-        embedder = _Embedding(n_components=2, random_state=0,
-                              perplexity=30, init="pca")
-    else:
-        embedder_name = "UMAP"
-        embedder = UMAP(n_components=2, random_state=0,
-                        n_neighbors=30, min_dist=0.1)
-
-    # When a low cluster fraction makes the all-points UMAP mostly grey,
-    # also produce a CLUSTERS-ONLY UMAP that's much more informative.
-    n = len(F_all)
-    if subsample > 0 and n > subsample:
-        # Stratified subsample: keep ALL cluster points + sample of noise so
-        # cluster structure is fully represented even when noise dominates.
-        cluster_idx = np.where(labels != -1)[0]
-        noise_idx = np.where(labels == -1)[0]
-        budget = max(subsample - len(cluster_idx), 0)
-        rng = np.random.default_rng(0)
-        sel_noise = (rng.choice(noise_idx, min(budget, len(noise_idx)),
-                                replace=False)
-                     if budget > 0 else np.array([], dtype=np.int64))
-        sel = np.concatenate([cluster_idx, sel_noise])
-        rng.shuffle(sel)
-        F_sub, lab_sub = F_all[sel], labels[sel]
-    else:
-        F_sub, lab_sub = F_all, labels
-
-    print(f"  fitting {embedder_name} on {len(F_sub)} points "
-          f"({int((lab_sub != -1).sum())} clustered + "
-          f"{int((lab_sub == -1).sum())} noise) ...", flush=True)
-    t0 = time.time()
-    Z = embedder.fit_transform(F_sub)
-    print(f"    done in {time.time() - t0:.1f}s", flush=True)
-
-    unique = sorted(set(int(c) for c in lab_sub) - {-1})
+    unique = sorted(set(int(c) for c in labels) - {-1})
     palette = [colorsys.hsv_to_rgb(i / max(len(unique), 1), 0.92, 0.88)
                for i in range(len(unique))]
-    cluster_sizes = {c: int((lab_sub == c).sum()) for c in unique}
+    cluster_sizes = {c: int((labels == c).sum()) for c in unique}
     draw_order = sorted(unique, key=lambda c: -cluster_sizes[c])
 
     def _draw_panel(ax, show_noise: bool, label_min_size: int):
-        noise = lab_sub == -1
+        noise = labels == -1
         if show_noise and noise.any():
             ax.scatter(Z[noise, 0], Z[noise, 1], s=1.5, color="lightgray",
-                       alpha=0.10, edgecolors="none",
+                       alpha=0.10, edgecolors="none", rasterized=True,
                        label=f"noise (n={int(noise.sum())})")
         for c in draw_order:
             col = palette[unique.index(c)]
-            mask = lab_sub == c
+            mask = labels == c
             ax.scatter(Z[mask, 0], Z[mask, 1], s=7, color=col, alpha=0.85,
-                       edgecolors="none",
+                       edgecolors="none", rasterized=True,
                        label=f"cluster {c} (n={cluster_sizes[c]})")
-        # Centroid labels for clusters above the size threshold.
         for c in unique:
             if cluster_sizes[c] < label_min_size:
                 continue
-            mask = lab_sub == c
+            mask = labels == c
             cx, cy = Z[mask, 0].mean(), Z[mask, 1].mean()
             ax.text(cx, cy, str(c), fontsize=12, fontweight="bold",
                     ha="center", va="center",
@@ -260,21 +227,20 @@ def _save_umap_by_cluster(F_all: np.ndarray, labels: np.ndarray,
                               facecolor="white", edgecolor="black",
                               linewidth=0.7, alpha=0.92))
         ax.set_xticks([]); ax.set_yticks([])
-        ax.set_xlabel(f"{embedder_name}-1", fontsize=13)
-        ax.set_ylabel(f"{embedder_name}-2", fontsize=13)
+        ax.set_xlabel("UMAP-1", fontsize=13)
+        ax.set_ylabel("UMAP-2", fontsize=13)
 
-    # 1 row, 2 cols: left = all points (context), right = clusters only (signal).
     fig, axes = plt.subplots(1, 2, figsize=(22, 10))
     _draw_panel(axes[0], show_noise=True, label_min_size=50)
     axes[0].set_title(
-        f"All experts — noise greyed out, clusters in colour\n"
-        f"(n={len(F_sub)}; {100*sum(cluster_sizes.values())/len(F_sub):.1f}% clustered)",
+        f"All experts on canonical UMAP — noise greyed, clusters in colour\n"
+        f"(n={len(Z)}; "
+        f"{100*sum(cluster_sizes.values())/len(Z):.1f}% clustered)",
         fontsize=13,
     )
 
-    # Right panel: noise hidden, axes auto-zoom to cluster bounding box.
-    cluster_mask_sub = lab_sub != -1
-    Z_clusters = Z[cluster_mask_sub]
+    cluster_mask = labels != -1
+    Z_clusters = Z[cluster_mask]
     _draw_panel(axes[1], show_noise=False, label_min_size=30)
     if len(Z_clusters) > 0:
         pad = 0.05
@@ -286,7 +252,7 @@ def _save_umap_by_cluster(F_all: np.ndarray, labels: np.ndarray,
                          y_max + pad * (y_max - y_min))
     axes[1].set_title(
         f"Clusters only (noise hidden, zoomed to cluster bbox)\n"
-        f"{len(unique)} clusters, n={int(cluster_mask_sub.sum())}",
+        f"{len(unique)} clusters, n={int(cluster_mask.sum())}",
         fontsize=13,
     )
     axes[1].legend(loc="upper left", fontsize=8, framealpha=0.92,
@@ -295,6 +261,96 @@ def _save_umap_by_cluster(F_all: np.ndarray, labels: np.ndarray,
 
     fig.tight_layout()
     out_path = out_dir / "clusters_umap.pdf"
+    fig.savefig(out_path, dpi=dpi)
+    plt.close(fig)
+    return out_path
+
+
+# -------------------- composite: same UMAP, two colourings -----------------
+def _save_composite_umap(Z: np.ndarray, model_idx: np.ndarray,
+                         models: list[str], labels: np.ndarray,
+                         out_dir: Path, dpi: int) -> Path:
+    """The headline figure for the paper: SAME UMAP coordinates, side-by-side
+    coloured by model (left) and by HDBSCAN cluster (right). Lets reviewers
+    immediately verify "do same-model experts share clusters?" by aligning
+    panels along the shared spatial layout."""
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    import colorsys
+
+    # Shared axis limits across both panels.
+    pad = 0.04
+    x_min, x_max = float(Z[:, 0].min()), float(Z[:, 0].max())
+    y_min, y_max = float(Z[:, 1].min()), float(Z[:, 1].max())
+    xlim = (x_min - pad * (x_max - x_min), x_max + pad * (x_max - x_min))
+    ylim = (y_min - pad * (y_max - y_min), y_max + pad * (y_max - y_min))
+
+    fig, axes = plt.subplots(1, 2, figsize=(22, 10), sharex=True, sharey=True)
+
+    # ----- Left: coloured by model -----
+    model_colors = [colorsys.hsv_to_rgb(i / len(models), 0.92, 0.88)
+                    for i in range(len(models))]
+    counts = np.bincount(model_idx, minlength=len(models))
+    order_models = np.argsort(-counts)
+    for i in order_models:
+        mask = model_idx == i
+        if not mask.any():
+            continue
+        axes[0].scatter(Z[mask, 0], Z[mask, 1], s=4,
+                        color=model_colors[i], alpha=0.55,
+                        edgecolors="none", rasterized=True,
+                        label=f"{models[i]} (n={int(mask.sum())})")
+    axes[0].set_title("Coloured by model", fontsize=14)
+    axes[0].legend(loc="upper left", fontsize=10, framealpha=0.92,
+                   markerscale=3.0, bbox_to_anchor=(1.01, 1.0))
+
+    # ----- Right: coloured by HDBSCAN cluster -----
+    unique = sorted(set(int(c) for c in labels) - {-1})
+    cluster_colors = [colorsys.hsv_to_rgb(i / max(len(unique), 1), 0.92, 0.88)
+                      for i in range(len(unique))]
+    cluster_sizes = {c: int((labels == c).sum()) for c in unique}
+
+    noise = labels == -1
+    if noise.any():
+        axes[1].scatter(Z[noise, 0], Z[noise, 1], s=1.5, color="lightgray",
+                        alpha=0.10, edgecolors="none", rasterized=True,
+                        label=f"noise (n={int(noise.sum())})")
+    for c in sorted(unique, key=lambda x: -cluster_sizes[x]):
+        col = cluster_colors[unique.index(c)]
+        mask = labels == c
+        axes[1].scatter(Z[mask, 0], Z[mask, 1], s=7, color=col, alpha=0.85,
+                        edgecolors="none", rasterized=True,
+                        label=f"cluster {c} (n={cluster_sizes[c]})")
+    # Cluster ID labels at centroids for clusters with n >= 50.
+    for c in unique:
+        if cluster_sizes[c] < 50:
+            continue
+        mask = labels == c
+        cx, cy = Z[mask, 0].mean(), Z[mask, 1].mean()
+        axes[1].text(cx, cy, str(c), fontsize=11, fontweight="bold",
+                     ha="center", va="center",
+                     bbox=dict(boxstyle="round,pad=0.22", facecolor="white",
+                               edgecolor="black", linewidth=0.7, alpha=0.92))
+    axes[1].set_title("Coloured by HDBSCAN cluster", fontsize=14)
+    axes[1].legend(loc="upper left", fontsize=8, framealpha=0.92,
+                   markerscale=2.5,
+                   ncol=2 if len(unique) > 8 else 1,
+                   bbox_to_anchor=(1.18, 1.0))
+
+    for ax in axes:
+        ax.set_xticks([]); ax.set_yticks([])
+        ax.set_xlim(xlim); ax.set_ylim(ylim)
+        ax.set_xlabel("UMAP-1", fontsize=13)
+    axes[0].set_ylabel("UMAP-2", fontsize=13)
+
+    fig.suptitle(
+        "Canonical UMAP of all experts in feature space — two colourings, "
+        "shared projection",
+        fontsize=15,
+    )
+    fig.tight_layout(rect=(0, 0, 1, 0.96))
+    out_path = out_dir / "clusters_composite_umap.pdf"
     fig.savefig(out_path, dpi=dpi)
     plt.close(fig)
     return out_path
@@ -387,16 +443,24 @@ def main():
                         help="HDBSCAN cluster selection: 'eom' (excess of "
                              "mass, default) gives stable big clusters; "
                              "'leaf' returns finer-grained clusters.")
-    parser.add_argument("--subsample", type=int, default=8000,
-                        help="Random subsample for the UMAP scatter "
-                             "(default 8000; 0 = use all).")
+    parser.add_argument("--recompute-embedding", action="store_true",
+                        help="Force-recompute the canonical UMAP+PCA from "
+                             "scratch (default loads from cache if present).")
     args = parser.parse_args()
 
     out_dir = Path(args.out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
 
     print(f"=== HDBSCAN cluster analysis on task = {args.task} ===\n")
-    F_all, model_idx, models = _build_all(args.task)
+    # Canonical embedding (cached). Same UMAP coordinates as
+    # inspect_features.py, so all visualisations align.
+    from experiments.feature_embedding import load_or_compute_embedding
+    emb = load_or_compute_embedding(args.task,
+                                    recompute=args.recompute_embedding)
+    F_all = emb["F_all"]
+    model_idx = emb["model_idx"]
+    models = emb["models"]
+    umap_2d = emb["umap_2d"]
     print(f"\n  Total: {len(F_all)} experts × {F_all.shape[1]} features\n")
 
     labels = _run_hdbscan(
@@ -413,8 +477,9 @@ def main():
     paths: list[Path] = []
     paths.append(_save_signatures(F_all, labels, model_idx, models,
                                   out_dir, args.dpi))
-    paths.append(_save_umap_by_cluster(F_all, labels, out_dir, args.dpi,
-                                       args.subsample))
+    paths.append(_save_umap_by_cluster(umap_2d, labels, out_dir, args.dpi))
+    paths.append(_save_composite_umap(umap_2d, model_idx, models, labels,
+                                      out_dir, args.dpi))
     paths.append(_save_summary(F_all, labels, model_idx, models, args, out_dir))
 
     print(f"\n  saved:")

@@ -244,19 +244,15 @@ def _save_correlation(F_all, model_idx, models, out_dir, dpi) -> Path:
     return out_path
 
 
-def _save_pca(F_all, model_idx, models, out_dir, dpi) -> Path:
-    """3D PCA, 8 panels (one per model). Same global PCA fit, same x/y/z
-    limits across panels; each panel shows its model in colour against a
-    faint grey background of the other 7 models' experts."""
-    from sklearn.decomposition import PCA
+def _save_pca(F_all, model_idx, models, Z, explained, out_dir, dpi) -> Path:
+    """3D PCA, 8 panels (one per model). Uses CANONICAL PCA coordinates from
+    feature_embedding cache so every PCA visualisation in this project shares
+    the same projection. Each panel shows its model in colour against a faint
+    grey background of the other 7 models' experts."""
     from mpl_toolkits.mplot3d import Axes3D  # noqa: F401  (registers projection)
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
-
-    pca = PCA(n_components=3)
-    Z = pca.fit_transform(F_all)
-    explained = pca.explained_variance_ratio_
 
     # Shared axis limits, derived from the full point cloud.
     pad = 0.04
@@ -299,60 +295,32 @@ def _save_pca(F_all, model_idx, models, out_dir, dpi) -> Path:
     return out_path
 
 
-def _save_embedding(F_all, model_idx, models, out_dir, dpi,
-                    method: str, subsample: int) -> Path:
-    """Non-linear 2D projection: UMAP if available, else t-SNE.
-    Both can be slow on >10k points → subsample by default."""
+def _save_embedding(F_all, model_idx, models, Z, out_dir, dpi,
+                    method: str = "umap") -> Path:
+    """Render the CANONICAL UMAP (from feature_embedding cache) coloured by
+    model. No subsampling, no per-call UMAP fit — the projection is shared
+    across all visualisation scripts so different colourings of the same
+    embedding are strictly comparable."""
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
 
-    n = len(F_all)
-    if subsample > 0 and n > subsample:
-        np.random.seed(0)
-        sel = np.random.choice(n, subsample, replace=False)
-        F_sub, idx_sub = F_all[sel], model_idx[sel]
-    else:
-        F_sub, idx_sub = F_all, model_idx
-
-    if method == "umap":
-        try:
-            import umap                                  # noqa: F401
-            from umap import UMAP
-            print(f"  fitting UMAP on {len(F_sub)} points ...", flush=True)
-            t0 = time.time()
-            Z = UMAP(n_components=2, random_state=0,
-                     n_neighbors=30, min_dist=0.1).fit_transform(F_sub)
-            print(f"    done in {time.time()-t0:.1f}s", flush=True)
-            title = (f"UMAP of all experts in feature space "
-                     f"(n={len(F_sub)}), coloured by model")
-            fname = "features_umap.pdf"
-        except ImportError:
-            print("  umap-learn not installed; falling back to t-SNE.")
-            method = "tsne"
-    if method == "tsne":
-        from sklearn.manifold import TSNE
-        print(f"  fitting t-SNE on {len(F_sub)} points ...", flush=True)
-        t0 = time.time()
-        Z = TSNE(n_components=2, random_state=0, perplexity=30,
-                 init="pca").fit_transform(F_sub)
-        print(f"    done in {time.time()-t0:.1f}s", flush=True)
-        title = (f"t-SNE of all experts in feature space "
-                 f"(n={len(F_sub)}), coloured by model")
-        fname = "features_tsne.pdf"
+    title = (f"{method.upper()} of all experts in feature space "
+             f"(n={len(F_all)}), coloured by model")
+    fname = f"features_{method}.pdf"
 
     fig, ax = plt.subplots(figsize=(11, 9))
     base_colors = _model_palette(len(models))
-    counts = np.bincount(idx_sub, minlength=len(models))
+    counts = np.bincount(model_idx, minlength=len(models))
     order = np.argsort(-counts)
     for i in order:
-        mask = (idx_sub == i)
+        mask = (model_idx == i)
         if mask.sum() == 0:
             continue
-        ax.scatter(Z[mask, 0], Z[mask, 1], s=6,
-                   color=base_colors[i], alpha=0.65,
+        ax.scatter(Z[mask, 0], Z[mask, 1], s=4,
+                   color=base_colors[i], alpha=0.55,
                    label=f"{models[i]} (n={int(mask.sum())})",
-                   edgecolors="none")
+                   edgecolors="none", rasterized=True)
     ax.set_title(title, fontsize=15)
     ax.legend(loc="best", fontsize=12, framealpha=0.9, markerscale=3.0)
     ax.set_xticks([]); ax.set_yticks([])
@@ -435,29 +403,42 @@ def main():
     parser.add_argument("--out-dir", default=str(DEFAULT_OUT_DIR))
     parser.add_argument("--dpi", type=int, default=180)
     parser.add_argument("--skip-umap", action="store_true",
-                        help="Skip UMAP/t-SNE (the slowest step).")
-    parser.add_argument("--subsample", type=int, default=8000,
-                        help="Random subsample size for UMAP/t-SNE "
-                             "(default 8000; 0 = use all).")
+                        help="Skip the UMAP figure (the canonical UMAP is "
+                             "still computed and cached for downstream "
+                             "scripts; this only skips the figure render).")
     parser.add_argument("--kmeans-k", type=int, default=8,
                         help="K for k-means (default 8 = one per model).")
+    parser.add_argument("--recompute-embedding", action="store_true",
+                        help="Recompute the canonical UMAP+PCA embedding "
+                             "from scratch (default loads from cache if "
+                             "present). Use after any change to the feature "
+                             "construction.")
     args = parser.parse_args()
 
     out_dir = Path(args.out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
 
     print(f"=== Feature analysis on task = {args.task} ===\n")
-    F_all, model_idx, models = _build_all(args.task)
+    # Canonical embedding (cached). Single source of truth for UMAP/PCA
+    # coordinates across all visualisation scripts.
+    from experiments.feature_embedding import load_or_compute_embedding
+    emb = load_or_compute_embedding(args.task, recompute=args.recompute_embedding)
+    F_all = emb["F_all"]
+    model_idx = emb["model_idx"]
+    models = emb["models"]
+    umap_2d = emb["umap_2d"]
+    pca_3d = emb["pca_3d"]
+    pca_explained = emb["pca_explained"]
     print(f"\n  Total: {len(F_all)} experts × {F_all.shape[1]} features\n")
 
     paths: list[Path] = []
     paths.append(_save_cosine_similarity(F_all, model_idx, models, out_dir, args.dpi))
     paths.append(_save_correlation(F_all, model_idx, models, out_dir, args.dpi))
-    paths.append(_save_pca(F_all, model_idx, models, out_dir, args.dpi))
+    paths.append(_save_pca(F_all, model_idx, models, pca_3d, pca_explained,
+                           out_dir, args.dpi))
     if not args.skip_umap:
-        paths.append(_save_embedding(F_all, model_idx, models, out_dir,
-                                     args.dpi, method="umap",
-                                     subsample=args.subsample))
+        paths.append(_save_embedding(F_all, model_idx, models, umap_2d,
+                                     out_dir, args.dpi, method="umap"))
     paths.append(_kmeans_analysis(F_all, model_idx, models, out_dir,
                                   args.dpi, k=args.kmeans_k))
 
