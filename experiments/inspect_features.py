@@ -232,15 +232,20 @@ def _save_correlation(F_all, model_idx, models, out_dir, dpi) -> Path:
             ax.set_yticks([])
         ax.set_title(f"{model}  (n={int(mask.sum())})", fontsize=13)
 
+    fig.suptitle("Pairwise Feature Correlations per Model", fontsize=18, y=0.99)
+    # Reserve right margin for an EXPLICIT colorbar axes, then place the cax
+    # manually. Avoids matplotlib's auto-layout pushing the colorbar into the
+    # last column of subplots.
+    fig.subplots_adjust(top=0.93, right=0.91, left=0.05,
+                        wspace=0.18, hspace=0.30)
     if im is not None:
-        cbar = fig.colorbar(im, ax=axes.ravel().tolist(),
-                            fraction=0.022, pad=0.06, aspect=40)
+        cax = fig.add_axes([0.935, 0.10, 0.012, 0.78])
+        cbar = fig.colorbar(im, cax=cax)
         cbar.set_label("Pearson coefficient", fontsize=13)
         cbar.ax.tick_params(labelsize=11)
-    fig.suptitle("Pairwise Feature Correlations per Model", fontsize=18, y=0.99)
-    fig.subplots_adjust(top=0.93)            # tighten gap between title & first row
     out_path = out_dir / "features_correlation.pdf"
-    fig.savefig(out_path, dpi=dpi, bbox_inches="tight")
+    fig.savefig(out_path, dpi=dpi)            # don't use bbox_inches="tight"
+                                              # (would re-shift the manual cax)
     plt.close(fig)
     return out_path
 
@@ -421,8 +426,6 @@ def _kmeans_analysis(F_all, model_idx, models, out_dir, dpi, k) -> Path:
     im = ax.imshow(M_frac, cmap="viridis", vmin=0.0, vmax=1.0, aspect="auto")
     for c in range(k):
         for mi in range(n_models):
-            if M[c, mi] == 0:
-                continue
             colour = "white" if M_frac[c, mi] < 0.55 else "black"
             ax.text(mi, c, f"{100*M_frac[c, mi]:.0f}%",
                      ha="center", va="center", fontsize=13, color=colour)
