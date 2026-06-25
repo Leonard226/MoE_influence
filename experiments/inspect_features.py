@@ -161,17 +161,13 @@ def _save_cosine_similarity(F_all, model_idx, models, out_dir, dpi) -> Path:
         for j in range(n):
             val = sim[i, j]
             txt_colour = "black" if val > 0.55 else "white"
-            ax.text(j, i, f"{val:.3f}", ha="center", va="center",
-                    fontsize=11, color=txt_colour)
+            ax.text(j, i, f"{val:.3f}", ha="center", va="center", fontsize=11, color=txt_colour)
     ax.set_xticks(range(n))
     ax.set_xticklabels(models, rotation=45, ha="right", fontsize=13)
     ax.set_yticks(range(n))
     ax.set_yticklabels(models, fontsize=13)
-    fig.colorbar(im, ax=ax, label="mean pairwise cosine similarity")
-    ax.set_title(
-        "Mean pairwise cosine similarity between expert feature vectors",
-        fontsize=15,
-    )
+    fig.colorbar(im, ax=ax, label="Cosine similarity", fontsize=13)
+    ax.set_title("Mean pairwise cosine similarity between expert feature vectors", fontsize=18)
     fig.tight_layout()
     out_path = out_dir / "features_cosine_similarity.pdf"
     fig.savefig(out_path, dpi=dpi)
@@ -235,9 +231,9 @@ def _save_correlation(F_all, model_idx, models, out_dir, dpi) -> Path:
         ax.set_title(f"{model}  (n={int(mask.sum())})", fontsize=13)
 
     if im is not None:
-        fig.colorbar(im, ax=axes.ravel().tolist(), label="Pearson r",
-                     fraction=0.018, pad=0.02)
-    fig.suptitle("Feature-feature correlation per model", fontsize=16)
+        fig.colorbar(im, ax=axes.ravel().tolist(), label="Pearson coefficient",
+                     fraction=0.018, pad=0.02, fontsize=13)
+    fig.suptitle("Feature-feature correlation per model", fontsize=18, y=0.97)
     out_path = out_dir / "features_correlation.pdf"
     fig.savefig(out_path, dpi=dpi, bbox_inches="tight")
     plt.close(fig)
@@ -273,20 +269,18 @@ def _save_pca(F_all, model_idx, models, Z, explained, out_dir, dpi) -> Path:
         ax.scatter(Z[mask, 0], Z[mask, 1], Z[mask, 2],
                    s=5, color=base_colors[i], alpha=0.75,
                    edgecolors="none", depthshade=False, rasterized=True)
-        ax.set_title(f"{model}  (n={int(mask.sum())})", fontsize=12)
+        ax.set_title(f"{model}  (n={int(mask.sum())})", fontsize=13)
         ax.set_xlim(lims[0]); ax.set_ylim(lims[1]); ax.set_zlim(lims[2])
-        ax.set_xlabel(f"PC1 ({100*explained[0]:.1f}%)", fontsize=9, labelpad=2)
-        ax.set_ylabel(f"PC2 ({100*explained[1]:.1f}%)", fontsize=9, labelpad=2)
-        ax.set_zlabel(f"PC3 ({100*explained[2]:.1f}%)", fontsize=9, labelpad=2)
+        ax.set_xlabel(f"PC1 ({100*explained[0]:.1f}%)", fontsize=13, labelpad=2)
+        ax.set_ylabel(f"PC2 ({100*explained[1]:.1f}%)", fontsize=13, labelpad=2)
+        ax.set_zlabel(f"PC3 ({100*explained[2]:.1f}%)", fontsize=13, labelpad=2)
         ax.tick_params(labelsize=7)
         # Slight rotation away from the default for a more informative angle.
         ax.view_init(elev=22, azim=-55)
 
     fig.suptitle(
-        "3D PCA of all experts in 10-D feature space — one panel per model\n"
-        f"(grey background = experts from the other 7 models; coloured = this model. "
-        f"PC1+PC2+PC3 explain {100*explained.sum():.1f}% of variance)",
-        fontsize=14,
+        "3D PCA of all experts in 10-D feature space",
+        fontsize=18,
     )
     fig.tight_layout(rect=(0, 0, 1, 0.94))
     out_path = out_dir / "features_pca.pdf"
@@ -373,8 +367,8 @@ def _kmeans_analysis(F_all, model_idx, models, out_dir, dpi, k) -> Path:
     ax.set_xticklabels(models, rotation=45, ha="right", fontsize=13)
     ax.set_yticks(range(k))
     ax.set_yticklabels([f"cluster {c}" for c in range(k)], fontsize=13)
-    fig.colorbar(im, ax=ax, label="fraction of model's experts in this cluster")
-    ax.set_title(f"K-means (k={k}) cluster composition", fontsize=15)
+    fig.colorbar(im, ax=ax, label="fraction of model's experts in this cluster", fontsize=13)
+    ax.set_title(f"K-means (k={k}) cluster composition", fontsize=18)
     fig.tight_layout()
     out_path = out_dir / "features_kmeans.pdf"
     fig.savefig(out_path, dpi=dpi)
