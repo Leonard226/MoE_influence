@@ -74,16 +74,16 @@ NULL_TASK = "c4"     # null baseline was run on c4 only
 #                                    FROM NULL CSV (c4 only, 8 archs × 3 seeds = 24)
 CATEGORIES = [
     # (key, csv string or "headline:...", display label, colour)
-    # Colours from the Wong (2011) categorical palette — designed to be
-    # distinguishable under all common forms of colour-vision deficiency.
-    # The two blues group the trained-trained pair together; the
-    # vermillion clearly separates the null.
+    # Matplotlib tab10 / tab20 paired palette — the de-facto standard
+    # in NeurIPS/ICML/ICLR figures. Within-family / cross-family share the
+    # blue family (paired tab10 dark + tab20 light) to signal they're both
+    # "trained × trained" comparisons; null uses the tab10 orange contrast.
     ("trained_within", "headline:within",
-        "within-family",       "#56B4E9"),  # Wong sky blue
+        "within-\nfamily",        "#1f77b4"),  # tab10 blue
     ("trained_cross",  "headline:cross",
-        "cross-family",        "#0072B2"),  # Wong blue
+        "cross-\nfamily",         "#aec7e8"),  # tab20 light blue (paired)
     ("tr_vs_rnd_same", "trained_vs_random_same",
-        "trained vs random",   "#D55E00"),  # Wong vermillion
+        "trained vs\nrandom",     "#ff7f0e"),  # tab10 orange
 ]
 
 
@@ -295,30 +295,33 @@ def _save_violins(S, headline_alphas, headline_Qs, null_rows,
                     parts[k].set_color("black")
                     parts[k].set_linewidth(0.8)
 
-            # Every panel gets its own x-tick labels (kept readable; user request).
+            # Every panel gets its own x-tick labels, displayed horizontally
+            # (two-line labels avoid the need for rotation).
             ax.set_xticks(range(1, len(CATEGORIES) + 1))
-            ax.set_xticklabels(labels, fontsize=9, rotation=22, ha="right")
+            ax.set_xticklabels(labels, fontsize=9, rotation=0, ha="center")
             ax.grid(alpha=0.18, axis="y")
             ax.set_ylim(-0.02, 1.03)
             ax.set_ylabel("")            # no per-panel ylabel; we use supylabel
             ax.set_title("")             # no per-panel title; we use column headers
             ax.tick_params(axis="y", labelsize=8)
 
-    # Column headers at top: α values (fontsize scaled).
+    # Column headers at top: α values (bold).
     for ai, alpha in enumerate(ALPHAS):
-        axes[0, ai].set_title(f"α = {alpha}", fontsize=16, pad=8)
+        axes[0, ai].set_title(f"α = {alpha}", fontsize=16, fontweight="bold",
+                              pad=8)
 
-    # Row labels on the right: Q values (vertical top-to-bottom, scaled).
+    # Row labels on the right: Q values (bold, vertical top-to-bottom).
     for qi, Q in enumerate(QUANTILES):
         axes[qi, -1].text(
             1.05, 0.5, f"Q = {Q}",
-            fontsize=16, rotation=-90, ha="left", va="center",
+            fontsize=16, fontweight="bold", rotation=-90,
+            ha="left", va="center",
             transform=axes[qi, -1].transAxes,
         )
 
-    # Global y-label on the leftmost side (vertical, bottom-to-top per matplotlib
-    # convention — standard ylabel orientation).
-    fig.supylabel("FGW similarity S", fontsize=16)
+    # Global y-label on the leftmost side (bold, vertical, bottom-to-top per
+    # matplotlib convention — standard ylabel orientation).
+    fig.supylabel("FGW similarity", fontsize=16, fontweight="bold")
 
     fig.tight_layout(rect=(0.025, 0, 0.96, 0.98))
     out_path = out_dir / "null_violins.pdf"
