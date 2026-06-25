@@ -204,59 +204,95 @@ def _save_umap_by_cluster(F_all: np.ndarray, labels: np.ndarray,
         embedder = UMAP(n_components=2, random_state=0,
                         n_neighbors=30, min_dist=0.1)
 
+    # When a low cluster fraction makes the all-points UMAP mostly grey,
+    # also produce a CLUSTERS-ONLY UMAP that's much more informative.
     n = len(F_all)
     if subsample > 0 and n > subsample:
+        # Stratified subsample: keep ALL cluster points + sample of noise so
+        # cluster structure is fully represented even when noise dominates.
+        cluster_idx = np.where(labels != -1)[0]
+        noise_idx = np.where(labels == -1)[0]
+        budget = max(subsample - len(cluster_idx), 0)
         rng = np.random.default_rng(0)
-        sel = rng.choice(n, subsample, replace=False)
+        sel_noise = (rng.choice(noise_idx, min(budget, len(noise_idx)),
+                                replace=False)
+                     if budget > 0 else np.array([], dtype=np.int64))
+        sel = np.concatenate([cluster_idx, sel_noise])
+        rng.shuffle(sel)
         F_sub, lab_sub = F_all[sel], labels[sel]
     else:
         F_sub, lab_sub = F_all, labels
 
-    print(f"  fitting {embedder_name} on {len(F_sub)} points ...", flush=True)
+    print(f"  fitting {embedder_name} on {len(F_sub)} points "
+          f"({int((lab_sub != -1).sum())} clustered + "
+          f"{int((lab_sub == -1).sum())} noise) ...", flush=True)
     t0 = time.time()
     Z = embedder.fit_transform(F_sub)
     print(f"    done in {time.time() - t0:.1f}s", flush=True)
 
-    fig, ax = plt.subplots(figsize=(12, 10))
-    noise = lab_sub == -1
-    if noise.any():
-        ax.scatter(Z[noise, 0], Z[noise, 1], s=3, color="lightgray",
-                   alpha=0.35, edgecolors="none",
-                   label=f"noise (n={int(noise.sum())})")
-
     unique = sorted(set(int(c) for c in lab_sub) - {-1})
     palette = [colorsys.hsv_to_rgb(i / max(len(unique), 1), 0.92, 0.88)
                for i in range(len(unique))]
-
-    # Draw smaller clusters last so they stay visible above big ones.
     cluster_sizes = {c: int((lab_sub == c).sum()) for c in unique}
     draw_order = sorted(unique, key=lambda c: -cluster_sizes[c])
-    for c in draw_order:
-        col = palette[unique.index(c)]
-        mask = lab_sub == c
-        ax.scatter(Z[mask, 0], Z[mask, 1], s=6, color=col, alpha=0.75,
-                   edgecolors="none",
-                   label=f"cluster {c} (n={cluster_sizes[c]})")
 
-    # Cluster ID labels at centroids — easy to cross-reference to signatures.
-    for c in unique:
-        mask = lab_sub == c
-        if not mask.any():
-            continue
-        cx, cy = Z[mask, 0].mean(), Z[mask, 1].mean()
-        ax.text(cx, cy, str(c), fontsize=14, fontweight="bold",
-                ha="center", va="center",
-                bbox=dict(boxstyle="round,pad=0.25",
-                          facecolor="white", edgecolor="black",
-                          linewidth=0.7, alpha=0.9))
+    def _draw_panel(ax, show_noise: bool, label_min_size: int):
+        noise = lab_sub == -1
+        if show_noise and noise.any():
+            ax.scatter(Z[noise, 0], Z[noise, 1], s=1.5, color="lightgray",
+                       alpha=0.10, edgecolors="none",
+                       label=f"noise (n={int(noise.sum())})")
+        for c in draw_order:
+            col = palette[unique.index(c)]
+            mask = lab_sub == c
+            ax.scatter(Z[mask, 0], Z[mask, 1], s=7, color=col, alpha=0.85,
+                       edgecolors="none",
+                       label=f"cluster {c} (n={cluster_sizes[c]})")
+        # Centroid labels for clusters above the size threshold.
+        for c in unique:
+            if cluster_sizes[c] < label_min_size:
+                continue
+            mask = lab_sub == c
+            cx, cy = Z[mask, 0].mean(), Z[mask, 1].mean()
+            ax.text(cx, cy, str(c), fontsize=12, fontweight="bold",
+                    ha="center", va="center",
+                    bbox=dict(boxstyle="round,pad=0.22",
+                              facecolor="white", edgecolor="black",
+                              linewidth=0.7, alpha=0.92))
+        ax.set_xticks([]); ax.set_yticks([])
+        ax.set_xlabel(f"{embedder_name}-1", fontsize=13)
+        ax.set_ylabel(f"{embedder_name}-2", fontsize=13)
 
-    ax.set_xticks([]); ax.set_yticks([])
-    ax.set_xlabel(f"{embedder_name}-1", fontsize=13)
-    ax.set_ylabel(f"{embedder_name}-2", fontsize=13)
-    ax.legend(loc="best", fontsize=10, framealpha=0.92, markerscale=2.5,
-              ncol=2 if len(unique) > 8 else 1)
-    ax.set_title(f"{embedder_name} of all experts, coloured by HDBSCAN cluster "
-                  f"(n={len(F_sub)})", fontsize=14)
+    # 1 row, 2 cols: left = all points (context), right = clusters only (signal).
+    fig, axes = plt.subplots(1, 2, figsize=(22, 10))
+    _draw_panel(axes[0], show_noise=True, label_min_size=50)
+    axes[0].set_title(
+        f"All experts — noise greyed out, clusters in colour\n"
+        f"(n={len(F_sub)}; {100*sum(cluster_sizes.values())/len(F_sub):.1f}% clustered)",
+        fontsize=13,
+    )
+
+    # Right panel: noise hidden, axes auto-zoom to cluster bounding box.
+    cluster_mask_sub = lab_sub != -1
+    Z_clusters = Z[cluster_mask_sub]
+    _draw_panel(axes[1], show_noise=False, label_min_size=30)
+    if len(Z_clusters) > 0:
+        pad = 0.05
+        x_min, x_max = Z_clusters[:, 0].min(), Z_clusters[:, 0].max()
+        y_min, y_max = Z_clusters[:, 1].min(), Z_clusters[:, 1].max()
+        axes[1].set_xlim(x_min - pad * (x_max - x_min),
+                         x_max + pad * (x_max - x_min))
+        axes[1].set_ylim(y_min - pad * (y_max - y_min),
+                         y_max + pad * (y_max - y_min))
+    axes[1].set_title(
+        f"Clusters only (noise hidden, zoomed to cluster bbox)\n"
+        f"{len(unique)} clusters, n={int(cluster_mask_sub.sum())}",
+        fontsize=13,
+    )
+    axes[1].legend(loc="upper left", fontsize=8, framealpha=0.92,
+                   markerscale=2.0, ncol=2 if len(unique) > 8 else 1,
+                   bbox_to_anchor=(1.01, 1.0))
+
     fig.tight_layout()
     out_path = out_dir / "clusters_umap.pdf"
     fig.savefig(out_path, dpi=dpi)
