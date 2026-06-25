@@ -295,6 +295,63 @@ def _save_pca(F_all, model_idx, models, Z, explained, out_dir, dpi) -> Path:
     return out_path
 
 
+def _save_pca_per_model(F_all, model_idx, models, out_dir, dpi) -> Path:
+    """Per-model 3D PCA. Unlike the global PCA, this fits a SEPARATE PCA(3)
+    on each model's own features (F_m) so each panel has its own coordinate
+    system and per-model variance-explained labels.
+
+    Caveats (mention in the paper if used):
+      - Coordinates ACROSS panels are NOT comparable (different bases).
+      - Variance % differs per panel — it's the fraction of THAT model's
+        internal variance captured, not the global variance.
+      - Answers a different question than the global PCA: 'what are the
+        dominant axes of variation WITHIN each model?', not 'where does
+        each model sit in a shared feature space?'.
+    """
+    from sklearn.decomposition import PCA
+    from mpl_toolkits.mplot3d import Axes3D  # noqa: F401
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    base_colors = _model_palette(len(models))
+    fig = plt.figure(figsize=(24, 12))
+    for i, model in enumerate(models):
+        ax = fig.add_subplot(2, 4, i + 1, projection="3d")
+        mask = (model_idx == i)
+        n = int(mask.sum())
+        if n < 4:
+            ax.set_title(f"{model}  (n={n}; too few)", fontsize=13, pad=2)
+            ax.set_xticks([]); ax.set_yticks([]); ax.set_zticks([])
+            continue
+        F_m = F_all[mask]
+        pca = PCA(n_components=3)
+        Z_m = pca.fit_transform(F_m)
+        explained = pca.explained_variance_ratio_
+
+        ax.scatter(Z_m[:, 0], Z_m[:, 1], Z_m[:, 2],
+                   s=5, color=base_colors[i], alpha=0.75,
+                   edgecolors="none", depthshade=False, rasterized=True)
+        ax.set_title(f"{model}  (n={n})", fontsize=13, pad=2)
+        ax.set_xlabel(f"PC1 ({100*explained[0]:.1f}%)", fontsize=13, labelpad=2)
+        ax.set_ylabel(f"PC2 ({100*explained[1]:.1f}%)", fontsize=13, labelpad=2)
+        ax.set_zlabel(f"PC3 ({100*explained[2]:.1f}%)", fontsize=13, labelpad=2)
+        ax.tick_params(labelsize=7)
+        ax.view_init(elev=22, azim=-55)
+
+    fig.suptitle(
+        "Per-model 3D PCA — each panel fitted independently on its own model's "
+        "features (coordinates not comparable across panels)",
+        fontsize=18, y=0.99,
+    )
+    fig.tight_layout(rect=(0, 0, 1, 0.97))
+    fig.subplots_adjust(top=0.93, hspace=0.05, wspace=0.05)
+    out_path = out_dir / "features_pca_per_model.pdf"
+    fig.savefig(out_path, dpi=dpi)
+    plt.close(fig)
+    return out_path
+
+
 def _save_embedding(F_all, model_idx, models, Z, out_dir, dpi,
                     method: str = "umap") -> Path:
     """Render the CANONICAL UMAP (from feature_embedding cache) coloured by
@@ -438,6 +495,7 @@ def main():
     paths.append(_save_correlation(F_all, model_idx, models, out_dir, args.dpi))
     paths.append(_save_pca(F_all, model_idx, models, pca_3d, pca_explained,
                            out_dir, args.dpi))
+    paths.append(_save_pca_per_model(F_all, model_idx, models, out_dir, args.dpi))
     if not args.skip_umap:
         paths.append(_save_embedding(F_all, model_idx, models, umap_2d,
                                      out_dir, args.dpi, method="umap"))
