@@ -237,7 +237,8 @@ def _save_correlation(F_all, model_idx, models, out_dir, dpi) -> Path:
                             fraction=0.018, pad=0.02)
         cbar.set_label("Pearson coefficient", fontsize=13)
         cbar.ax.tick_params(labelsize=11)
-    fig.suptitle("Feature-feature correlation per model", fontsize=18, y=0.97)
+    fig.suptitle("Pairwise Feature Correlations per Model", fontsize=18, y=0.99)
+    fig.subplots_adjust(top=0.93)            # tighten gap between title & first row
     out_path = out_dir / "features_correlation.pdf"
     fig.savefig(out_path, dpi=dpi, bbox_inches="tight")
     plt.close(fig)
@@ -273,7 +274,7 @@ def _save_pca(F_all, model_idx, models, Z, explained, out_dir, dpi) -> Path:
         ax.scatter(Z[mask, 0], Z[mask, 1], Z[mask, 2],
                    s=5, color=base_colors[i], alpha=0.75,
                    edgecolors="none", depthshade=False, rasterized=True)
-        ax.set_title(f"{model}  (n={int(mask.sum())})", fontsize=13)
+        ax.set_title(f"{model}  (n={int(mask.sum())})", fontsize=13, pad=2)
         ax.set_xlim(lims[0]); ax.set_ylim(lims[1]); ax.set_zlim(lims[2])
         ax.set_xlabel(f"PC1 ({100*explained[0]:.1f}%)", fontsize=13, labelpad=2)
         ax.set_ylabel(f"PC2 ({100*explained[1]:.1f}%)", fontsize=13, labelpad=2)
@@ -284,9 +285,10 @@ def _save_pca(F_all, model_idx, models, Z, explained, out_dir, dpi) -> Path:
 
     fig.suptitle(
         "3D PCA of all experts in 10-D feature space",
-        fontsize=18,
+        fontsize=18, y=0.99,
     )
-    fig.tight_layout(rect=(0, 0, 1, 0.94))
+    fig.tight_layout(rect=(0, 0, 1, 0.97))
+    fig.subplots_adjust(top=0.93, hspace=0.05, wspace=0.05)
     out_path = out_dir / "features_pca.pdf"
     fig.savefig(out_path, dpi=dpi)
     plt.close(fig)

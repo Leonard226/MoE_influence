@@ -303,7 +303,7 @@ def _save_composite_umap(Z: np.ndarray, model_idx: np.ndarray,
                         label=f"{models[i]} (n={int(mask.sum())})")
     axes[0].set_title("Coloured by model", fontsize=14)
     axes[0].legend(loc="upper left", fontsize=10, framealpha=0.92,
-                   markerscale=3.0, bbox_to_anchor=(1.01, 1.0))
+                   markerscale=3.0)
 
     # ----- Right: coloured by HDBSCAN cluster -----
     unique = sorted(set(int(c) for c in labels) - {-1})
@@ -335,8 +335,7 @@ def _save_composite_umap(Z: np.ndarray, model_idx: np.ndarray,
     axes[1].set_title("Coloured by HDBSCAN cluster", fontsize=14)
     axes[1].legend(loc="upper left", fontsize=8, framealpha=0.92,
                    markerscale=2.5,
-                   ncol=2 if len(unique) > 8 else 1,
-                   bbox_to_anchor=(1.18, 1.0))
+                   ncol=2 if len(unique) > 8 else 1)
 
     for ax in axes:
         ax.set_xticks([]); ax.set_yticks([])
@@ -344,12 +343,7 @@ def _save_composite_umap(Z: np.ndarray, model_idx: np.ndarray,
         ax.set_xlabel("UMAP-1", fontsize=13)
     axes[0].set_ylabel("UMAP-2", fontsize=13)
 
-    fig.suptitle(
-        "Canonical UMAP of all experts in feature space — two colourings, "
-        "shared projection",
-        fontsize=15,
-    )
-    fig.tight_layout(rect=(0, 0, 1, 0.96))
+    fig.tight_layout()
     out_path = out_dir / "clusters_composite_umap.pdf"
     fig.savefig(out_path, dpi=dpi)
     plt.close(fig)
