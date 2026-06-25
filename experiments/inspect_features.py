@@ -231,7 +231,7 @@ def _save_correlation(F_all, model_idx, models, out_dir, dpi) -> Path:
         ax.set_title(f"{model}  (n={int(mask.sum())})", fontsize=13)
 
     if im is not None:
-        fig.colorbar(im, ax=axes.tolist(), label="Pearson r",
+        fig.colorbar(im, ax=axes.ravel().tolist(), label="Pearson r",
                      fraction=0.018, pad=0.02)
     fig.suptitle("Feature-feature correlation per model", fontsize=16)
     out_path = out_dir / "features_correlation.pdf"
