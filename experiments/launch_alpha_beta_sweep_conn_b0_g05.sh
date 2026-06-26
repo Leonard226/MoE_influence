@@ -1,6 +1,6 @@
 #!/bin/bash
 #SBATCH --array=0-127
-#SBATCH --nodelist=piora5,piora6,piora7,piora8
+#SBATCH --nodelist=piora3,piora4,piora7,piora8
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=4
 #SBATCH --job-name="abQ-c-b0-g05"
@@ -27,8 +27,10 @@
 #
 # Parallelism layout (same as the local-mode sweep):
 #   - 64 sources × 2 target chunks = 128 SLURM array tasks.
-#   - 4 nodes (piora5, piora6, piora7, piora8) × ~32 cores / 4 cpus-per-task
-#     = ~32 concurrent slots → several waves needed.
+#   - 4 CPU nodes (piora3, piora4, piora7, piora8) × ~32 cores / 4 cpus-per-task
+#     = ~32 concurrent slots → several waves needed. piora5/6 deliberately
+#     excluded so this sweep doesn't compete with the small-GPU random-init
+#     jobs running there.
 #   - OMP/MKL/OPENBLAS = 4 to let scipy.linalg (Katz triangular solve) and
 #     POT (BCG matrix multiplies) use all 4 cores per task. Each task is a
 #     single Python process with no fork pool, so all 4 cores go to BLAS.
