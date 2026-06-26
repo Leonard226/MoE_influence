@@ -324,9 +324,10 @@ def _save_overlay(rows: list[dict], kind: str, task: str,
                         label=model)
 
     ax.set_xscale("log")
-    ax.set_xlabel(xlabel)
-    ax.set_ylabel("fraction of edges per bin")
-    ax.set_title(title, fontsize=13)
+    ax.set_xlabel(xlabel, fontsize=12)
+    ax.set_ylabel("fraction of edges per bin", fontsize=12)
+    ax.tick_params(axis="both", which="major", labelsize=11)
+    ax.set_title(title, fontsize=14, fontweight="bold")
 
     # Legend ordered to match the canonical MODELS list (not the draw order),
     # so the user always sees the same models in the same legend position.
@@ -335,7 +336,7 @@ def _save_overlay(rows: list[dict], kind: str, task: str,
                    key=lambda i: (MODELS.index(labels[i])
                                   if labels[i] in MODELS else 99))
     ax.legend([handles[i] for i in order], [labels[i] for i in order],
-              loc="upper right", fontsize=9, framealpha=0.92)
+              loc="upper right", fontsize=12, framealpha=0.92)
 
     fig.tight_layout()
     out_path = out_dir / fname
