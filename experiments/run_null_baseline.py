@@ -15,8 +15,8 @@ all 540 FGW calls for that Q sequentially. Submit as a 3-task array; the
 results across Q are concatenated by --merge.
 
 Settings match the headline sweep:
-  alpha in {0, 0.5, 1},  Q in {0.9, 0.99, 0.999},  beta = 0.5,
-  n_init = 5,  act_norm = log_max,  load_norm = log_max.
+  alpha in {0, 0.5, 1},  Q in {0.9, 0.99, 0.999},  beta = 0 (hardcoded),
+  n_init = 3,  act_norm = log_max,  load_norm = log_max.
 
 Output:
   ${result_path}/circuits/null_baseline/null_S_Q{q}.csv     (per-Q task)
@@ -68,8 +68,7 @@ ARCHS = [
 SEEDS = [0, 1, 2]
 ALPHAS = [0.0, 0.5, 1.0]
 QUANTILES = [0.9, 0.99, 0.999]
-BETA = 0.5
-N_INIT = 5
+N_INIT = 3
 TASK = "c4"
 ACT_NORM = "log_max"
 LOAD_NORM = "log_max"
@@ -90,7 +89,6 @@ def _classification_path(circuits_dir: Path, arch: str) -> Path:
 
 
 def _build_triple_at_Q(dag_path: Path, classification: dict, Q: float,
-                        beta: float = BETA,
                         structural_mode: str = "path",
                         gamma: float = 1.0):
     """Build the (C, F, mass, meta) triple at the given Q, with the same
@@ -103,7 +101,7 @@ def _build_triple_at_Q(dag_path: Path, classification: dict, Q: float,
 
     triple = build_triple(
         dag, classification,
-        beta=beta, edge_threshold=threshold, edge_tensor=EDGE_TENSOR,
+        edge_threshold=threshold, edge_tensor=EDGE_TENSOR,
         act_norm_method=ACT_NORM, load_norm_method=LOAD_NORM,
         structural_mode=structural_mode, gamma=gamma,
     )
@@ -183,11 +181,11 @@ def _fgw_worker(args):
 # --- Main per-Q routine ---------------------------------------------------
 def _run_one_Q(Q: float, circuits_dir: Path, out_path: Path,
                n_init: int = N_INIT, n_workers: int = 1,
-               beta: float = BETA, structural_mode: str = "path",
+               structural_mode: str = "path",
                gamma: float = 1.0) -> None:
     """Build triples for one Q and run all FGW calls in a worker pool."""
     print(f"\n=== Q = {Q}   (n_workers = {n_workers})   "
-          f"struct={structural_mode}  beta={beta}  gamma={gamma} ===", flush=True)
+          f"struct={structural_mode}  beta=0 (hardcoded)  gamma={gamma} ===", flush=True)
     _TRIPLES.clear()
     t_build = time.time()
     for arch in ARCHS:
@@ -197,14 +195,14 @@ def _run_one_Q(Q: float, circuits_dir: Path, out_path: Path,
         with open(cls_path, "rb") as f:
             cls = pickle.load(f)
         tri = _build_triple_at_Q(_dag_path(circuits_dir, arch, None), cls, Q,
-                                 beta=beta, structural_mode=structural_mode,
+                                 structural_mode=structural_mode,
                                  gamma=gamma)
         _TRIPLES[(arch, None)] = tri
         print(f"  built ({arch}, trained) @Q={Q}  n_verts={tri[3]['n_verts']:6d}  "
               f"({time.time() - t_build:6.1f}s)", flush=True)
         for s in SEEDS:
             tri = _build_triple_at_Q(_dag_path(circuits_dir, arch, s), cls, Q,
-                                     beta=beta, structural_mode=structural_mode,
+                                     structural_mode=structural_mode,
                                      gamma=gamma)
             _TRIPLES[(arch, s)] = tri
             print(f"  built ({arch}, s={s})    @Q={Q}  n_verts={tri[3]['n_verts']:6d}  "
@@ -326,10 +324,6 @@ def main() -> None:
                         choices=["path", "local", "conn"],
                         help="Match the value used in the headline sweep "
                              "(default 'path'). 'conn' enables Katz path-sum.")
-    parser.add_argument("--beta", type=float, default=BETA,
-                        help=f"Depth/structural mixing in C (default {BETA}). "
-                             "Set 0 to drop the depth term from C (depth then "
-                             "lives only in F via the Wasserstein channel).")
     parser.add_argument("--gamma", type=float, default=1.0,
                         help="Katz per-hop discount in (0, 1] (default 1.0; "
                              "only used by structural-mode=conn).")
@@ -347,8 +341,6 @@ def main() -> None:
         suffix_parts.append("local")
     elif args.structural_mode == "conn":
         suffix_parts.append("conn")
-    if args.beta != BETA:
-        suffix_parts.append(f"b{args.beta:g}")
     if args.structural_mode == "conn" and args.gamma != 1.0:
         suffix_parts.append(f"g{args.gamma:g}")
     out_subdir_name = (OUT_SUBDIR + "_" + "_".join(suffix_parts)
@@ -378,7 +370,7 @@ def main() -> None:
     print(f"  archs          : {ARCHS}")
     print(f"  seeds          : {SEEDS}")
     print(f"  alphas         : {ALPHAS}")
-    print(f"  beta, n_init   : {args.beta}, {args.n_init}")
+    print(f"  beta, n_init   : 0 (hardcoded), {args.n_init}")
     print(f"  structural_mode: {args.structural_mode}")
     print(f"  gamma          : {args.gamma}")
     print(f"  act_norm       : {ACT_NORM}")
@@ -388,7 +380,7 @@ def main() -> None:
 
     _run_one_Q(Q, circuits_dir, out_path, n_init=args.n_init,
                n_workers=args.n_workers,
-               beta=args.beta, structural_mode=args.structural_mode,
+               structural_mode=args.structural_mode,
                gamma=args.gamma)
 
 

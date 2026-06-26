@@ -354,7 +354,6 @@ def _shortest_path_costs(W_fwd: torch.Tensor, L: int, N: int,
 def build_triple(dag: Dict[str, Any],
                  classification: Optional[Dict[Tuple[int, int], int]] = None,
                  *,
-                 beta: float = 0.5,
                  edge_threshold: float = 0.0,
                  edge_tensor: str = "W_softmax",
                  act_norm_method: str = "rank",
@@ -364,6 +363,12 @@ def build_triple(dag: Dict[str, Any],
                  ) -> Tuple[np.ndarray, np.ndarray, np.ndarray, Dict[str, Any]]:
     """Construct the FGW triple (C, F, mass) for one routing DAG.
 
+    The structural cost C is set directly to the chosen structural-mode
+    descriptor (no depth mixing). The depth feature lives only in F, where
+    the Wasserstein channel of FGW penalises cross-depth matches without
+    double-encoding depth in C. (This corresponds to the legacy β=0 setting;
+    β has been retired.)
+
     Args:
         dag: dict produced by build_dag.py; expects keys n_tokens_selected,
             top_weight, top_prompt, top_pos, moe_layers, plus the edge tensor
@@ -371,19 +376,16 @@ def build_triple(dag: Dict[str, Any],
         classification: dict[(prompt_idx, position) -> class_idx] from
             build_token_classification. If None, the token-class histogram is
             set to all-mass-on-"special" (P6 contributes nothing).
-        beta: mixing weight for the structural cost:
-            C = beta * |depth_u - depth_v| + (1 - beta) * d_path / (L - 1).
-            beta = 1 skips the (expensive) shortest-path computation.
         edge_threshold: drop edges with W < threshold before computing
             shortest paths. 0.0 = use the dense graph. See main.tex
             "Graph thresholding".
         edge_tensor: which 4D tensor in `dag` to use as the edge weight
             W[c, j, l, n]. Default "W_softmax" (the softmax-mass perturbation
             primary edge weight; cf. main.tex §2). Alternative options stored
-            in the DAG: "W_softmax_var", "W_softmax_signed", "APS", "ANS",
-            "AARV", "P_add", "P_rem". To use the legacy P_flip view, the
-            caller must inject `dag["P_flip"] = dag["P_add"] + dag["P_rem"]`
-            beforehand and pass edge_tensor="P_flip".
+            in the DAG: "W_softmax_var", "W_softmax_signed", "APS", "ANS".
+            (The previous AARV/P_add/P_rem alternative edge weights were
+            removed when switching to Approach 2 pairwise-isolated ablation;
+            they live in the archived `approach1-frozen` branch.)
 
     Returns:
         C    : [n, n] np.float64  -- structural cost
@@ -497,32 +499,24 @@ def build_triple(dag: Dict[str, Any],
     mass = mass / mass.sum()
 
     # --- Structural cost C ---
-    depth_flat = depth.reshape(-1).cpu().numpy().astype(np.float64)  # [n]
-    C_depth = np.abs(depth_flat[:, None] - depth_flat[None, :])      # [n, n]
-
-    if beta < 1.0:
-        if structural_mode == "path":
-            C_struct_raw = _shortest_path_costs(W_fwd, L, N, edge_threshold=edge_threshold)
-            C_struct = C_struct_raw / max(L - 1, 1)  # normalise to [0, 1]
-        elif structural_mode == "local":
-            # Already in [0, 1]: 1 - |W| on direct edges, 1 elsewhere.
-            C_struct = _local_costs(W_fwd, L, N, edge_threshold=edge_threshold)
-        elif structural_mode == "conn":
-            # Already in [0, 1]: -log(Phi^gamma) / -log(eps), clipped.
-            C_struct = _conn_costs(W_fwd, L, N, edge_threshold=edge_threshold,
-                                   gamma=gamma)
-        else:
-            raise ValueError(
-                f"Unknown structural_mode={structural_mode!r}; "
-                "expected 'path', 'local', or 'conn'."
-            )
+    if structural_mode == "path":
+        C_struct_raw = _shortest_path_costs(W_fwd, L, N, edge_threshold=edge_threshold)
+        C = C_struct_raw / max(L - 1, 1)  # normalise to [0, 1]
+    elif structural_mode == "local":
+        # Already in [0, 1]: 1 - |W| on direct edges, 1 elsewhere.
+        C = _local_costs(W_fwd, L, N, edge_threshold=edge_threshold)
+    elif structural_mode == "conn":
+        # Already in [0, 1]: -log(Phi^gamma) / -log(eps), clipped.
+        C = _conn_costs(W_fwd, L, N, edge_threshold=edge_threshold,
+                        gamma=gamma)
     else:
-        C_struct = np.zeros_like(C_depth)
-
-    C = beta * C_depth + (1.0 - beta) * C_struct
+        raise ValueError(
+            f"Unknown structural_mode={structural_mode!r}; "
+            "expected 'path', 'local', or 'conn'."
+        )
 
     meta = {"L": L, "N": N, "n_verts": n_verts, "D": F.shape[1],
-            "beta": beta, "edge_threshold": edge_threshold,
+            "edge_threshold": edge_threshold,
             "structural_mode": structural_mode, "gamma": gamma}
     return C.astype(np.float64), F, mass, meta
 

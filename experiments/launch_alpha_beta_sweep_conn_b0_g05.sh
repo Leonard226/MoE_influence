@@ -8,8 +8,9 @@
 #
 # α × Q sweep under log-max load + log-max act normalisations, with:
 #   - structural-mode = conn  (Katz path-sum)
-#   - beta = 0                (depth removed from C; depth is in F via Wasserstein
-#                              channel, no longer double-encoded)
+#   - beta = 0                (hardcoded in fgw.py: C = C_struct directly,
+#                              depth lives only in F via the Wasserstein
+#                              channel; not double-encoded into C)
 #   - gamma = 0.5             (Katz per-hop discount; damps the combinatorial
 #                              dominance of long paths in dense graphs)
 #
@@ -20,28 +21,34 @@
 # C unjams the GW signal; with gamma<1, the connectivity term is also less
 # dominated by combinatorial long-path counts.
 #
+# Note: the filename retains '_b0_' for historical continuity; β has been
+# retired as a flag (always 0 now) so it no longer appears in the output dir
+# suffix.
+#
 # Parallelism layout (same as the local-mode sweep):
 #   - 64 sources × 2 target chunks = 128 SLURM array tasks.
 #   - 4 nodes (piora5, piora6, piora7, piora8) × ~32 cores / 4 cpus-per-task
 #     = ~32 concurrent slots → several waves needed.
-#   - OMP/MKL/OPENBLAS pinned to 1 thread (POT/scipy is single-threaded).
+#   - OMP/MKL/OPENBLAS = 4 to let scipy.linalg (Katz triangular solve) and
+#     POT (BCG matrix multiplies) use all 4 cores per task. Each task is a
+#     single Python process with no fork pool, so all 4 cores go to BLAS.
 #
 # Submit:
 #   sbatch experiments/launch_alpha_beta_sweep_conn_b0_g05.sh
 #
-# Output (NEW DIRECTORY, does not touch existing sweeps):
-#   ${result_path}/circuits/alpha_beta_sweep_logact_logload_conn_b0_g0.5/
+# Output:
+#   ${result_path}/circuits/alpha_beta_sweep_logact_logload_conn_g0.5/
 #     sweep_src{SS}_chunk{CC}.npz   (128 slices)
 #
 # Aggregate after the array finishes:
 #   python experiments/aggregate_alpha_beta_sweep.py \
 #       --act-norm log_max --load-norm log_max \
-#       --structural-mode conn --beta 0 --gamma 0.5
+#       --structural-mode conn --gamma 0.5
 #
 # Analyze:
 #   python experiments/analyze_alpha_beta_sweep.py \
 #       --act-norm log_max --load-norm log_max \
-#       --structural-mode conn --beta 0 --gamma 0.5
+#       --structural-mode conn --gamma 0.5
 
 set -euo pipefail
 
@@ -60,9 +67,9 @@ ENV_BIN=/scratch/sleonard/miniconda3/envs/megatron/bin
 export PATH="${ENV_BIN}:${PATH}"
 export LD_LIBRARY_PATH="/scratch/sleonard/miniconda3/envs/megatron/lib:${LD_LIBRARY_PATH:-}"
 
-export OMP_NUM_THREADS=1
-export MKL_NUM_THREADS=1
-export OPENBLAS_NUM_THREADS=1
+export OMP_NUM_THREADS=4
+export MKL_NUM_THREADS=4
+export OPENBLAS_NUM_THREADS=4
 
 NUM_CHUNKS=2
 ARRAY_IDX=${SLURM_ARRAY_TASK_ID:-0}
@@ -78,5 +85,4 @@ ${ENV_BIN}/python experiments/run_alpha_beta_sweep.py \
     --act-norm log_max \
     --load-norm log_max \
     --structural-mode conn \
-    --beta 0 \
     --gamma 0.5

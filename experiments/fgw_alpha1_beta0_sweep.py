@@ -63,7 +63,6 @@ N_TUPLES = len(TUPLES)
 
 QUANTILES = [0.9, 0.99, 0.999]
 ALPHA = 1.0
-BETA = 0.0
 N_INIT = 3         # baseline-comparison run; slightly noisier per pair but fine
                    # for Pearson/Spearman vs spectral (was 5 in headline sweep)
 
@@ -101,8 +100,8 @@ def _isolated_keep_mask(dag: dict, theta: float) -> np.ndarray:
 
 
 def _build_filtered_triple(dag: dict, theta: float):
-    """Build triple at BETA, edge_threshold=theta, then drop isolated vertices."""
-    triple = build_triple(dag, beta=BETA, edge_threshold=theta)
+    """Build triple at edge_threshold=theta, then drop isolated vertices."""
+    triple = build_triple(dag, edge_threshold=theta)
     keep_mask = _isolated_keep_mask(dag, theta)
     return _subset_triple(triple, keep_mask), int(keep_mask.sum())
 
@@ -166,7 +165,7 @@ def main() -> None:
     print(f"Project root : {ROOT}")
     print(f"Result path  : {result_path}")
     print(f"Output       : {out_path}")
-    print(f"Settings     : alpha={ALPHA}, beta={BETA}, n_init={N_INIT}")
+    print(f"Settings     : alpha={ALPHA}, n_init={N_INIT}")
     print(f"Q axis       : {QUANTILES}")
     print(f"Pair space   : {N_TUPLES} x {N_TUPLES} = {N_TUPLES * N_TUPLES} ordered "
           f"(unordered cross-pairs = {N_TUPLES * (N_TUPLES - 1) // 2})")
@@ -201,7 +200,7 @@ def main() -> None:
             models=np.array(MODELS, dtype=object),
             tasks=np.array(TASKS, dtype=object),
             quantiles=np.array(QUANTILES),
-            alpha=ALPHA, beta=BETA, n_init=N_INIT,
+            alpha=ALPHA, n_init=N_INIT,
         )
         if tag:
             print(f"    [checkpoint {tag}] saved {out_path.name}  "

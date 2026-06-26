@@ -53,9 +53,8 @@ def _model_class_distribution(model: str, task: str, result_path: str) -> np.nda
     with open(cls_path, "rb") as f:
         classification = pickle.load(f)
 
-    # build_triple with beta=1.0 skips the expensive shortest-path computation;
-    # we only need F and the mass vector, not C.
-    _, F, mass, _ = build_triple(dag, classification, beta=1.0, edge_threshold=0.0)
+    # We only need F and the mass vector here; C is discarded.
+    _, F, mass, _ = build_triple(dag, classification, edge_threshold=0.0)
     # F is np.ndarray of shape (L*N, 10): cols 5-9 are the class histogram.
     class_block = np.asarray(F[:, CLASS_BLOCK_COLS])   # (L*N, 5)
     mass = np.asarray(mass)

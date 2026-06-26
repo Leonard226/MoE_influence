@@ -49,10 +49,6 @@ _parser.add_argument("--structural-mode", type=str, default="path",
                      help="Match the value used in the sweep. 'local' / "
                           "'conn' append a matching suffix to the input "
                           "subdir name.")
-from experiments.run_alpha_beta_sweep import FIXED_BETA as _DEFAULT_BETA  # noqa: E402
-_parser.add_argument("--beta", type=float, default=_DEFAULT_BETA,
-                     help=f"Match the --beta used in the sweep (default "
-                          f"{_DEFAULT_BETA}).")
 _parser.add_argument("--gamma", type=float, default=1.0,
                      help="Match the --gamma used in the sweep (default 1.0).")
 _args = _parser.parse_args()
@@ -66,8 +62,6 @@ if _args.structural_mode == "local":
     _suffix_parts.append("local")
 elif _args.structural_mode == "conn":
     _suffix_parts.append("conn")
-if _args.beta != _DEFAULT_BETA:
-    _suffix_parts.append(f"b{_args.beta:g}")
 if _args.structural_mode == "conn" and _args.gamma != 1.0:
     _suffix_parts.append(f"g{_args.gamma:g}")
 _sweep_name = ("alpha_beta_sweep_" + "_".join(_suffix_parts)

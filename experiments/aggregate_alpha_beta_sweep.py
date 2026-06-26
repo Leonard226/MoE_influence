@@ -44,10 +44,6 @@ def main():
                         help="Match the value used in the sweep. 'local' / "
                              "'conn' append a matching suffix to the input "
                              "subdir name.")
-    parser.add_argument("--beta", type=float, default=FIXED_BETA,
-                        help=f"Match the --beta used in the sweep (default "
-                             f"{FIXED_BETA}). Non-default beta appends "
-                             "'_b<value>' to the input dir name.")
     parser.add_argument("--gamma", type=float, default=1.0,
                         help="Match the --gamma used in the sweep (default 1.0). "
                              "Non-default gamma appends '_g<value>' to the "
@@ -63,8 +59,6 @@ def main():
         suffix_parts.append("local")
     elif args.structural_mode == "conn":
         suffix_parts.append("conn")
-    if args.beta != FIXED_BETA:
-        suffix_parts.append(f"b{args.beta:g}")
     if args.structural_mode == "conn" and args.gamma != 1.0:
         suffix_parts.append(f"g{args.gamma:g}")
     default_in_name = ("alpha_beta_sweep_" + "_".join(suffix_parts)

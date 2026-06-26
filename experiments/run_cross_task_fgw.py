@@ -183,13 +183,13 @@ def main():
                   flush=True)
 
     # --- Triples (mask + optional class-drop) ---
-    print(f"\n=== Triples (beta=1, mask special >{MASK_THRESH}, drop_class={drop_class}) ===",
+    print(f"\n=== Triples (mask special >{MASK_THRESH}, drop_class={drop_class}) ===",
           flush=True)
     triples = {}
     for m in models:
         for t in tasks:
             tr = build_triple(dags[(m, t)], classifications[(m, t)],
-                              beta=1.0, edge_threshold=0.0)
+                              edge_threshold=0.0)
             tr = mask_triple_by_class(tr, SPECIAL_IDX, MASK_THRESH)
             if drop_class:
                 tr = drop_class_features(tr)

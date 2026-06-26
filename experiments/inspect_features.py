@@ -81,7 +81,7 @@ def _model_palette(n: int):
 # -------------------- per-model F construction -----------------------------
 def _load_F(model: str, task: str) -> np.ndarray | None:
     """Build F (only) for one (model, task) using log-max normalisations.
-    Calls build_triple with beta=1 so the (expensive) C_struct path is skipped."""
+    C is computed but discarded."""
     dag_path = CIRCUITS_DIR / f"dag_{model}_{task}.pt"
     if not dag_path.exists():
         return None
@@ -93,7 +93,6 @@ def _load_F(model: str, task: str) -> np.ndarray | None:
     dag = torch.load(dag_path, weights_only=False, map_location="cpu")
     _C, F, _mass, _meta = build_triple(
         dag, classification,
-        beta=1.0,                           # skip C_struct entirely
         act_norm_method="log_max",
         load_norm_method="log_max",
     )

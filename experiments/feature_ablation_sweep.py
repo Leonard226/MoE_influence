@@ -81,12 +81,10 @@ TASKS = [
     "pile-arxiv", "pile-github",
 ]
 QUANTILES = [0.9, 0.99, 0.999]
-ALPHA = 0.0
-BETA = 1.0          # IRRELEVANT at alpha=0 (Wasserstein-only, C unused); but
-                    # beta=1.0 skips the all-pairs shortest-path computation
-                    # in build_triple (see fgw.py:342-346) -- pure performance
-                    # optimisation, identical FGW output as beta=0.5 here.
-N_INIT = 5          # matches headline sweep
+ALPHA = 0.0         # IRRELEVANT cost: alpha=0 is Wasserstein-only, so C is
+                    # unused. (build_triple still computes C; the skip-via-beta
+                    # perf trick is gone now that β has been retired.)
+N_INIT = 3          # matches headline sweep
 
 # Activation feature normalisation. Set from --act-norm CLI flag in main().
 # Defaults to "rank" so existing scripts and the per-pair-task workers behave
@@ -169,12 +167,12 @@ def _isolated_keep_mask(dag: dict, theta: float) -> np.ndarray:
 def _build_filtered_triple(dag: dict, classification, theta: float,
                            act_norm_method: str = "rank",
                            load_norm_method: str = "raw"):
-    """Build triple at BETA, edge_threshold=theta, then drop isolated vertices.
+    """Build triple at edge_threshold=theta, then drop isolated vertices.
     PASSES the classification through so class_hist is meaningful (the alpha=0
     Wasserstein term needs it). Matches run_alpha_beta_sweep.build_triple_at_Q.
     `act_norm_method` / `load_norm_method` select the normalisation of the
     activation / load features; plumbed through to fgw.build_triple."""
-    triple = build_triple(dag, classification, beta=BETA, edge_threshold=theta,
+    triple = build_triple(dag, classification, edge_threshold=theta,
                           act_norm_method=act_norm_method,
                           load_norm_method=load_norm_method)
     keep_mask = _isolated_keep_mask(dag, theta)
@@ -381,7 +379,7 @@ def _process_one_pair_task(pair_task_idx: int, result_path: str, out_dir: Path) 
         model_i=model_i, model_j=model_j, task=task,
         ablations=np.array(ABLATION_NAMES, dtype=object),
         quantiles=np.array(QUANTILES),
-        alpha=ALPHA, beta=BETA, n_init=N_INIT,
+        alpha=ALPHA, n_init=N_INIT,
     )
     print(f"\nDone in {time.time() - t0:.1f}s.  Failed: {n_failed}/{n_abl * n_q}")
     print(f"Saved: {out_npz}")
@@ -491,7 +489,7 @@ def main() -> None:
     print(f"Project root : {ROOT}")
     print(f"Result path  : {result_path}")
     print(f"Output dir   : {out_dir}")
-    print(f"Settings     : alpha={ALPHA}, beta={BETA}, n_init={N_INIT}")
+    print(f"Settings     : alpha={ALPHA}, n_init={N_INIT}")
     print(f"Models       : {n_m}, tasks: {n_t}, Q axis: {QUANTILES}")
     print(f"Ablations    : {ABLATION_NAMES}")
     print(f"Workers      : {n_workers}")
@@ -553,7 +551,7 @@ def main() -> None:
             tasks=np.array(TASKS, dtype=object),
             quantiles=np.array(QUANTILES),
             ablations=np.array(ABLATION_NAMES, dtype=object),
-            alpha=ALPHA, beta=BETA, n_init=N_INIT,
+            alpha=ALPHA, n_init=N_INIT,
         )
         print(f"Saved merged: {out_npz_final}")
         print(f"  Total NaN remaining: {int(np.isnan(S).sum())} / {S.size}\n")
@@ -587,7 +585,7 @@ def main() -> None:
             tasks=np.array(TASKS, dtype=object),
             quantiles=np.array(QUANTILES),
             ablations=np.array(ABLATION_NAMES, dtype=object),
-            alpha=ALPHA, beta=BETA, n_init=N_INIT,
+            alpha=ALPHA, n_init=N_INIT,
         )
         if tag:
             print(f"    [checkpoint {tag}] saved {out_npz.name}  "

@@ -1,10 +1,11 @@
-"""Pairwise α × Q sweep across all (model, task) tuples at β = FIXED_BETA.
+"""Pairwise α × Q sweep across all (model, task) tuples at β = 0 (hardcoded).
 
 One worker = one (source_idx, target_chunk) work unit. Run as a SLURM array
 via experiments/launch_alpha_beta_sweep.sh.
 
-For each (source, target) pair, each quantile Q, and each α, computes
-    S_α(G_source^Q, G_target^Q)         at fixed β = FIXED_BETA
+For each (source, target) pair (with target > source — FGW is symmetric and
+the aggregator mirrors), each quantile Q, and each α, computes
+    S_α(G_source^Q, G_target^Q)         at β = 0 (C = C_struct, no depth mix)
 and writes a slice file
     {output_dir}/sweep_src{SS}_chunk{CC}.npz
 that the aggregator stitches into
@@ -25,8 +26,9 @@ otherwise contribute only uniform-diameter distance rows = structural
 noise). No other vertex filter is applied in this baseline; the special-
 token mask used by the legacy dense sweep is OFF here.
 
-β is fixed, so only ONE triple is built per (model, task, Q). The metric
-is CPU-bound (POT + scipy); no GPU needed.
+β = 0 is hardcoded (depth lives only in F via the Wasserstein channel; not
+double-encoded into C), so only ONE triple is built per (model, task, Q).
+The metric is CPU-bound (POT + scipy); no GPU needed.
 """
 import argparse
 import os
@@ -76,8 +78,8 @@ N_TUPLES = len(TUPLES)
 
 ALPHAS    = [0.0, 0.5, 1.0]
 QUANTILES = [0.9, 0.99, 0.999]    # per-edge |W| quantile; drop edges below it.
-FIXED_BETA = 0.5
-N_INIT = 5
+FIXED_BETA = 0.0
+N_INIT = 3
 
 CACHE_DIR = os.path.join(config["result_path"], "circuits", "classifications")
 DAG_DIR   = os.path.join(config["result_path"], "circuits")
@@ -130,20 +132,18 @@ def build_triple_at_Q(model, task, classification, Q,
                       act_norm_method: str = "rank",
                       load_norm_method: str = "raw",
                       structural_mode: str = "path",
-                      beta: float = 0.5,
                       gamma: float = 1.0):
-    """Build one triple at β = FIXED_BETA with:
+    """Build one triple with:
       - F, mass        : computed on the DENSE routing DAG (intrinsic features).
-      - C_path         : computed on the SPARSIFIED graph (edges with
-                         W > θ_Q only).
+      - C              : structural cost (mode-dispatched in build_triple) on
+                         the SPARSIFIED graph (edges with W > θ_Q only).
       - vertex set     : drop vertices isolated in the sparsified graph
                          (no surviving in- or out-edge).
 
     The edge tensor W is read from `dag[EDGE_TENSOR]` (default "W_softmax"
     — the softmax-mass perturbation primary edge weight defined in main.tex
-    §2). To switch to the legacy P_flip view, change EDGE_TENSOR to "P_flip"
-    and ensure each DAG file has that key (computable on the fly from P_add
-    + P_rem if needed).
+    §2). Other edge-tensor keys in the DAG (W_softmax_var, W_softmax_signed,
+    APS, ANS) are not exposed here; switch by editing EDGE_TENSOR.
 
     Note: this baseline does NOT apply the special-token (class_hist[special]
     > 0.5) mask. The legacy dense sweep applied it; we drop it here so the
@@ -164,9 +164,9 @@ def build_triple_at_Q(model, task, classification, Q,
     threshold = _edge_quantile_threshold(W, Q)
 
     # build_triple keeps F and mass on the DENSE graph; edge_threshold only
-    # filters edges fed into the C_path shortest-path computation.
+    # filters edges fed into the structural-cost computation.
     triple = build_triple(dag, classification,
-                          beta=beta, edge_threshold=threshold,
+                          edge_threshold=threshold,
                           edge_tensor=EDGE_TENSOR,
                           act_norm_method=act_norm_method,
                           load_norm_method=load_norm_method,
@@ -225,12 +225,6 @@ def main():
                              "rewards path-redundancy + edge-weight all in one "
                              "closed-form descriptor (gamma controls per-hop "
                              "discount). Output goes to a separate dir.")
-    parser.add_argument("--beta", type=float, default=FIXED_BETA,
-                        help=f"Depth/structural mixing in C = beta*|Δdepth| + "
-                             f"(1-beta)*C_struct. Default {FIXED_BETA} (legacy). "
-                             "Set 0 to drop the depth term from C entirely so "
-                             "depth lives only in the feature matrix F (avoids "
-                             "double-encoding depth in both F and C).")
     parser.add_argument("--gamma", type=float, default=1.0,
                         help="Katz per-hop discount in (0, 1] (default 1.0, no "
                              "discount; only used by structural-mode=conn). "
@@ -250,8 +244,6 @@ def main():
         suffix_parts.append("local")
     elif args.structural_mode == "conn":
         suffix_parts.append("conn")
-    if args.beta != FIXED_BETA:
-        suffix_parts.append(f"b{args.beta:g}")
     if args.structural_mode == "conn" and args.gamma != 1.0:
         suffix_parts.append(f"g{args.gamma:g}")
     default_out_name = ("alpha_beta_sweep_" + "_".join(suffix_parts)
@@ -263,7 +255,12 @@ def main():
 
     src_model, src_task = TUPLES[args.source_idx]
 
-    all_other = [i for i in range(N_TUPLES) if i != args.source_idx]
+    # FGW is symmetric: S(G_i, G_j) = S(G_j, G_i). Each unordered pair only
+    # needs to be computed once; the aggregator mirrors src→tgt into tgt→src.
+    # So worker for source i only handles targets with j > i. This halves the
+    # total compute and the worker for source 63 ends up with zero targets
+    # (handled by the all-NaN early return below).
+    all_other = [i for i in range(N_TUPLES) if i > args.source_idx]
     chunk_size = (len(all_other) + args.num_chunks - 1) // args.num_chunks
     chunk_start = args.target_chunk * chunk_size
     chunk_end = min(chunk_start + chunk_size, len(all_other))
@@ -275,10 +272,18 @@ def main():
         f"sweep_src{args.source_idx:02d}_chunk{args.target_chunk:02d}.npz",
     )
 
+    # Under the i > source_idx restriction, sources near the end (and trailing
+    # chunks of mid-range sources) have no targets. Early-exit before building
+    # source triples to avoid the wasted Katz solves.
+    if n_tgts == 0:
+        print(f"  no targets for source-idx {args.source_idx} chunk "
+              f"{args.target_chunk}; nothing to do.", flush=True)
+        return
+
     n_a, n_q = len(ALPHAS), len(QUANTILES)
     n_cells = n_a * n_q
 
-    print(f"=== α × Q Sweep at β = {args.beta} ===")
+    print(f"=== α × Q Sweep (β=0 hardcoded) ===")
     print(f"  source   : {src_model}/{src_task} (idx {args.source_idx})")
     print(f"  targets  : chunk {args.target_chunk}/{args.num_chunks - 1}  -> {n_tgts} tuples")
     print(f"  α        : {ALPHAS}")
@@ -286,7 +291,6 @@ def main():
     print(f"  act_norm : {args.act_norm}")
     print(f"  load_norm: {args.load_norm}")
     print(f"  struct.  : {args.structural_mode}")
-    print(f"  β        : {args.beta}")
     print(f"  γ        : {args.gamma}")
     print(f"  cells    : {n_cells} (α × Q) per pair")
     print(f"  total    : {n_tgts * n_cells} FGW calls")
@@ -308,7 +312,7 @@ def main():
             print(f"[warn] could not resume from {output_path}: {e}; starting fresh")
             S_mat = np.full((n_tgts, n_a, n_q), np.nan)
 
-    # --- Source triples: one per Q at β = FIXED_BETA. ---
+    # --- Source triples: one per Q (β = 0 hardcoded). ---
     print(f"\n[1/2] Building source triples at each Q ...", flush=True)
     src_class = load_classification(src_model, src_task)
     src_triples_by_Q = {}
@@ -318,7 +322,6 @@ def main():
                                        act_norm_method=args.act_norm,
                                        load_norm_method=args.load_norm,
                                        structural_mode=args.structural_mode,
-                                       beta=args.beta,
                                        gamma=args.gamma)
         src_triples_by_Q[Q] = tri
         print(f"  Q={Q:5.3g}: built in {time.time() - t0:7.1f}s  "
@@ -328,7 +331,7 @@ def main():
         np.savez(output_path, S=S_mat,
                  alphas=np.array(ALPHAS),
                  quantiles=np.array(QUANTILES),
-                 fixed_beta=np.float64(args.beta),
+                 fixed_beta=np.float64(0.0),
                  gamma=np.float64(args.gamma),
                  structural_mode=args.structural_mode,
                  source_idx=args.source_idx,
@@ -370,7 +373,6 @@ def main():
                                                act_norm_method=args.act_norm,
                                                load_norm_method=args.load_norm,
                                                structural_mode=args.structural_mode,
-                                               beta=args.beta,
                                                gamma=args.gamma)
             except FileNotFoundError as e:
                 print(f"    [WARN] missing DAG at Q={Q}: {e}")
