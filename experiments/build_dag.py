@@ -1,31 +1,42 @@
-"""DAG builder for a chosen MoE model + dataset, with multiple edge weights.
+"""DAG builder for a chosen MoE model + dataset.
 
 Computes per-edge weights conditioned on sender selection. With S(g^{l,n}, e^{c,j}_{out,i})
 denoting the per-edge sub-score from the score decomposition (cf. main.tex §2):
 
     APS(c, j → l, n)    = E_i  [ max(S, 0)                                       | (c,j) selected ]
     ANS(c, j → l, n)    = E_i  [ min(S, 0)                                       | (c,j) selected ]
-    AARV(c, j → l, n)   = E_i  [ | rank_l^orig(n) − rank_l^pert(n) |             | (c,j) selected ]
-    P_add(c, j → l, n)  = P_i  [ rank_l^orig(n) > K-1  ∧  rank_l^pert(n) ≤ K-1   | (c,j) selected ]
-    P_rem(c, j → l, n)  = P_i  [ rank_l^orig(n) ≤ K-1  ∧  rank_l^pert(n) > K-1   | (c,j) selected ]
 
-and the new softmax-mass perturbation family (PRIMARY edge weight for the influence DAG):
+and the PRIMARY influence-edge family — softmax-mass perturbation with PAIRWISE-ISOLATED
+ablation (Approach 2):
 
-    W_softmax(c, j → l, n)        = E_i  [ | p_orig(n) − p_pert(n) |             | (c,j) selected ]
-    W_softmax_var(c, j → l, n)    = Var_i[ | p_orig(n) − p_pert(n) |             | (c,j) selected ]
-    W_softmax_signed(c, j → l, n) = E_i  [ p_pert(n) − p_orig(n)                 | (c,j) selected ]
+    W_softmax(c, j → l, n)        = E_i  [ | p_orig(n) − p_pert_{c→n}(n) |       | (c,j) selected ]
+    W_softmax_var(c, j → l, n)    = Var_i[ | p_orig(n) − p_pert_{c→n}(n) |       | (c,j) selected ]
+    W_softmax_signed(c, j → l, n) = E_i  [ p_pert_{c→n}(n) − p_orig(n)           | (c,j) selected ]
 
-where p_orig(n)/p_pert(n) is the renormalised top-K-softmax gating weight of expert n
-at receiver layer l in the original / sender-ablated routing scores (with p=0 outside
-the top-K). W_softmax is dimensionless in [0, 1] and cross-model comparable by
-construction. W_softmax_signed > 0 ⇒ ablating (c,j) raises n's mass ⇒ (c,j) suppresses n.
+Pairwise-isolated ablation (Approach 2):
+    To compute the edge (c, j) → (l, n), we subtract sender (c, j)'s contribution
+    ONLY from receiver n's score at layer l (NOT from other receivers' scores).
+    The new top-K and renormalised softmax are then computed over this per-pair
+    perturbed score vector. So for each (sender, receiver) pair we have its OWN
+    perturbed network state — the edge weight is uncontaminated by the sender's
+    side effects on other receivers at the same layer.
+
+    Contrast to "Approach 1" (legacy, archived on branch `approach1-frozen`):
+    the legacy version subtracted (c, j)'s contributions from ALL receivers'
+    scores simultaneously, which mixed in (c, j)'s effects on other receivers
+    via softmax renormalisation. Approach 2 isolates the pairwise effect.
+
+where p_orig(n)/p_pert_{c→n}(n) is the renormalised top-K-softmax gating weight of
+expert n at receiver layer l in the original / pair-isolated-ablated routing scores
+(with p = 0 outside the top-K). W_softmax is dimensionless in [0, 1] and
+cross-model comparable by construction. W_softmax_signed > 0 ⇒ ablating (c,j)'s
+contribution to n raises n's mass ⇒ (c,j) suppresses n.
 
 For Phi-3.5-MoE the model actually uses `sparsemixer` rather than top-K softmax; we
 override that with the cross-model unified renorm(softmax_topK) formula here so the
 edge-weight definition is identical across all models.
 
-rank_l^pert is the receiver-rank after ablating the sender's score contribution; K is the
-model's top_k.
+K is the model's top_k.
 
 Also computed per sender expert / per vertex:
     n_tokens_selected[c, j]               = #tokens where (c,j) ∈ top-K at layer c
@@ -417,19 +428,20 @@ if len(prompts) < N_PROMPTS:
 
 # ---- Accumulators ----
 # APS/ANS               : positive / negative parts of the per-edge sub-score.
-# aarv_accum            : |rank shift| after sender-score ablation.
-# padd/prem_accum       : indicator counts for the receiver crossing the top-K boundary.
-# wsm/wsm_sq/wsm_signed : softmax-mass perturbation statistics. wsm = E_i[|delta|],
-#                         wsm_sq = E_i[delta^2] (used to derive Var since |delta|^2 = delta^2),
-#                         wsm_signed = E_i[p_pert - p_orig]. delta = p_orig(v) - p_pert(v),
-#                         where p_*(v) is renorm(softmax_topK) of the gating at receiver
-#                         layer R; zero outside top-K. PRIMARY influence-edge weight.
+# wsm/wsm_sq/wsm_signed : softmax-mass perturbation statistics under Approach 2
+#                         (pairwise-isolated ablation). For edge (c,j) → (l,n):
+#                           - delta_{c,j,l,n} = p_orig(n) - p_pert_{c→n}(n)
+#                             where p_pert_{c→n} is the renorm(softmax_topK) of the
+#                             gating at receiver layer l AFTER subtracting only the
+#                             (c,j) contribution to n's score (other receivers'
+#                             scores unchanged); zero outside top-K.
+#                           - wsm = E_i[|delta|], wsm_sq = E_i[delta^2]
+#                             (Var = E[delta^2] - E[|delta|]^2 since |delta|^2 = delta^2),
+#                             wsm_signed = E_i[p_pert - p_orig] = E_i[-delta].
+#                         PRIMARY influence-edge weight.
 SHAPE = (N_LAYERS, N_EXPERTS, N_LAYERS, N_EXPERTS)
 APS_accum        = torch.zeros(SHAPE, dtype=torch.float32, device=device)
 ANS_accum        = torch.zeros(SHAPE, dtype=torch.float32, device=device)
-aarv_accum       = torch.zeros(SHAPE, dtype=torch.float32, device=device)
-padd_accum       = torch.zeros(SHAPE, dtype=torch.float32, device=device)
-prem_accum       = torch.zeros(SHAPE, dtype=torch.float32, device=device)
 wsm_accum        = torch.zeros(SHAPE, dtype=torch.float32, device=device)
 wsm_sq_accum     = torch.zeros(SHAPE, dtype=torch.float32, device=device)
 wsm_signed_accum = torch.zeros(SHAPE, dtype=torch.float32, device=device)
@@ -509,10 +521,6 @@ for B in range(0, N_PROMPTS, BSZ):
     # Original assignment scores at every receiver layer (for AARV computation).
     after_norm2_r = (after_norm2.float().permute(0, 2, 1, 3).reshape(bt, N_LAYERS, D_E))   # [bt, L, d_e]
     orig_score = torch.einsum("lnd,bld->bln", G_recv, after_norm2_r)       # [bt, L, N_EXPERTS]
-    orig_sorted = torch.argsort(orig_score, dim=-1, descending=True)       # [bt, L, N_EXPERTS]
-    orig_rank_of = torch.empty_like(orig_sorted)
-    orig_rank_of.scatter_(-1, orig_sorted, torch.arange(N_EXPERTS, device=device).expand_as(orig_sorted))
-    # orig_rank_of[bt, l, n] = position of expert n in the layer-l ordering.
 
     # Sender-side reshapes: [bt, S, k, ...]
     omega = (weighted_out.float().permute(0, 2, 1, 3, 4).reshape(bt, N_LAYERS, TOP_K, D_E))   # [bt, S, k, d_e]
@@ -564,58 +572,67 @@ for B in range(0, N_PROMPTS, BSZ):
             APS_accum[S, :, R, :].index_add_(0, sel_flat, scores_pos.flatten(0, 1))
             ANS_accum[S, :, R, :].index_add_(0, sel_flat, scores_neg.flatten(0, 1))
 
-            # Causal-routing features: ablate sender's contribution at layer R,
-            # re-rank receivers, derive AARV / P_add / P_rem from the shift.
-            pert_score = orig_score[:, R, :].unsqueeze(1) - scores               # [bt, k, N_EXPERTS]
-            pert_sorted = torch.argsort(pert_score, dim=-1, descending=True)     # [bt, k, N_EXPERTS]
-            pert_rank_of = torch.empty_like(pert_sorted)
-            pert_rank_of.scatter_(-1, pert_sorted,
-                                  torch.arange(N_EXPERTS, device=device).expand_as(pert_sorted))
-            orig_rank_R = orig_rank_of[:, R, :].unsqueeze(1).expand_as(pert_rank_of)   # [bt, k, N_EXPERTS]
-            aarv = (orig_rank_R.float() - pert_rank_of.float()).abs()
-            in_topk_orig = (orig_rank_R <= TOP_K - 1)
-            in_topk_pert = (pert_rank_of <= TOP_K - 1)
-            padd = (~in_topk_orig &  in_topk_pert).float()
-            prem = ( in_topk_orig & ~in_topk_pert).float()
+            # ---- Softmax-mass perturbation under Approach 2 (per-pair isolated ablation) ----
+            # For each edge (sender k, receiver n) we ablate sender k's contribution
+            # to n ONLY (not to other receivers at the same layer). Each edge has its
+            # OWN perturbed score vector, top-K and softmax.
+            #
+            #   pert_score_pair[b, k, n, m] = orig_score[b, R, m]                  if m ≠ n
+            #                               = orig_score[b, R, n] - scores[b, k, n]  if m == n
+            #
+            # After per-pair softmax + top-K renormalisation we read off the diagonal
+            # (m == n) to obtain p_pert_{k→n}(n).
+            #
+            # Memory: pert_score_pair, pert_softmax_pair, p_pert_full each take
+            # [bt, TOP_K, N, N] float32 = ~520 MB at (bt=1000, K=8, N=128).
+            # The blob is built, consumed, and `del`'d within this iteration.
+            N = N_EXPERTS
+            diag_idx = torch.arange(N, device=device)
 
-            aarv_accum[S, :, R, :].index_add_(0, sel_flat, aarv.flatten(0, 1))
-            padd_accum[S, :, R, :].index_add_(0, sel_flat, padd.flatten(0, 1))
-            prem_accum[S, :, R, :].index_add_(0, sel_flat, prem.flatten(0, 1))
+            # Build per-pair perturbed scores.
+            pert_score_pair = (orig_score[:, R, :]
+                               .view(bt, 1, 1, N)
+                               .expand(bt, TOP_K, N, N)
+                               .clone())                                           # [bt, K, N, N]
+            # Subtract scores[b, k, n] from the diagonal in m: pert_score_pair[b, k, n, n].
+            pert_score_pair[:, :, diag_idx, diag_idx] = (
+                pert_score_pair[:, :, diag_idx, diag_idx] - scores
+            )
 
-            # ---- Softmax-mass perturbation (W_softmax family) ----
-            # p_orig(v) at receiver R = renormalised top-K softmax of orig_score[R];
-            # zero outside top-K. Already computed at line ~395 as `routing_weight`,
-            # which is renorm(softmax_topK) for layer R; scatter back to N_EXPERTS.
+            # Per-pair top-K (over m) and renormalised softmax.
+            pert_softmax_pair = torch.softmax(pert_score_pair, dim=-1)             # [bt, K, N, N]
+            pert_topk_vals, pert_topk_idx = torch.topk(
+                pert_softmax_pair, TOP_K, dim=-1)                                  # [bt, K, N, TOP_K]
+            pert_topk_vals = pert_topk_vals / pert_topk_vals.sum(dim=-1, keepdim=True)
+            p_pert_full = torch.zeros_like(pert_softmax_pair)
+            p_pert_full.scatter_(-1, pert_topk_idx, pert_topk_vals)                # [bt, K, N, N]
+            del pert_score_pair, pert_softmax_pair, pert_topk_vals, pert_topk_idx
+
+            # p_pert_n[b, k, n] = p_pert under the (k → n) per-pair perturbation,
+            # at receiver index n itself (the diagonal of the [N, N] slab).
+            p_pert_n = p_pert_full[:, :, diag_idx, diag_idx]                       # [bt, K, N]
+            del p_pert_full
+
+            # p_orig(n) at receiver R: renormalised top-K softmax of orig_score[R];
+            # zero outside top-K. Same for every sender k → broadcast over K.
             p_orig_R = torch.zeros((bt, N_EXPERTS), dtype=torch.float32, device=device)
-            p_orig_R.scatter_(-1, sel[:, R, :], routing_weight[:, R, :])         # [bt, N_EXPERTS]
-            p_orig_R = p_orig_R.unsqueeze(1).expand(bt, TOP_K, N_EXPERTS)        # broadcast over k
+            p_orig_R.scatter_(-1, sel[:, R, :], routing_weight[:, R, :])           # [bt, N_EXPERTS]
+            p_orig_R = p_orig_R.unsqueeze(1).expand(bt, TOP_K, N_EXPERTS)          # [bt, K, N]
 
-            # p_pert: cross-model unified renorm(softmax_topK) over the perturbed scores.
-            # softmax over all N, then top-K from pert_sorted, then L1 renorm; zero elsewhere.
-            pert_softmax_all = torch.softmax(pert_score, dim=-1)                 # [bt, k, N_EXPERTS]
-            pert_topk_idx    = pert_sorted[:, :, :TOP_K]                         # [bt, k, TOP_K]
-            pert_topk_vals   = torch.gather(pert_softmax_all, dim=-1, index=pert_topk_idx)  # [bt, k, TOP_K]
-            pert_topk_vals   = pert_topk_vals / pert_topk_vals.sum(dim=-1, keepdim=True)
-            p_pert = torch.zeros_like(pert_softmax_all)
-            p_pert.scatter_(-1, pert_topk_idx, pert_topk_vals)                   # [bt, k, N_EXPERTS]
-            del pert_softmax_all, pert_topk_idx, pert_topk_vals
-
-            # delta = p_orig - p_pert in [-1, 1]. wsm = E[|delta|], wsm_sq = E[delta^2]
-            # (which equals E[|delta|^2] — used for Var via E[delta^2] − E[|delta|]^2),
-            # wsm_signed_accum += -delta = p_pert - p_orig so >0 means u suppresses v.
-            delta = p_orig_R - p_pert                                            # [bt, k, N_EXPERTS]
+            # delta_{c,j,l,n} = p_orig(n) - p_pert_{c→n}(n) ∈ [-1, 1].
+            # wsm = E[|delta|], wsm_sq = E[delta^2] (used for Var; |delta|^2 == delta^2),
+            # wsm_signed_accum += -delta = p_pert - p_orig so > 0 means u suppresses v.
+            delta = p_orig_R - p_pert_n                                            # [bt, K, N]
             wsm_accum       [S, :, R, :].index_add_(0, sel_flat, delta.abs().flatten(0, 1))
             wsm_sq_accum    [S, :, R, :].index_add_(0, sel_flat, (delta * delta).flatten(0, 1))
             wsm_signed_accum[S, :, R, :].index_add_(0, sel_flat, (-delta).flatten(0, 1))
 
             del ln_bar, scores, scores_pos, scores_neg
-            del pert_score, pert_sorted, pert_rank_of, orig_rank_R
-            del aarv, in_topk_orig, in_topk_pert, padd, prem
-            del p_orig_R, p_pert, delta
+            del p_orig_R, p_pert_n, delta
 
     del hook_dict, after_res1, after_norm2, selected, weighted_out
     del omega, sel, rms_sq, rms_inv, after_norm2_r
-    del orig_score, orig_sorted, orig_rank_of
+    del orig_score
     torch.cuda.empty_cache()
 
     bnum = B // BSZ + 1
@@ -635,9 +652,6 @@ zero_mask  = (n_tokens_selected == 0).view(N_LAYERS, N_EXPERTS, 1, 1)
 
 APS   = (APS_accum  / denom).masked_fill(zero_mask, 0.0)
 ANS   = (ANS_accum  / denom).masked_fill(zero_mask, 0.0)
-AARV  = (aarv_accum / denom).masked_fill(zero_mask, 0.0)
-P_add = (padd_accum / denom).masked_fill(zero_mask, 0.0)
-P_rem = (prem_accum / denom).masked_fill(zero_mask, 0.0)
 
 # W_softmax family. Var[|delta|] = E[|delta|^2] − E[|delta|]^2 = E[delta^2] − E[|delta|]^2
 # (legit since |delta|^2 = delta^2). The clamp(min=0) guards float32 catastrophic
@@ -661,12 +675,9 @@ else:
 torch.save({
     "APS":               APS.cpu(),                       # [c, j, l, n]
     "ANS":               ANS.cpu(),                       # [c, j, l, n]
-    "AARV":              AARV.cpu(),                      # [c, j, l, n] — mean |rank shift|
-    "P_add":             P_add.cpu(),                     # [c, j, l, n] — receiver crosses INTO top-K
-    "P_rem":             P_rem.cpu(),                     # [c, j, l, n] — receiver crosses OUT OF top-K
-    "W_softmax":         W_softmax.cpu(),                 # [c, j, l, n] — E_i[|p_orig − p_pert|]      (PRIMARY)
-    "W_softmax_var":     W_softmax_var.cpu(),             # [c, j, l, n] — Var_i[|p_orig − p_pert|]
-    "W_softmax_signed":  W_softmax_signed.cpu(),          # [c, j, l, n] — E_i[p_pert − p_orig]; >0 ⇒ u suppresses v
+    "W_softmax":         W_softmax.cpu(),                 # [c, j, l, n] — E_i[|p_orig − p_pert_{c→n}|]   (PRIMARY, Approach 2)
+    "W_softmax_var":     W_softmax_var.cpu(),             # [c, j, l, n] — Var_i[|p_orig − p_pert_{c→n}|]
+    "W_softmax_signed":  W_softmax_signed.cpu(),          # [c, j, l, n] — E_i[p_pert_{c→n} − p_orig]; >0 ⇒ (c,j) suppresses n
     "act":               act_accum.cpu(),                 # [l, n]       — Su et al. activation magnitude
     "n_tokens_selected": n_tokens_selected.cpu(),         # [c, j]       — #tokens routed to (c, j)
     "top_weight":        top_weight.cpu(),                # [c, j, K_TOP_TOKENS] — empty slot = -1

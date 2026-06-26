@@ -16,9 +16,10 @@ For DeepSeek-V2's dense layer 0, MoE hooks are skipped (`mlp_hooks` is empty
 there); only after_res1/after_norm2 are valid for dense layers and we don't
 need them for the score decomposition anyway.
 
-Rank 0 owns the score-decomposition accumulators (APS, ANS, aarv, padd, prem,
-wsm/wsm_sq/wsm_signed for the softmax-mass perturbation family, n_tokens_selected,
-top-K-by-routing-weight token buffer) and runs the inner loop. The router gate
+Rank 0 owns the score-decomposition accumulators (APS, ANS,
+wsm/wsm_sq/wsm_signed for the softmax-mass perturbation family under Approach 2
+pairwise-isolated ablation, n_tokens_selected, top-K-by-routing-weight token
+buffer) and runs the inner loop. The router gate
 and post-attention RMSNorm weights from every MoE layer are gathered to rank 0
 once at startup.
 
@@ -905,9 +906,6 @@ def main():
         SHAPE = (N_LAYERS, N_EXPERTS, N_LAYERS, N_EXPERTS)
         APS_accum        = torch.zeros(SHAPE, dtype=torch.float32, device=device0)
         ANS_accum        = torch.zeros(SHAPE, dtype=torch.float32, device=device0)
-        aarv_accum       = torch.zeros(SHAPE, dtype=torch.float32, device=device0)
-        padd_accum       = torch.zeros(SHAPE, dtype=torch.float32, device=device0)
-        prem_accum       = torch.zeros(SHAPE, dtype=torch.float32, device=device0)
         wsm_accum        = torch.zeros(SHAPE, dtype=torch.float32, device=device0)
         wsm_sq_accum     = torch.zeros(SHAPE, dtype=torch.float32, device=device0)
         wsm_signed_accum = torch.zeros(SHAPE, dtype=torch.float32, device=device0)
@@ -1008,15 +1006,9 @@ def main():
             rms_sq = after_res1.pow(2).mean(dim=-1) + EPS                          # [bsz, L, n_tok]
             rms_inv = torch.rsqrt(rms_sq).permute(0, 2, 1).reshape(bt, N_LAYERS)   # [bt, L]
 
-            # Original assignment scores at every receiver layer (for AARV).
+            # Original assignment scores at every receiver layer.
             after_norm2_r = after_norm2.permute(0, 2, 1, 3).reshape(bt, N_LAYERS, D_E)  # [bt, L, d_e]
             orig_score = torch.einsum("lnd,bld->bln", G_recv, after_norm2_r)            # [bt, L, n_experts]
-            orig_sorted = torch.argsort(orig_score, dim=-1, descending=True)            # [bt, L, n_experts]
-            orig_rank_of = torch.empty_like(orig_sorted)
-            orig_rank_of.scatter_(
-                -1, orig_sorted,
-                torch.arange(N_EXPERTS, device=device0).expand_as(orig_sorted),
-            )
 
             # Sender-side reshapes.
             omega = weighted_out.permute(0, 2, 1, 3, 4).reshape(bt, N_LAYERS, TOP_K, D_E)
@@ -1063,51 +1055,45 @@ def main():
                     APS_accum[S, :, R, :].index_add_(0, sel_flat, scores_pos.flatten(0, 1))
                     ANS_accum[S, :, R, :].index_add_(0, sel_flat, scores_neg.flatten(0, 1))
 
-                    pert_score = orig_score[:, R, :].unsqueeze(1) - scores         # [bt, k, n_experts]
-                    pert_sorted = torch.argsort(pert_score, dim=-1, descending=True)
-                    pert_rank_of = torch.empty_like(pert_sorted)
-                    pert_rank_of.scatter_(
-                        -1, pert_sorted,
-                        torch.arange(N_EXPERTS, device=device0).expand_as(pert_sorted),
+                    # ---- Softmax-mass perturbation under Approach 2 ----
+                    # See build_dag.py for the derivation; same per-pair logic here.
+                    N = N_EXPERTS
+                    diag_idx = torch.arange(N, device=device0)
+
+                    pert_score_pair = (orig_score[:, R, :]
+                                       .view(bt, 1, 1, N)
+                                       .expand(bt, TOP_K, N, N)
+                                       .clone())                                  # [bt, K, N, N]
+                    pert_score_pair[:, :, diag_idx, diag_idx] = (
+                        pert_score_pair[:, :, diag_idx, diag_idx] - scores
                     )
-                    orig_rank_R = orig_rank_of[:, R, :].unsqueeze(1).expand_as(pert_rank_of)
-                    aarv = (orig_rank_R.float() - pert_rank_of.float()).abs()
-                    in_topk_orig = (orig_rank_R <= TOP_K - 1)
-                    in_topk_pert = (pert_rank_of <= TOP_K - 1)
-                    padd = (~in_topk_orig &  in_topk_pert).float()
-                    prem = ( in_topk_orig & ~in_topk_pert).float()
 
-                    aarv_accum[S, :, R, :].index_add_(0, sel_flat, aarv.flatten(0, 1))
-                    padd_accum[S, :, R, :].index_add_(0, sel_flat, padd.flatten(0, 1))
-                    prem_accum[S, :, R, :].index_add_(0, sel_flat, prem.flatten(0, 1))
+                    pert_softmax_pair = torch.softmax(pert_score_pair, dim=-1)     # [bt, K, N, N]
+                    pert_topk_vals, pert_topk_idx = torch.topk(
+                        pert_softmax_pair, TOP_K, dim=-1)                          # [bt, K, N, TOP_K]
+                    pert_topk_vals = pert_topk_vals / pert_topk_vals.sum(dim=-1, keepdim=True)
+                    p_pert_full = torch.zeros_like(pert_softmax_pair)
+                    p_pert_full.scatter_(-1, pert_topk_idx, pert_topk_vals)
+                    del pert_score_pair, pert_softmax_pair, pert_topk_vals, pert_topk_idx
 
-                    # ---- Softmax-mass perturbation (W_softmax family) ----
-                    # See build_dag.py for the derivation; same formula here.
+                    p_pert_n = p_pert_full[:, :, diag_idx, diag_idx]               # [bt, K, N]
+                    del p_pert_full
+
                     p_orig_R = torch.zeros((bt, N_EXPERTS), dtype=torch.float32, device=device0)
                     p_orig_R.scatter_(-1, sel[:, R, :], routing_weight[:, R, :])
                     p_orig_R = p_orig_R.unsqueeze(1).expand(bt, TOP_K, N_EXPERTS)
 
-                    pert_softmax_all = torch.softmax(pert_score, dim=-1)
-                    pert_topk_idx    = pert_sorted[:, :, :TOP_K]
-                    pert_topk_vals   = torch.gather(pert_softmax_all, dim=-1, index=pert_topk_idx)
-                    pert_topk_vals   = pert_topk_vals / pert_topk_vals.sum(dim=-1, keepdim=True)
-                    p_pert = torch.zeros_like(pert_softmax_all)
-                    p_pert.scatter_(-1, pert_topk_idx, pert_topk_vals)
-                    del pert_softmax_all, pert_topk_idx, pert_topk_vals
-
-                    delta = p_orig_R - p_pert
+                    delta = p_orig_R - p_pert_n                                    # [bt, K, N]
                     wsm_accum       [S, :, R, :].index_add_(0, sel_flat, delta.abs().flatten(0, 1))
                     wsm_sq_accum    [S, :, R, :].index_add_(0, sel_flat, (delta * delta).flatten(0, 1))
                     wsm_signed_accum[S, :, R, :].index_add_(0, sel_flat, (-delta).flatten(0, 1))
 
                     del ln_bar, scores, scores_pos, scores_neg
-                    del pert_score, pert_sorted, pert_rank_of, orig_rank_R
-                    del aarv, in_topk_orig, in_topk_pert, padd, prem
-                    del p_orig_R, p_pert, delta
+                    del p_orig_R, p_pert_n, delta
 
             del full_hooks, after_res1, after_norm2, selected, weighted_out
             del omega, sel, rms_sq, rms_inv, after_norm2_r
-            del orig_score, orig_sorted, orig_rank_of
+            del orig_score
 
         # Free per-rank hooks.
         del hooks
@@ -1144,9 +1130,6 @@ def main():
 
         APS   = (APS_accum  / denom).masked_fill(zero_mask, 0.0)
         ANS   = (ANS_accum  / denom).masked_fill(zero_mask, 0.0)
-        AARV  = (aarv_accum / denom).masked_fill(zero_mask, 0.0)
-        P_add = (padd_accum / denom).masked_fill(zero_mask, 0.0)
-        P_rem = (prem_accum / denom).masked_fill(zero_mask, 0.0)
 
         W_softmax        = (wsm_accum        / denom).masked_fill(zero_mask, 0.0)
         W_softmax_E_sq   = (wsm_sq_accum     / denom).masked_fill(zero_mask, 0.0)
@@ -1163,10 +1146,7 @@ def main():
         torch.save({
             "APS":               APS.cpu(),
             "ANS":               ANS.cpu(),
-            "AARV":              AARV.cpu(),
-            "P_add":             P_add.cpu(),
-            "P_rem":             P_rem.cpu(),
-            "W_softmax":         W_softmax.cpu(),
+            "W_softmax":         W_softmax.cpu(),                 # PRIMARY, Approach 2 pairwise-isolated
             "W_softmax_var":     W_softmax_var.cpu(),
             "W_softmax_signed":  W_softmax_signed.cpu(),
             "act":               act_accum.cpu(),
