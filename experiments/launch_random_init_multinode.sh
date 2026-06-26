@@ -6,17 +6,20 @@
 #SBATCH --gres=gpu:4
 #SBATCH --cpus-per-task=8
 #SBATCH --output=logs/null_multi_%A_%a.log
-#SBATCH --array=0-8
+#SBATCH --array=0-5
 #
-# Multi-node random-init DAG builds for the three big MoE architectures.
-# 3 models x 3 seeds = 9 array tasks. Each task takes 2 GPU nodes (8 GPUs)
-# constrained to piora1,piora2; tasks run sequentially (one wave at a time
-# because only 2 nodes are available for the 2-node allocations).
+# Multi-node random-init DAG builds for the two genuinely multinode-required
+# architectures. 2 models x 3 seeds = 6 array tasks. Each task takes 2 GPU
+# nodes (8 GPUs) constrained to piora1,piora2; tasks run sequentially (one
+# wave at a time because only 2 nodes are available for the 2-node
+# allocations).
+#
+# Mixtral-8x22B is handled by launch_random_init_mixtral22b.sh instead
+# (single-node, fits on 4 A100 80GB) -- avoids the 2-node overhead.
 #
 # Array layout: ARRAY_IDX = MODEL_IDX * N_SEEDS + SEED
-#   0,1,2  -> mixtral-8x22b seeds 0,1,2
-#   3,4,5  -> deepseek-v2 seeds 0,1,2
-#   6,7,8  -> qwen3-235b-a22b seeds 0,1,2
+#   0,1,2  -> deepseek-v2 seeds 0,1,2
+#   3,4,5  -> qwen3-235b-a22b seeds 0,1,2
 #
 # Submit:
 #   sbatch experiments/launch_random_init_multinode.sh
@@ -24,8 +27,8 @@
 # Output:
 #   ${result_path}/circuits/dag_<model>_c4_rand_s{0,1,2}.pt
 #
-# After all 9 tasks land:
-#   for M in mixtral-8x22b deepseek-v2 qwen3-235b-a22b; do
+# After all 6 tasks land:
+#   for M in deepseek-v2 qwen3-235b-a22b; do
 #       python experiments/check_random_init_pilot.py --model "$M"
 #   done
 
@@ -69,7 +72,7 @@ export NCCL_IB_DISABLE=0
 export NCCL_DEBUG=${NCCL_DEBUG:-WARN}
 
 # 3 models x 3 seeds.
-MODELS=(mixtral-8x22b deepseek-v2 qwen3-235b-a22b)
+MODELS=(deepseek-v2 qwen3-235b-a22b)
 N_SEEDS=3
 ARRAY_IDX=${SLURM_ARRAY_TASK_ID:-0}
 MODEL_IDX=$(( ARRAY_IDX / N_SEEDS ))
