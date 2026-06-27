@@ -280,9 +280,11 @@ def _save_ridge(rows: list[dict], kind: str, task: str,
             for sp in ("top", "right"):
                 ax.spines[sp].set_visible(False)
             ax.grid(axis="y", linestyle="--", linewidth=0.4, alpha=0.45)
-            if ci == 0:
+            # Model name as ylabel on the RIGHT side of the log-y panel.
+            if ci == 1:
+                ax.yaxis.set_label_position("right")
                 ax.set_ylabel(model, rotation=90, ha="center", va="center",
-                              fontsize=12, labelpad=8)
+                              fontsize=12, labelpad=10, fontweight="bold")
             # Per-graph Q-quantile threshold markers on edges-ridge only.
             if kind == "edges":
                 for Q, t in model_thresholds[model].items():
@@ -290,17 +292,21 @@ def _save_ridge(rows: list[dict], kind: str, task: str,
                         ax.axvline(t, color="#c0392b", linestyle="--",
                                    linewidth=0.9, alpha=0.7)
 
-    # Column headers (top row).
-    axes[0, 0].set_title("linear scale", fontsize=12, pad=4)
-    axes[0, 1].set_title("log scale",    fontsize=12, pad=4)
+    # Column headers (top row), bold.
+    axes[0, 0].set_title("linear scale", fontsize=12, pad=4, fontweight="bold")
+    axes[0, 1].set_title("log scale",    fontsize=12, pad=4, fontweight="bold")
 
-    # Bottom-row x-axis label on both columns (shared x).
+    # Bottom-row x-axis label on both columns (shared x), bold.
     for ci in (0, 1):
-        axes[-1, ci].set_xlabel(xlabel, fontsize=13, labelpad=6)
+        axes[-1, ci].set_xlabel(xlabel, fontsize=13, labelpad=6,
+                                fontweight="bold")
 
-    fig.supylabel(ylabel, fontsize=13, x=0.008)
+    # Shared y-axis meaning label, moved rightward (closer to the panels) and
+    # bold for emphasis.
+    fig.supylabel(ylabel, fontsize=13, x=0.028, fontweight="bold")
 
-    fig.tight_layout(rect=(0.015, 0, 1, 1))
+    # Reserve right-side margin for the per-row model labels.
+    fig.tight_layout(rect=(0.035, 0, 0.96, 1))
     out_path = out_dir / fname
     fig.savefig(out_path, dpi=dpi)
     plt.close(fig)
