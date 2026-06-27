@@ -187,13 +187,11 @@ def _save_per_model_panels(rows: list[dict], kind: str, task: str,
 
 def _save_ridge(rows: list[dict], kind: str, task: str,
                 out_dir: Path, dpi: int) -> Path:
-    """One panel per model, log-x histogram of the chosen quantity.
-
-    Shared x-axis (global [min, max] across all 8 models) so a vertical
-    line at a given edge magnitude corresponds to the same value in every
-    row. Shared y-axis (fraction of edges per bin) so peak heights compare
-    directly across models -- narrow / heavy-tailed distributions stand
-    out as taller bars. Vertical model labels, no figure title; the red
+    """Two-column ridge plot: one row per model; left column = linear y,
+    right column = log y. Both columns plot the same histogram with the
+    same shared log-x; the two y-scales let the reader read both the bulk
+    shape (linear) and the heavy tail / rare super-experts (log) without
+    flipping figures. Vertical model labels, no figure title. The red
     dashed lines on the edges-ridge mark each model's per-graph Q-quantile
     thresholds (Q in {0.9, 0.99, 0.999}).
     """
@@ -250,47 +248,59 @@ def _save_ridge(rows: list[dict], kind: str, task: str,
     BAR_COLOR = "#1f77b4"
     EDGE_COLOR = "#0e3d63"
 
-    fig, axes = plt.subplots(len(panel_data), 1,
-                             figsize=(11, 1.55 * len(panel_data) + 0.9),
-                             sharex=True, sharey=True)
-    if len(panel_data) == 1:
-        axes = [axes]
+    n_rows = len(panel_data)
+    lo_y = y_min_positive * 0.5 if np.isfinite(y_min_positive) else 1e-5
+    fig, axes = plt.subplots(n_rows, 2,
+                             figsize=(13, 1.55 * n_rows + 1.0),
+                             sharex=True, sharey=False)
+    if n_rows == 1:
+        axes = axes.reshape(1, 2)
 
-    for ax, (model, frac) in zip(axes, panel_data):
-        ax.stairs(frac, edges=bins, fill=True,
-                  facecolor=BAR_COLOR, edgecolor=EDGE_COLOR,
-                  linewidth=0.6, alpha=0.95)
+    # Per-model row thresholds for the edges-ridge red markers.
+    model_thresholds: dict[str, dict] = {
+        rr["model"]: rr["thresholds"] for rr in rows
+    }
 
-        ax.set_xscale("log")
-        ax.set_xlim(global_min, global_max)
-        # Log y in both ridge types. For the mass ridge, it keeps single
-        # super-experts (frac = 1/V) visible next to a 3-4 orders of magnitude
-        # larger bulk. For the edges ridge, it exposes the shape of the
-        # heavy tail that motivates per-graph Q-quantile thresholding.
-        ax.set_yscale("log")
-        lo_y = y_min_positive * 0.5 if np.isfinite(y_min_positive) else 1e-5
-        ax.set_ylim(lo_y, y_max_disp)
-        ax.tick_params(axis="x", which="major", labelsize=11)
-        ax.tick_params(axis="x", which="minor", labelsize=0, length=2)
-        ax.tick_params(axis="y", which="major", labelsize=10)
-        ax.set_ylabel(model, rotation=90, ha="center", va="center",
-                      fontsize=13, labelpad=10)
-        for sp in ("top", "right"):
-            ax.spines[sp].set_visible(False)
-        ax.grid(axis="y", linestyle="--", linewidth=0.4, alpha=0.45)
+    for ri, (model, frac) in enumerate(panel_data):
+        for ci, scale in enumerate(("linear", "log")):
+            ax = axes[ri, ci]
+            ax.stairs(frac, edges=bins, fill=True,
+                      facecolor=BAR_COLOR, edgecolor=EDGE_COLOR,
+                      linewidth=0.6, alpha=0.95)
+            ax.set_xscale("log")
+            ax.set_xlim(global_min, global_max)
+            if scale == "linear":
+                ax.set_ylim(0, y_max_disp)
+            else:
+                ax.set_yscale("log")
+                ax.set_ylim(lo_y, y_max_disp)
+            ax.tick_params(axis="x", which="major", labelsize=10)
+            ax.tick_params(axis="x", which="minor", labelsize=0, length=2)
+            ax.tick_params(axis="y", which="major", labelsize=9)
+            for sp in ("top", "right"):
+                ax.spines[sp].set_visible(False)
+            ax.grid(axis="y", linestyle="--", linewidth=0.4, alpha=0.45)
+            if ci == 0:
+                ax.set_ylabel(model, rotation=90, ha="center", va="center",
+                              fontsize=12, labelpad=8)
+            # Per-graph Q-quantile threshold markers on edges-ridge only.
+            if kind == "edges":
+                for Q, t in model_thresholds[model].items():
+                    if t > 0:
+                        ax.axvline(t, color="#c0392b", linestyle="--",
+                                   linewidth=0.9, alpha=0.7)
 
-        # Per-graph Q-quantile thresholds on the edges ridge only.
-        if kind == "edges":
-            r = next(rr for rr in rows if rr["model"] == model)
-            for Q, t in r["thresholds"].items():
-                if t > 0:
-                    ax.axvline(t, color="#c0392b", linestyle="--",
-                               linewidth=0.9, alpha=0.7)
+    # Column headers (top row).
+    axes[0, 0].set_title("linear scale", fontsize=12, pad=4)
+    axes[0, 1].set_title("log scale",    fontsize=12, pad=4)
 
-    axes[-1].set_xlabel(xlabel, fontsize=14, labelpad=6)
-    fig.supylabel(ylabel, fontsize=14, x=0.012)
+    # Bottom-row x-axis label on both columns (shared x).
+    for ci in (0, 1):
+        axes[-1, ci].set_xlabel(xlabel, fontsize=13, labelpad=6)
 
-    fig.tight_layout(rect=(0.02, 0, 1, 1))
+    fig.supylabel(ylabel, fontsize=13, x=0.008)
+
+    fig.tight_layout(rect=(0.015, 0, 1, 1))
     out_path = out_dir / fname
     fig.savefig(out_path, dpi=dpi)
     plt.close(fig)
