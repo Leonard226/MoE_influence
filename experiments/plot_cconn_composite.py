@@ -84,8 +84,8 @@ def _panel(ax, C: np.ndarray, keep_mask: np.ndarray, N: int):
     tri_idx = np.tril_indices(V_eff, k=-1)
     display[tri_idx] = np.nan
 
-    # viridis_r: bright = low C = tightly coupled = more connected.
-    cmap = plt.get_cmap("viridis_r").copy()
+    # viridis: bright = high C = decoupled; dark = low C = tightly coupled.
+    cmap = plt.get_cmap("viridis").copy()
     cmap.set_bad("#d8d8d8")
     im = ax.imshow(display, cmap=cmap, vmin=0.0, vmax=1.0,
                    interpolation="nearest", rasterized=True)
@@ -123,8 +123,8 @@ def _render_grid(models: list[str], cache: dict,
         n_rows, n_cols + 1,
         width_ratios=[1.0] * n_cols + [0.07],   # very thin colorbar column
         wspace=0.05, hspace=0.05,
-        left=0.085, right=0.965,
-        top=1.0 - 0.30 / fig_h,   # ~0.3 inch top margin (just enough for Q labels)
+        left=0.085, right=0.94,    # 6% right margin so colorbar tick labels aren't clipped
+        top=1.0 - 0.30 / fig_h,    # ~0.3 inch top margin (just enough for Q labels)
         bottom=0.02,
     )
 
@@ -140,13 +140,11 @@ def _render_grid(models: list[str], cache: dict,
                 ax.set_yticks([])
             else:
                 last_im = _panel(ax, C, keep_mask, stats["N"])
-                ax.text(0.98, 0.04,
-                        f"V$_{{\\mathrm{{eff}}}}$={stats['V_eff']}",
-                        ha="right", va="bottom",
+                ax.text(0.02, 0.04,
+                        f"$V_Q = {stats['V_eff']}$",
+                        ha="left", va="bottom",
                         transform=ax.transAxes,
-                        fontsize=7, color="white",
-                        bbox=dict(facecolor="black", alpha=0.45,
-                                  edgecolor="none", pad=1.2))
+                        fontsize=7, color="black")
             if ri == 0:
                 ax.set_title(f"$Q = {q}$", fontsize=10, pad=1)
             if ci == 0:
