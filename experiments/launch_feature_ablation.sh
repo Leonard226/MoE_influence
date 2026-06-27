@@ -1,6 +1,6 @@
 #!/bin/bash
 #SBATCH --array=0-223
-#SBATCH --nodelist=piora1,piora2,piora3,piora4
+#SBATCH --nodelist=piora3,piora4,piora7,piora8
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=4
 #SBATCH --job-name="loo-ablate"
@@ -21,13 +21,13 @@
 #   load_norm = log_max
 #
 # Parallelism layout:
-#   - 224 array tasks. piora1-4 ~ 32 cores each, 4 cpus-per-task
-#     -> ~32 concurrent slots. ~7 waves needed.
+#   - 224 array tasks. piora3,4,7,8 are the 4 CPU nodes; ~32 cores each,
+#     4 cpus-per-task -> ~32 concurrent slots, ~7 waves needed.
 #   - OMP/MKL/OPENBLAS = 4 so scipy + POT use all 4 cores per task (same
 #     reasoning as the alpha-beta sweep launcher).
 #
-# piora1-4 currently idle: GPU random-init builds finished, headline FGW
-# sweep finished. The null-baseline sweep occupies piora5-8 in parallel.
+# piora1,2 are the A100 nodes -- intentionally excluded so the LOO sweep
+# doesn't burn GPU node time on a CPU-bound workload.
 #
 # Submit:
 #   sbatch experiments/launch_feature_ablation.sh
