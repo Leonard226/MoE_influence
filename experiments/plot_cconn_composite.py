@@ -1,19 +1,34 @@
-"""Composite C_conn heatmap figure: 8 models (rows) x 3 Q values (columns)
-in a single PDF.
+"""Composite C_conn heatmap figures for the routing-DAG paper.
 
-Renders all 24 panels in one matplotlib figure so the LaTeX side just
-includes one PDF. Model names are vertical labels at the left of each row;
-one colorbar is drawn per row on the right (all panels share the same
-[0, 1] colour scale, but per-row placement reads more cleanly than a
-single global bar).
+Renders 8 models x 3 Q values in matplotlib subplots. By default writes ONE
+PDF (8 rows). With --split, writes TWO PDFs of 4 rows each so each fits
+comfortably on one page.
+
+Row ordering keeps within-family models adjacent:
+  1. Mixtral-8x7B     (family Mixtral)
+  2. Mixtral-8x22B    (family Mixtral)
+  3. DeepSeek-V2-Lite (family DeepSeek)
+  4. DeepSeek-V2      (family DeepSeek)
+  5. Qwen3-30B-A3B    (family Qwen3)
+  6. Qwen3-235B-A22B  (family Qwen3)
+  7. OLMoE            (singleton)
+  8. Phi-3.5-MoE      (singleton)
+
+Colour: viridis_r so bright = small C = tightly coupled = more connected,
+dark = large C = decoupled. One thin colorbar per row on the right.
 
 Reuses _compute_one and constants from inspect_conn_costs.py.
 
 Usage (on piora, where the DAGs live):
+    # single 8-row PDF
     python experiments/plot_cconn_composite.py --task c4 --gamma 0.5
+    # split into two 4-row PDFs (for paper layout)
+    python experiments/plot_cconn_composite.py --task c4 --gamma 0.5 --split
 
 Output:
     ${result_path}/circuits/conn_inspection/C_conn_composite_<task>_g<gamma>.pdf
+    or (with --split):
+    ${result_path}/circuits/conn_inspection/C_conn_composite_<task>_g<gamma>_part{1,2}.pdf
 """
 from __future__ import annotations
 
@@ -29,32 +44,32 @@ sys.path.insert(0, str(ROOT))
 from experiments.inspect_conn_costs import _compute_one, DEFAULT_OUT_DIR
 
 
-# Rows: model order by ascending total expert count.
+# Row order: within-family models adjacent, then singletons.
 MODELS_ORDERED = [
     "mixtral-8x7b",
     "mixtral-8x22b",
-    "phi-3.5-moe",
-    "olmoe",
     "deepseek-v2-lite",
-    "qwen3-30b-a3b",
     "deepseek-v2",
+    "qwen3-30b-a3b",
     "qwen3-235b-a22b",
+    "olmoe",
+    "phi-3.5-moe",
 ]
 MODEL_LABELS = {
     "mixtral-8x7b":     "Mixtral-8x7B",
     "mixtral-8x22b":    "Mixtral-8x22B",
-    "phi-3.5-moe":      "Phi-3.5-MoE",
-    "olmoe":            "OLMoE",
     "deepseek-v2-lite": "DeepSeek-V2-Lite",
-    "qwen3-30b-a3b":    "Qwen3-30B-A3B",
     "deepseek-v2":      "DeepSeek-V2",
+    "qwen3-30b-a3b":    "Qwen3-30B-A3B",
     "qwen3-235b-a22b":  "Qwen3-235B-A22B",
+    "olmoe":            "OLMoE",
+    "phi-3.5-moe":      "Phi-3.5-MoE",
 }
 QUANTILES = [0.9, 0.99, 0.999]
 
 
-def _panel(ax, C: np.ndarray, keep_mask: np.ndarray, L: int, N: int):
-    """Render one upper-triangular heatmap into ax. Returns the AxesImage."""
+def _panel(ax, C: np.ndarray, keep_mask: np.ndarray, N: int):
+    """Render one upper-triangular heatmap into ax. Returns AxesImage."""
     import matplotlib.pyplot as plt
     if keep_mask is None or int(keep_mask.sum()) < 2:
         ax.text(0.5, 0.5, "(empty)", ha="center", va="center",
@@ -69,12 +84,13 @@ def _panel(ax, C: np.ndarray, keep_mask: np.ndarray, L: int, N: int):
     tri_idx = np.tril_indices(V_eff, k=-1)
     display[tri_idx] = np.nan
 
-    cmap = plt.get_cmap("viridis").copy()
+    # viridis_r: bright = low C = tightly coupled = more connected.
+    cmap = plt.get_cmap("viridis_r").copy()
     cmap.set_bad("#d8d8d8")
     im = ax.imshow(display, cmap=cmap, vmin=0.0, vmax=1.0,
                    interpolation="nearest", rasterized=True)
 
-    # Layer boundary markers (white lines on the panel).
+    # Layer boundary markers.
     original_layer = keep_idx // N
     diff_idx = np.where(np.diff(original_layer) > 0)[0]
     for b in diff_idx + 0.5:
@@ -86,6 +102,73 @@ def _panel(ax, C: np.ndarray, keep_mask: np.ndarray, L: int, N: int):
     return im
 
 
+def _render_grid(models: list[str], cache: dict,
+                 panel_size: float, gamma: float,
+                 out_path: Path, dpi: int) -> None:
+    """Render an n_rows x 3 composite into out_path. Models is the row order."""
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    from matplotlib.gridspec import GridSpec
+
+    n_rows = len(models)
+    n_cols = len(QUANTILES)
+
+    # Figure dimensions. Very small top margin since there's no figure title.
+    fig_w = panel_size * (n_cols + 0.15) + 0.7   # +0.7 for vertical row labels
+    fig_h = panel_size * n_rows + 0.35           # +0.35 for column titles only
+
+    fig = plt.figure(figsize=(fig_w, fig_h))
+    gs = GridSpec(
+        n_rows, n_cols + 1,
+        width_ratios=[1.0] * n_cols + [0.07],   # very thin colorbar column
+        wspace=0.05, hspace=0.05,
+        left=0.085, right=0.965,
+        top=1.0 - 0.30 / fig_h,   # ~0.3 inch top margin (just enough for Q labels)
+        bottom=0.02,
+    )
+
+    for ri, m in enumerate(models):
+        last_im = None
+        for ci, q in enumerate(QUANTILES):
+            ax = fig.add_subplot(gs[ri, ci])
+            stats, C, keep_mask = cache[(m, q)]
+            if stats.get("missing"):
+                ax.text(0.5, 0.5, "(missing)", ha="center", va="center",
+                        transform=ax.transAxes, fontsize=8, color="gray")
+                ax.set_xticks([])
+                ax.set_yticks([])
+            else:
+                last_im = _panel(ax, C, keep_mask, stats["N"])
+                ax.text(0.98, 0.04,
+                        f"V$_{{\\mathrm{{eff}}}}$={stats['V_eff']}",
+                        ha="right", va="bottom",
+                        transform=ax.transAxes,
+                        fontsize=7, color="white",
+                        bbox=dict(facecolor="black", alpha=0.45,
+                                  edgecolor="none", pad=1.2))
+            if ri == 0:
+                ax.set_title(f"$Q = {q}$", fontsize=10, pad=1)
+            if ci == 0:
+                ax.set_ylabel(MODEL_LABELS[m], fontsize=10, rotation=90,
+                              ha="center", va="center", labelpad=4)
+        # Thin per-row colorbar.
+        cax = fig.add_subplot(gs[ri, n_cols])
+        if last_im is not None:
+            cbar = fig.colorbar(last_im, cax=cax)
+            cbar.ax.tick_params(labelsize=6)
+            # Only label the first row's colorbar to reduce text clutter.
+            if ri == 0:
+                cbar.set_label(r"$C_{\mathrm{conn}}^{\gamma=" + f"{gamma:g}" + r"}$",
+                               fontsize=7, labelpad=1)
+            else:
+                cbar.set_label("")
+
+    fig.savefig(out_path, dpi=dpi)
+    plt.close(fig)
+    print(f"Saved {out_path}")
+
+
 def main():
     p = argparse.ArgumentParser(description=__doc__,
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -93,16 +176,15 @@ def main():
     p.add_argument("--gamma", type=float, default=0.5)
     p.add_argument("--eps", type=float, default=1e-12)
     p.add_argument("--panel-size", type=float, default=1.7,
-                   help="Per-panel width/height in inches (default 1.7).")
+                   help="Per-panel side in inches (default 1.7).")
+    p.add_argument("--split", action="store_true",
+                   help="Write two PDFs of 4 rows each instead of one 8-row PDF.")
     p.add_argument("--out-dir", default=str(DEFAULT_OUT_DIR))
     p.add_argument("--dpi", type=int, default=200)
     args = p.parse_args()
 
     out_dir = Path(args.out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
-
-    n_rows = len(MODELS_ORDERED)
-    n_cols = len(QUANTILES)
 
     # Compute every (model, Q) panel up front.
     cache: dict[tuple[str, float], tuple] = {}
@@ -114,67 +196,16 @@ def main():
             )
             cache[(m, q)] = (stats, C, keep_mask)
 
-    # GridSpec layout: per row, 3 panels + small gap + thin colorbar column.
-    # Width ratios: 1 1 1 0.15 (colorbar column).
-    import matplotlib
-    matplotlib.use("Agg")
-    import matplotlib.pyplot as plt
-    from matplotlib.gridspec import GridSpec
-
-    # Figure size: extra left margin for vertical row labels, no right margin
-    # needed since the colorbars sit inside the gridspec.
-    fig_w = args.panel_size * (n_cols + 0.30) + 0.9   # +0.9 inch for left labels
-    fig_h = args.panel_size * n_rows + 0.6            # +0.6 inch for column titles
-    fig = plt.figure(figsize=(fig_w, fig_h))
-    gs = GridSpec(
-        n_rows, n_cols + 1,
-        width_ratios=[1.0] * n_cols + [0.15],
-        wspace=0.06, hspace=0.06,
-        left=0.10, right=0.97, top=0.94, bottom=0.03,
-    )
-
-    im_per_row: list = []
-    for ri, m in enumerate(MODELS_ORDERED):
-        for ci, q in enumerate(QUANTILES):
-            ax = fig.add_subplot(gs[ri, ci])
-            stats, C, keep_mask = cache[(m, q)]
-            if stats.get("missing"):
-                ax.text(0.5, 0.5, "(missing)", ha="center", va="center",
-                        transform=ax.transAxes, fontsize=8, color="gray")
-                ax.set_xticks([])
-                ax.set_yticks([])
-                im_local = None
-            else:
-                im_local = _panel(ax, C, keep_mask, stats["L"], stats["N"])
-                # V_eff annotation in the lower-right of each panel.
-                ax.text(0.98, 0.04,
-                        f"V$_{{\\mathrm{{eff}}}}$={stats['V_eff']}",
-                        ha="right", va="bottom",
-                        transform=ax.transAxes,
-                        fontsize=7, color="white",
-                        bbox=dict(facecolor="black", alpha=0.45,
-                                  edgecolor="none", pad=1.2))
-            # Column titles on the top row.
-            if ri == 0:
-                ax.set_title(f"$Q = {q}$", fontsize=11, pad=4)
-            # Vertical row label on the leftmost panel.
-            if ci == 0:
-                ax.set_ylabel(MODEL_LABELS[m], fontsize=10, rotation=90,
-                              ha="center", va="center", labelpad=6)
-            if im_local is not None and ci == n_cols - 1:
-                im_per_row.append(im_local)
-        # Per-row colorbar in the right column of this row.
-        cax = fig.add_subplot(gs[ri, n_cols])
-        if im_per_row and im_per_row[-1] is not None:
-            cbar = fig.colorbar(im_per_row[-1], cax=cax)
-            cbar.ax.tick_params(labelsize=7)
-            cbar.set_label(r"$C_{\mathrm{conn}}^{\gamma=" + f"{args.gamma:g}" + r"}$",
-                           fontsize=8, labelpad=2)
-
-    out_path = out_dir / f"C_conn_composite_{args.task}_g{args.gamma:g}.pdf"
-    fig.savefig(out_path, dpi=args.dpi)
-    plt.close(fig)
-    print(f"\nSaved {out_path}")
+    if args.split:
+        part1 = MODELS_ORDERED[:4]   # Mixtral + DeepSeek
+        part2 = MODELS_ORDERED[4:]   # Qwen3 + singletons
+        out1 = out_dir / f"C_conn_composite_{args.task}_g{args.gamma:g}_part1.pdf"
+        out2 = out_dir / f"C_conn_composite_{args.task}_g{args.gamma:g}_part2.pdf"
+        _render_grid(part1, cache, args.panel_size, args.gamma, out1, args.dpi)
+        _render_grid(part2, cache, args.panel_size, args.gamma, out2, args.dpi)
+    else:
+        out = out_dir / f"C_conn_composite_{args.task}_g{args.gamma:g}.pdf"
+        _render_grid(MODELS_ORDERED, cache, args.panel_size, args.gamma, out, args.dpi)
 
 
 if __name__ == "__main__":
