@@ -232,11 +232,10 @@ def _print_verbose_one(stats: dict, phi_pairs: np.ndarray,
 def _save_heatmap(C: np.ndarray, keep_mask: np.ndarray, V_eff: int,
                   model: str, task: str, Q: float, gamma: float,
                   L: int, N: int, out_dir: Path, dpi: int
-                  ) -> tuple[Path | None, Path | None]:
-    """Save TWO heatmap PDFs per (model, Q):
-       1. C_conn^gamma alone (the pure path-sum cost).
-       2. C_mixed = 0.5 * |Delta depth| + 0.5 * C_conn^gamma  (what FGW sees).
-    Returns (path_conn, path_mixed), each None if V_eff < 2."""
+                  ) -> Path | None:
+    """Save one heatmap PDF per (model, Q) of the C_conn^gamma cost --
+    the pure Katz path-sum cost that FGW receives under beta = 0.
+    Returns the output path, or None if V_eff < 2."""
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
@@ -244,67 +243,47 @@ def _save_heatmap(C: np.ndarray, keep_mask: np.ndarray, V_eff: int,
     out_dir.mkdir(parents=True, exist_ok=True)
     V = C.shape[0]
     if V_eff < 2:
-        return None, None
+        return None
 
     # Shrink to the V_eff x V_eff sub-matrix that FGW actually receives.
     keep_idx = np.where(keep_mask)[0]
     C_eff = C[np.ix_(keep_idx, keep_idx)]
 
-    # |Delta depth| over kept experts and the mixed cost.
-    original_layer = keep_idx // N                              # (V_eff,)
-    depth_kept = original_layer.astype(np.float64) / max(L - 1, 1)
-    delta_depth = np.abs(depth_kept[:, None] - depth_kept[None, :])
-    C_mixed = 0.5 * delta_depth + 0.5 * C_eff
-    np.fill_diagonal(C_mixed, 0.0)
-
     # Layer boundaries in the reduced indexing (non-uniform after isolation filter).
+    original_layer = keep_idx // N                              # (V_eff,)
     diff_idx = np.where(np.diff(original_layer) > 0)[0]
     boundary_positions = diff_idx + 0.5
     layer_kept = np.bincount(original_layer, minlength=L)
     n_layers_with_any = int((layer_kept > 0).sum())
 
-    # Upper-triangular display: NaN-out the lower triangle once, reuse for both.
+    # Upper-triangular display: NaN-out the lower triangle.
     tri_idx = np.tril_indices(V_eff, k=-1)
 
     gamma_suffix = "" if gamma == 1.0 else f"_g{gamma:g}"
 
-    def _render(M: np.ndarray, kind: str, colorbar_label: str,
-                title_extra: str) -> Path:
-        display = M.copy()
-        display[tri_idx] = np.nan
-        fig, ax = plt.subplots(figsize=(14, 12))
-        cmap = plt.get_cmap("viridis").copy()
-        cmap.set_bad("#d8d8d8")
-        im = ax.imshow(display, cmap=cmap, vmin=0.0, vmax=1.0,
-                       interpolation="nearest", rasterized=True)
-        fig.colorbar(im, ax=ax, label=colorbar_label)
-        for b in boundary_positions:
-            ax.axvline(x=b, color="white", linewidth=0.4, alpha=0.55)
-            ax.axhline(y=b, color="white", linewidth=0.4, alpha=0.55)
-        ax.set_title(
-            f"{kind}  ({model}/{task})  Q={Q}  gamma={gamma}\n"
-            f"V={V}, V_eff={V_eff} ({100*V_eff/V:.1f}% kept), "
-            f"L={L} layers ({n_layers_with_any} non-empty){title_extra}"
-        )
-        ax.set_xlabel("expert j (receiver)")
-        ax.set_ylabel("expert i (sender)")
-        out_path = out_dir / f"{kind}_{model}_{task}_Q{Q:g}{gamma_suffix}.pdf"
-        fig.tight_layout()
-        fig.savefig(out_path, dpi=dpi)
-        plt.close(fig)
-        return out_path
-
-    path_conn = _render(
-        C_eff, "C_conn",
-        "C_conn  (0 = strong coupling, 1 = unreachable)",
-        title_extra=""
+    display = C_eff.copy()
+    display[tri_idx] = np.nan
+    fig, ax = plt.subplots(figsize=(14, 12))
+    cmap = plt.get_cmap("viridis").copy()
+    cmap.set_bad("#d8d8d8")
+    im = ax.imshow(display, cmap=cmap, vmin=0.0, vmax=1.0,
+                   interpolation="nearest", rasterized=True)
+    fig.colorbar(im, ax=ax, label="C_conn  (0 = strong coupling, 1 = unreachable)")
+    for b in boundary_positions:
+        ax.axvline(x=b, color="white", linewidth=0.4, alpha=0.55)
+        ax.axhline(y=b, color="white", linewidth=0.4, alpha=0.55)
+    ax.set_title(
+        f"C_conn  ({model}/{task})  Q={Q}  gamma={gamma}\n"
+        f"V={V}, V_eff={V_eff} ({100*V_eff/V:.1f}% kept), "
+        f"L={L} layers ({n_layers_with_any} non-empty)"
     )
-    path_mixed = _render(
-        C_mixed, "C_mixed",
-        "C_mixed = 0.5 |Δdepth| + 0.5 C_conn",
-        title_extra="    (what FGW receives)"
-    )
-    return path_conn, path_mixed
+    ax.set_xlabel("expert j (receiver)")
+    ax.set_ylabel("expert i (sender)")
+    out_path = out_dir / f"C_conn_{model}_{task}_Q{Q:g}{gamma_suffix}.pdf"
+    fig.tight_layout()
+    fig.savefig(out_path, dpi=dpi)
+    plt.close(fig)
+    return out_path
 
 
 # -------------------- entry point ------------------------------------------
@@ -328,9 +307,10 @@ def main():
                              "graphs (e.g. gamma=0.5 halves contribution per "
                              "extra hop).")
     parser.add_argument("--heatmap", action="store_true",
-                        help="Save TWO heatmap PDFs per (model, Q): C_conn^gamma "
-                             "alone and the mixed C = 0.5|Δdepth| + 0.5 C_conn "
-                             "that FGW actually receives.")
+                        help="Save one heatmap PDF per (model, Q) of the "
+                             "C_conn^gamma cost that FGW receives "
+                             "(beta = 0 is hardcoded in fgw.py, so no depth "
+                             "mixing).")
     parser.add_argument("--out-dir", default=str(DEFAULT_OUT_DIR),
                         help="Directory for heatmap PDFs.")
     parser.add_argument("--dpi", type=int, default=200,
@@ -353,7 +333,7 @@ def main():
             if not args.all_models:
                 _print_verbose_one(stats, phi_pairs, c_pairs, args.eps)
             if args.heatmap and C is not None:
-                p_conn, p_mixed = _save_heatmap(
+                p_conn = _save_heatmap(
                     C, keep_mask, stats["V_eff"],
                     model, args.task, Q, args.gamma,
                     stats["L"], stats["N"], out_dir, args.dpi,
@@ -363,7 +343,6 @@ def main():
                           f"{model}/{args.task} Q={Q}")
                 else:
                     print(f"  C_conn  -> {p_conn}")
-                    print(f"  C_mixed -> {p_mixed}")
             del C, keep_mask, phi_pairs, c_pairs
 
     if args.all_models:
