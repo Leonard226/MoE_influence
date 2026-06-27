@@ -187,10 +187,16 @@ def _save_per_model_panels(rows: list[dict], kind: str, task: str,
 
 def _save_ridge(rows: list[dict], kind: str, task: str,
                 out_dir: Path, dpi: int) -> Path:
-    """Ridge plot: one narrow panel per model, all sharing the x-axis (log).
-    Each panel autoscales its own y so the shape of each distribution reads
-    clearly without 8-way overlap. Y-axis is fraction of edges per bin (no
-    bin-width division, so heights are directly interpretable on log x)."""
+    """One panel per model, log-x histogram of the chosen quantity.
+
+    Shared y-axis (fraction of edges per bin) so peak heights compare
+    directly across models -- narrow / heavy-tailed distributions stand
+    out as taller bars. Per-panel x-axis is clipped to the model's own
+    data range so there's no empty space at the ends. Single restrained
+    colour, vertical model labels, no figure title; the red dashed lines
+    on the edges-ridge mark each model's per-graph Q-quantile thresholds
+    (Q in {0.9, 0.99, 0.999}).
+    """
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
@@ -203,58 +209,75 @@ def _save_ridge(rows: list[dict], kind: str, task: str,
 
     if kind == "edges":
         get_data = lambda r: r["edges"]
-        xlabel = "|W|  (forward, nonzero edges only; log-scale)"
-        title = (f"Forward edge-weight distribution per model "
-                 f"(task = {task})")
+        xlabel = "Edge weight magnitude (log-scale)"
         fname = f"edge_weights_ridge_{task}.pdf"
     else:
         get_data = lambda r: r["out_mass"][r["out_mass"] > 0]
-        xlabel = "outgoing mass per expert  (log-scale)"
-        title = (f"Per-expert outgoing-mass distribution per model "
-                 f"(task = {task})")
+        xlabel = "Outgoing strength per expert (log-scale)"
         fname = f"outgoing_mass_ridge_{task}.pdf"
 
     arrays = [(r["model"], get_data(r)) for r in rows]
     arrays = [(m, a) for m, a in arrays if len(a) > 0]
     if not arrays:
         return out_dir / fname
-    global_min = min(a.min() for _, a in arrays)
-    global_max = max(a.max() for _, a in arrays)
-    bins = np.geomspace(global_min, global_max, 100)
 
-    base_colors = plt.cm.tab10(np.linspace(0, 1, len(rows)))
-    model_color = {r["model"]: c for r, c in zip(rows, base_colors)}
-
-    fig, axes = plt.subplots(len(arrays), 1,
-                             figsize=(14, 1.3 * len(arrays) + 1),
-                             sharex=True)
-    if len(arrays) == 1:
-        axes = [axes]
-    for ax, (model, data) in zip(axes, arrays):
-        c = model_color[model]
-        # Fraction of edges per bin: count / total. Directly interpretable.
+    # Per-panel bins and fractions; keep the y_max so we can share the y-axis.
+    N_BINS = 70
+    panel_data: list[tuple[str, np.ndarray, np.ndarray, float, float]] = []
+    y_max = 0.0
+    for model, data in arrays:
+        lo, hi = float(data.min()), float(data.max())
+        bins = np.geomspace(lo, hi, N_BINS)
         counts, _ = np.histogram(data, bins=bins)
-        frac = counts / counts.sum()
-        bin_centres = np.sqrt(bins[:-1] * bins[1:])     # geometric centres
-        ax.fill_between(bin_centres, 0, frac, step="mid",
-                        facecolor=c, edgecolor=c, linewidth=1.2, alpha=0.85)
-        ax.set_ylabel(model, rotation=0, ha="right", va="center",
-                       fontsize=10, labelpad=8)
-        ax.set_yticks([])
-        for sp in ("top", "right", "left"):
+        frac = counts / counts.sum() if counts.sum() else counts.astype(float)
+        panel_data.append((model, bins, frac, lo, hi))
+        if frac.size:
+            y_max = max(y_max, float(frac.max()))
+    # Small headroom above the tallest peak.
+    y_max_disp = y_max * 1.08 if y_max > 0 else 1.0
+
+    # Single restrained colour across all panels: model identity is encoded
+    # by the vertical row label, not by hue.
+    BAR_COLOR = "#3a6d8c"   # muted slate-blue
+    EDGE_COLOR = "#1f3a4d"
+
+    fig, axes = plt.subplots(len(panel_data), 1,
+                             figsize=(11, 1.55 * len(panel_data) + 0.9),
+                             sharey=True)
+    if len(panel_data) == 1:
+        axes = [axes]
+
+    for ax, (model, bins, frac, lo, hi) in zip(axes, panel_data):
+        # Stepped histogram, filled. ax.stairs handles non-uniform log bins.
+        ax.stairs(frac, edges=bins, fill=True,
+                  facecolor=BAR_COLOR, edgecolor=EDGE_COLOR,
+                  linewidth=0.6, alpha=0.95)
+
+        ax.set_xscale("log")
+        ax.set_xlim(lo, hi)            # clip to the model's own data range
+        ax.set_ylim(0, y_max_disp)
+        ax.tick_params(axis="x", which="major", labelsize=11)
+        ax.tick_params(axis="x", which="minor", labelsize=0, length=2)
+        ax.tick_params(axis="y", which="major", labelsize=10)
+        ax.set_ylabel(model, rotation=90, ha="center", va="center",
+                      fontsize=13, labelpad=10)
+        for sp in ("top", "right"):
             ax.spines[sp].set_visible(False)
-        # Show the model's Q-threshold markers if this is the edges ridge.
+        ax.grid(axis="y", linestyle="--", linewidth=0.4, alpha=0.45)
+
+        # Per-graph Q-quantile thresholds on the edges ridge only.
         if kind == "edges":
             r = next(rr for rr in rows if rr["model"] == model)
             for Q, t in r["thresholds"].items():
-                if t > 0:
-                    ax.axvline(t, color="red", linestyle="--",
-                               linewidth=0.7, alpha=0.55)
+                if t > 0 and lo <= t <= hi:
+                    ax.axvline(t, color="#c0392b", linestyle="--",
+                               linewidth=0.9, alpha=0.7)
 
-    axes[-1].set_xscale("log")
-    axes[-1].set_xlabel(xlabel)
-    fig.suptitle(title + "    (y: fraction of edges per bin)", fontsize=13)
-    fig.tight_layout(rect=(0, 0, 1, 0.97))
+    axes[-1].set_xlabel(xlabel, fontsize=14, labelpad=6)
+    # Shared y-axis meaning, written once on the left.
+    fig.supylabel("Fraction of edges per bin", fontsize=14, x=0.012)
+
+    fig.tight_layout(rect=(0.02, 0, 1, 1))
     out_path = out_dir / fname
     fig.savefig(out_path, dpi=dpi)
     plt.close(fig)
