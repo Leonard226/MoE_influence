@@ -232,12 +232,16 @@ def _save_ridge(rows: list[dict], kind: str, task: str,
 
     panel_data: list[tuple[str, np.ndarray]] = []
     y_max = 0.0
+    y_min_positive = float("inf")    # smallest non-zero fraction across all models
     for model, data in arrays:
         counts, _ = np.histogram(data, bins=bins)
         frac = counts / counts.sum() if counts.sum() else counts.astype(float)
         panel_data.append((model, frac))
         if frac.size:
             y_max = max(y_max, float(frac.max()))
+            pos = frac[frac > 0]
+            if pos.size:
+                y_min_positive = min(y_min_positive, float(pos.min()))
     y_max_disp = y_max * 1.08 if y_max > 0 else 1.0
 
     # Single, conservative colour across panels. Model identity is encoded
@@ -259,7 +263,13 @@ def _save_ridge(rows: list[dict], kind: str, task: str,
 
         ax.set_xscale("log")
         ax.set_xlim(global_min, global_max)
-        ax.set_ylim(0, y_max_disp)
+        # Log y in both ridge types. For the mass ridge, it keeps single
+        # super-experts (frac = 1/V) visible next to a 3-4 orders of magnitude
+        # larger bulk. For the edges ridge, it exposes the shape of the
+        # heavy tail that motivates per-graph Q-quantile thresholding.
+        ax.set_yscale("log")
+        lo_y = y_min_positive * 0.5 if np.isfinite(y_min_positive) else 1e-5
+        ax.set_ylim(lo_y, y_max_disp)
         ax.tick_params(axis="x", which="major", labelsize=11)
         ax.tick_params(axis="x", which="minor", labelsize=0, length=2)
         ax.tick_params(axis="y", which="major", labelsize=10)
