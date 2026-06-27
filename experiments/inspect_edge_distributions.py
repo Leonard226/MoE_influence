@@ -17,12 +17,12 @@ This answers questions like:
 
 Outputs (under {result_path}/circuits/distribution_inspection/):
   - console: per-model summary table.
-  - PDF: edge_weights_<task>.pdf      (per-model log-histogram, 8 panels +
+  - PDF: edge_weights_<task>.pdf       (per-model log-histogram, 8 panels +
                                         Q-threshold vertical markers).
-  - PDF: outgoing_mass_<task>.pdf     (per-model log-histogram, 8 panels).
-  - PDF: edge_weights_overlay_<task>.pdf
-                                       (all models in one panel, on log-density
-                                        axes, easy cross-model comparison).
+  - PDF: outgoing_mass_<task>.pdf      (per-model log-histogram, 8 panels).
+  - PDF: edge_weights_ridge_<task>.pdf (one stacked panel per model, shared
+                                        log-x axis, with Q-threshold markers).
+  - PDF: outgoing_mass_ridge_<task>.pdf (same layout, outgoing strength).
 
 Usage:
     python experiments/inspect_edge_distributions.py
@@ -189,13 +189,13 @@ def _save_ridge(rows: list[dict], kind: str, task: str,
                 out_dir: Path, dpi: int) -> Path:
     """One panel per model, log-x histogram of the chosen quantity.
 
-    Shared y-axis (fraction of edges per bin) so peak heights compare
+    Shared x-axis (global [min, max] across all 8 models) so a vertical
+    line at a given edge magnitude corresponds to the same value in every
+    row. Shared y-axis (fraction of edges per bin) so peak heights compare
     directly across models -- narrow / heavy-tailed distributions stand
-    out as taller bars. Per-panel x-axis is clipped to the model's own
-    data range so there's no empty space at the ends. Single restrained
-    colour, vertical model labels, no figure title; the red dashed lines
-    on the edges-ridge mark each model's per-graph Q-quantile thresholds
-    (Q in {0.9, 0.99, 0.999}).
+    out as taller bars. Vertical model labels, no figure title; the red
+    dashed lines on the edges-ridge mark each model's per-graph Q-quantile
+    thresholds (Q in {0.9, 0.99, 0.999}).
     """
     import matplotlib
     matplotlib.use("Agg")
@@ -221,40 +221,42 @@ def _save_ridge(rows: list[dict], kind: str, task: str,
     if not arrays:
         return out_dir / fname
 
-    # Per-panel bins and fractions; keep the y_max so we can share the y-axis.
-    N_BINS = 70
-    panel_data: list[tuple[str, np.ndarray, np.ndarray, float, float]] = []
+    # Shared bins on the global data range so a vertical at x is the same
+    # value across every panel.
+    N_BINS = 100
+    global_min = min(float(a.min()) for _, a in arrays)
+    global_max = max(float(a.max()) for _, a in arrays)
+    bins = np.geomspace(global_min, global_max, N_BINS)
+
+    panel_data: list[tuple[str, np.ndarray]] = []
     y_max = 0.0
     for model, data in arrays:
-        lo, hi = float(data.min()), float(data.max())
-        bins = np.geomspace(lo, hi, N_BINS)
         counts, _ = np.histogram(data, bins=bins)
         frac = counts / counts.sum() if counts.sum() else counts.astype(float)
-        panel_data.append((model, bins, frac, lo, hi))
+        panel_data.append((model, frac))
         if frac.size:
             y_max = max(y_max, float(frac.max()))
-    # Small headroom above the tallest peak.
     y_max_disp = y_max * 1.08 if y_max > 0 else 1.0
 
-    # Single restrained colour across all panels: model identity is encoded
-    # by the vertical row label, not by hue.
-    BAR_COLOR = "#3a6d8c"   # muted slate-blue
-    EDGE_COLOR = "#1f3a4d"
+    # Single, conservative colour across panels. Model identity is encoded
+    # by the vertical row label, not by hue. tab:blue is the matplotlib
+    # default and reads cleanly in print.
+    BAR_COLOR = "#1f77b4"
+    EDGE_COLOR = "#0e3d63"
 
     fig, axes = plt.subplots(len(panel_data), 1,
                              figsize=(11, 1.55 * len(panel_data) + 0.9),
-                             sharey=True)
+                             sharex=True, sharey=True)
     if len(panel_data) == 1:
         axes = [axes]
 
-    for ax, (model, bins, frac, lo, hi) in zip(axes, panel_data):
-        # Stepped histogram, filled. ax.stairs handles non-uniform log bins.
+    for ax, (model, frac) in zip(axes, panel_data):
         ax.stairs(frac, edges=bins, fill=True,
                   facecolor=BAR_COLOR, edgecolor=EDGE_COLOR,
                   linewidth=0.6, alpha=0.95)
 
         ax.set_xscale("log")
-        ax.set_xlim(lo, hi)            # clip to the model's own data range
+        ax.set_xlim(global_min, global_max)
         ax.set_ylim(0, y_max_disp)
         ax.tick_params(axis="x", which="major", labelsize=11)
         ax.tick_params(axis="x", which="minor", labelsize=0, length=2)
@@ -269,12 +271,11 @@ def _save_ridge(rows: list[dict], kind: str, task: str,
         if kind == "edges":
             r = next(rr for rr in rows if rr["model"] == model)
             for Q, t in r["thresholds"].items():
-                if t > 0 and lo <= t <= hi:
+                if t > 0:
                     ax.axvline(t, color="#c0392b", linestyle="--",
                                linewidth=0.9, alpha=0.7)
 
     axes[-1].set_xlabel(xlabel, fontsize=14, labelpad=6)
-    # Shared y-axis meaning, written once on the left.
     fig.supylabel("Fraction of edges per bin", fontsize=14, x=0.012)
 
     fig.tight_layout(rect=(0.02, 0, 1, 1))
@@ -284,88 +285,6 @@ def _save_ridge(rows: list[dict], kind: str, task: str,
     return out_path
 
 
-def _save_overlay(rows: list[dict], kind: str, task: str,
-                  out_dir: Path, dpi: int) -> Path:
-    """All-models overlay: filled stepped histograms with transparency,
-    z-ordered so narrower (higher-peak) distributions sit on top of wider
-    ones. Log-scale x-axis, raw values on ticks."""
-    import matplotlib
-    matplotlib.use("Agg")
-    import matplotlib.pyplot as plt
-
-    rows = [r for r in rows if not r.get("missing")]
-    fig, ax = plt.subplots(figsize=(14, 8))
-
-    # Stable model→color map: each model keeps its color regardless of plot order.
-    base_colors = plt.cm.tab10(np.linspace(0, 1, len(rows)))
-    model_color = {r["model"]: c for r, c in zip(rows, base_colors)}
-
-    # Data extraction.
-    if kind == "edges":
-        get_data = lambda r: r["edges"]
-        xlabel = "|W|  (forward, nonzero edges only; log-scale)"
-        title = (f"Forward edge-weight distribution: overlay across 8 models   "
-                 f"(task = {task})")
-        fname = f"edge_weights_overlay_{task}.pdf"
-    else:
-        get_data = lambda r: r["out_mass"][r["out_mass"] > 0]
-        xlabel = "outgoing mass per expert  (log-scale)"
-        title = (f"Per-expert outgoing-mass distribution: overlay across 8 models   "
-                 f"(task = {task})")
-        fname = f"outgoing_mass_overlay_{task}.pdf"
-
-    arrays = [(r["model"], get_data(r)) for r in rows]
-    arrays = [(m, a) for m, a in arrays if len(a) > 0]
-    if not arrays:
-        ax.text(0.5, 0.5, "(no data)", ha="center", transform=ax.transAxes)
-        out_path = out_dir / fname
-        fig.savefig(out_path, dpi=dpi)
-        plt.close(fig)
-        return out_path
-
-    global_min = min(a.min() for _, a in arrays)
-    global_max = max(a.max() for _, a in arrays)
-    bins = np.geomspace(global_min, global_max, 100)
-
-    # Pre-bin (fraction of edges per bin) so we can sort by peak height.
-    # Narrowest (highest peak) is drawn LAST so it stays visible above wider
-    # distributions. y-axis is fraction of edges per bin (not density), which
-    # is directly interpretable on a log-scale x.
-    binned = []
-    for model, data in arrays:
-        counts, _ = np.histogram(data, bins=bins)
-        frac = counts / counts.sum() if counts.sum() > 0 else counts
-        bin_centres = np.sqrt(bins[:-1] * bins[1:])
-        binned.append((model, bin_centres, frac, frac.max()))
-    binned.sort(key=lambda x: x[3])      # ascending: widest first
-
-    for model, centres, frac, _ in binned:
-        c = model_color[model]
-        ax.fill_between(centres, 0, frac, step="mid",
-                        facecolor=c, edgecolor=c,
-                        linewidth=1.2, alpha=0.40,
-                        label=model)
-
-    ax.set_xscale("log")
-    ax.set_xlabel(xlabel, fontsize=12)
-    ax.set_ylabel("fraction of edges per bin", fontsize=12)
-    ax.tick_params(axis="both", which="major", labelsize=11)
-    ax.set_title(title, fontsize=14, fontweight="bold")
-
-    # Legend ordered to match the canonical MODELS list (not the draw order),
-    # so the user always sees the same models in the same legend position.
-    handles, labels = ax.get_legend_handles_labels()
-    order = sorted(range(len(labels)),
-                   key=lambda i: (MODELS.index(labels[i])
-                                  if labels[i] in MODELS else 99))
-    ax.legend([handles[i] for i in order], [labels[i] for i in order],
-              loc="upper right", fontsize=12, framealpha=0.92)
-
-    fig.tight_layout()
-    out_path = out_dir / fname
-    fig.savefig(out_path, dpi=dpi)
-    plt.close(fig)
-    return out_path
 
 
 def main():
@@ -394,12 +313,10 @@ def main():
 
     p1 = _save_per_model_panels(rows, "edges", args.task, out_dir, args.dpi)
     p2 = _save_per_model_panels(rows, "mass", args.task, out_dir, args.dpi)
-    p3 = _save_overlay(rows, "edges", args.task, out_dir, args.dpi)
-    p4 = _save_overlay(rows, "mass", args.task, out_dir, args.dpi)
     p5 = _save_ridge(rows, "edges", args.task, out_dir, args.dpi)
     p6 = _save_ridge(rows, "mass", args.task, out_dir, args.dpi)
     print(f"\n  saved:")
-    for p in (p1, p2, p3, p4, p5, p6):
+    for p in (p1, p2, p5, p6):
         print(f"    {p}")
 
 
