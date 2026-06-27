@@ -210,10 +210,12 @@ def _save_ridge(rows: list[dict], kind: str, task: str,
     if kind == "edges":
         get_data = lambda r: r["edges"]
         xlabel = "Edge weight magnitude (log-scale)"
+        ylabel = "Fraction of edges per bin"
         fname = f"edge_weights_ridge_{task}.pdf"
     else:
         get_data = lambda r: r["out_mass"][r["out_mass"] > 0]
         xlabel = "Outgoing strength per expert (log-scale)"
+        ylabel = "Fraction of experts per bin"
         fname = f"outgoing_mass_ridge_{task}.pdf"
 
     arrays = [(r["model"], get_data(r)) for r in rows]
@@ -276,7 +278,7 @@ def _save_ridge(rows: list[dict], kind: str, task: str,
                                linewidth=0.9, alpha=0.7)
 
     axes[-1].set_xlabel(xlabel, fontsize=14, labelpad=6)
-    fig.supylabel("Fraction of edges per bin", fontsize=14, x=0.012)
+    fig.supylabel(ylabel, fontsize=14, x=0.012)
 
     fig.tight_layout(rect=(0.02, 0, 1, 1))
     out_path = out_dir / fname
