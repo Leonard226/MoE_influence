@@ -64,15 +64,23 @@ def audit_dag(dag: dict) -> dict:
 
     # Per-vertex flat stats.
     load_flat = load.reshape(-1)
+    n_total = int(load_flat.size)
+    n_zero = int((load_flat == 0).sum())
     load_pos = load_flat[load_flat > 0]
     if len(load_pos) == 0:
-        return {"N": N, "L": L}
+        return {"N": N, "L": L,
+                "n_total": n_total, "n_zero": n_zero,
+                "frac_zero": float(n_zero / max(n_total, 1))}
 
     p50 = float(np.percentile(load_pos, 50))
     p90 = float(np.percentile(load_pos, 90))
     p99 = float(np.percentile(load_pos, 99))
     p99_safe = max(p99, 1e-12)
     vmax = float(load_pos.max())
+    # Global min over ALL experts (including zeros). Distinct from the
+    # per-layer-min stats below.
+    vmin = float(load_flat.min())
+    vmin_pos = float(load_pos.min())   # smallest non-zero load
 
     return {
         "N": int(N),
@@ -81,13 +89,21 @@ def audit_dag(dag: dict) -> dict:
         "load_p50": p50,
         "load_p90": p90,
         "load_p99": p99,
+        "load_min": vmin,                # global min, includes zeros
+        "load_min_positive": vmin_pos,   # smallest non-zero load
         "load_max": vmax,
         "max_over_p99": vmax / p99_safe,
+        # Zero-load expert count: experts that were never selected on this corpus.
+        "n_total": n_total,
+        "n_zero": n_zero,
+        "frac_zero": float(n_zero / max(n_total, 1)),
         # Per-layer:
         "max_per_layer_median":  float(np.median(max_per_layer)),
         "max_per_layer_p90":     float(np.percentile(max_per_layer, 90)),
         "max_per_layer_max":     float(max_per_layer.max()),
         "min_per_layer_median":  float(np.median(min_per_layer)),
+        "min_per_layer_p10":     float(np.percentile(min_per_layer, 10)),
+        "min_per_layer_min":     float(min_per_layer.min()),
         # Top-1 layer concentration:
         "top1_frac_median":      float(np.median(top1_frac)),
         "top1_frac_p90":         float(np.percentile(top1_frac, 90)),
