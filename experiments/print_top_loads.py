@@ -1,8 +1,12 @@
-"""Print raw top-K token-count loads per model on a fixed task.
+"""Print top-K per-expert load values per model on a fixed task.
 
-For each model, sort experts by raw n_tokens_selected (descending) and
-print the values at ranks 1, 2, 3, 4, 5, 10. No normalisation -- these
-are absolute token counts on the calibration corpus.
+load(v) = n_tokens_selected(v) / (1/N * sum_{n'} n_tokens_selected(layer_v, n'))
+        = how many times the layer mean of tokens that expert v received.
+
+By construction, the mean of load over experts in a layer is 1. Reported
+values are the top 1, 2, 3, 4, 5, 10 ranked load values across the whole
+graph (descending). Equivalent unit to the load values in
+Table~tab:load-distribution.
 
 Usage:
     python experiments/print_top_loads.py
@@ -38,7 +42,7 @@ def main() -> None:
     args = p.parse_args()
 
     header = (f"{'model':<18s} {'V':>6s}  "
-              + "  ".join(f"{'top' + str(k):>7s}" for k in RANKS))
+              + "  ".join(f"{'top' + str(k):>9s}" for k in RANKS))
     print(header)
     print("-" * len(header))
     for m in MODELS:
@@ -47,12 +51,16 @@ def main() -> None:
             print(f"{m:<18s}  MISSING ({path})")
             continue
         dag = torch.load(path, weights_only=False, map_location="cpu")
-        n_tok = dag["n_tokens_selected"].cpu().numpy().reshape(-1)
-        V = int(n_tok.size)
-        sorted_desc = np.sort(n_tok)[::-1]
-        tops = [int(sorted_desc[k - 1]) for k in RANKS]
+        n_tok = dag["n_tokens_selected"].cpu().numpy().astype(np.float64)
+        L, N = n_tok.shape
+        V = int(L * N)
+        # Per-layer mean (clipped) and layer-mean-normalised load.
+        layer_mean = n_tok.mean(axis=1, keepdims=True).clip(min=1e-12)
+        load = (n_tok / layer_mean).reshape(-1)
+        sorted_desc = np.sort(load)[::-1]
+        tops = [float(sorted_desc[k - 1]) for k in RANKS]
         print(f"{m:<18s} {V:>6d}  "
-              + "  ".join(f"{t:>7d}" for t in tops))
+              + "  ".join(f"{t:>9.3f}" for t in tops))
 
 
 if __name__ == "__main__":
