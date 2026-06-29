@@ -34,7 +34,7 @@ MODELS = [
     "deepseek-v2-lite", "olmoe",
     "qwen3-30b-a3b", "qwen3-235b-a22b", "deepseek-v2",
 ]
-RANKS = [1, 2, 3, 5, 10]
+RANKS = [1, 2, 3, 4, 5, 10]
 
 
 def main() -> None:
