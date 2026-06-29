@@ -305,20 +305,33 @@ def _save_violins(S, headline_alphas, headline_Qs, null_rows,
             ax.set_title("")             # no per-panel title; we use column headers
             ax.tick_params(axis="y", labelsize=8)
 
-    # Column headers at top: α values (bold).
     ALPHA_LABELS = {
         0.0: "features only",
-        0.5: "features & structure.",
+        0.5: "features & structure",
         1.0: "structure only",
     }
 
-    # Column headers at top: α values (bold).
+    # Column headers.
     for ai, alpha in enumerate(ALPHAS):
-        axes[0, ai].set_title(
-            f"α = {alpha:g}\n({ALPHA_LABELS[alpha]})",
+        ax = axes[0, ai]
+
+        # Main title.
+        ax.set_title(
+            f"α = {alpha:g}",
             fontsize=16,
             fontweight="bold",
-            pad=8,
+            pad=18,
+        )
+
+        # Subtitle.
+        ax.text(
+            0.5,
+            1.01,
+            f"({ALPHA_LABELS[alpha]})",
+            transform=ax.transAxes,
+            ha="center",
+            va="bottom",
+            fontsize=12,
         )
 
     # Row labels on the right: Q values (bold, vertical top-to-bottom).
