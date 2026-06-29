@@ -45,7 +45,8 @@ def main() -> None:
     args = p.parse_args()
 
     header = (f"{'model':<18s} {'V':>6s}  "
-              + "  ".join(f"{'top' + str(k):>11s}" for k in RANKS))
+              + "  ".join(f"{'top' + str(k):>11s}" for k in RANKS)
+              + f"  {'rank@0.5%':>11s}  {'P99.5':>11s}")
     print(header)
     print("-" * len(header))
     for m in MODELS:
@@ -61,8 +62,13 @@ def main() -> None:
         V = int(act.size)
         sorted_desc = np.sort(act)[::-1]
         tops = [float(sorted_desc[k - 1]) for k in RANKS]
+        # P_99.5: threshold such that exactly 0.5% of experts exceed it.
+        # Use rank = ceil(0.005 * V) (1-indexed), so sorted_desc[rank-1].
+        rank_05 = max(1, int(np.ceil(0.005 * V)))
+        p_995 = float(sorted_desc[rank_05 - 1])
         print(f"{m:<18s} {V:>6d}  "
-              + "  ".join(f"{t:>11.4g}" for t in tops))
+              + "  ".join(f"{t:>11.4g}" for t in tops)
+              + f"  {rank_05:>11d}  {p_995:>11.4g}")
 
 
 if __name__ == "__main__":
