@@ -79,11 +79,11 @@ CATEGORIES = [
     # blue family (paired tab10 dark + tab20 light) to signal they're both
     # "trained × trained" comparisons; null uses the tab10 orange contrast.
     ("trained_within", "headline:within",
-        "within-\nfamily",        "#1f77b4"),  # tab10 blue
+        "within-\nfamily",        "#4C78A8"),  
     ("trained_cross",  "headline:cross",
-        "cross-\nfamily",         "#aec7e8"),  # tab20 light blue (paired)
+        "cross-\nfamily",         "#54A24B"), 
     ("tr_vs_rnd_same", "trained_vs_random_same",
-        "trained vs\nrandom",     "#ff7f0e"),  # tab10 orange
+        "model vs.\nnull",     "#B5B5B5"),  
 ]
 
 
@@ -306,9 +306,20 @@ def _save_violins(S, headline_alphas, headline_Qs, null_rows,
             ax.tick_params(axis="y", labelsize=8)
 
     # Column headers at top: α values (bold).
+    ALPHA_LABELS = {
+        0.0: "features only",
+        0.5: "features & structure.",
+        1.0: "structure only",
+    }
+
+    # Column headers at top: α values (bold).
     for ai, alpha in enumerate(ALPHAS):
-        axes[0, ai].set_title(f"α = {alpha}", fontsize=16, fontweight="bold",
-                              pad=8)
+        axes[0, ai].set_title(
+            f"α = {alpha:g}\n({ALPHA_LABELS[alpha]})",
+            fontsize=16,
+            fontweight="bold",
+            pad=8,
+        )
 
     # Row labels on the right: Q values (bold, vertical top-to-bottom).
     for qi, Q in enumerate(QUANTILES):
@@ -321,7 +332,7 @@ def _save_violins(S, headline_alphas, headline_Qs, null_rows,
 
     # Global y-label on the leftmost side (bold, vertical, bottom-to-top per
     # matplotlib convention — standard ylabel orientation).
-    fig.supylabel("FGW similarity", fontsize=16, fontweight="bold")
+    fig.supylabel("FGW similarity S", fontsize=16, fontweight="bold")
 
     fig.tight_layout(rect=(0.025, 0, 0.96, 0.98))
     out_path = out_dir / "null_violins.pdf"
