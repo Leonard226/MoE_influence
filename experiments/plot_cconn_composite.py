@@ -155,7 +155,7 @@ def _render_grid(models: list[str], cache: dict,
         if last_im is not None:
             cbar = fig.colorbar(last_im, cax=cax)
             cbar.ax.tick_params(labelsize=6)
-            cbar.set_label(r"Structural cost $C(u,v)$ (lower = stronger connectivity)", fontsize=7, labelpad=1)
+            cbar.set_label(r"Structural cost $C(u,v)$\nLower = stronger connectivity", fontsize=7, labelpad=1)
             
     fig.savefig(out_path, dpi=dpi)
     plt.close(fig)
