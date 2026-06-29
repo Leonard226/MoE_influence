@@ -207,12 +207,12 @@ def _save_ridge(rows: list[dict], kind: str, task: str,
 
     if kind == "edges":
         get_data = lambda r: r["edges"]
-        xlabel = "Edge weight magnitude (log-scale)"
+        xlabel = r"Edge weight magnitude ($W_{\mathrm{softmax}}$)"
         ylabel = "Fraction of edges per bin"
         fname = f"edge_weights_ridge_{task}.pdf"
     else:
         get_data = lambda r: r["out_mass"][r["out_mass"] > 0]
-        xlabel = "Outgoing strength per expert (log-scale)"
+        xlabel = r"Per-expert global influence ($\mathrm{out}(v)$)"
         ylabel = "Fraction of experts per bin"
         fname = f"outgoing_mass_ridge_{task}.pdf"
 
@@ -283,8 +283,7 @@ def _save_ridge(rows: list[dict], kind: str, task: str,
             # Model name as ylabel on the RIGHT side of the log-y panel.
             if ci == 1:
                 ax.yaxis.set_label_position("right")
-                ax.set_ylabel(model, rotation=90, ha="center", va="center",
-                              fontsize=12, labelpad=10, fontweight="bold")
+                ax.set_ylabel(model, rotation=90, ha="center", va="center", fontsize=10, labelpad=12)
             # Per-graph Q-quantile threshold markers on edges-ridge only.
             if kind == "edges":
                 for Q, t in model_thresholds[model].items():
@@ -293,13 +292,12 @@ def _save_ridge(rows: list[dict], kind: str, task: str,
                                    linewidth=0.9, alpha=0.7)
 
     # Column headers (top row), bold.
-    axes[0, 0].set_title("linear scale", fontsize=12, pad=4, fontweight="bold")
-    axes[0, 1].set_title("log scale",    fontsize=12, pad=4, fontweight="bold")
+    axes[0, 0].set_title("Linear scale", fontsize=14, pad=4, fontweight="bold")
+    axes[0, 1].set_title("Logarithmic scale",    fontsize=14, pad=4, fontweight="bold")
 
     # Bottom-row x-axis label on both columns (shared x), bold.
     for ci in (0, 1):
-        axes[-1, ci].set_xlabel(xlabel, fontsize=13, labelpad=6,
-                                fontweight="bold")
+        axes[-1, ci].set_xlabel(xlabel, fontsize=13, labelpad=6, fontweight="bold")
 
     # Shared y-axis meaning label, moved rightward (closer to the panels) and
     # bold for emphasis.
