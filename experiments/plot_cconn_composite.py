@@ -123,7 +123,7 @@ def _render_grid(models: list[str], cache: dict,
         n_rows, n_cols + 1,
         width_ratios=[1.0] * n_cols + [0.07],   # very thin colorbar column
         wspace=0.05, hspace=0.05,
-        left=0.085, right=0.94,    # 6% right margin so colorbar tick labels aren't clipped
+        left=0.085, right=0.90,    # 6% right margin so colorbar tick labels aren't clipped
         top=1.0 - 0.30 / fig_h,    # ~0.3 inch top margin (just enough for Q labels)
         bottom=0.02,
     )
@@ -155,7 +155,7 @@ def _render_grid(models: list[str], cache: dict,
         if last_im is not None:
             cbar = fig.colorbar(last_im, cax=cax)
             cbar.ax.tick_params(labelsize=6)
-            cbar.set_label("Structural cost $C(u,v)$\n(lower = stronger connectivity)", fontsize=7, labelpad=1)
+            cbar.set_label("Structural cost $C(u,v)$\n(lower = stronger connectivity)", fontsize=7, labelpad=8)
             
     fig.savefig(out_path, dpi=dpi)
     plt.close(fig)
