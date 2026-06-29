@@ -245,8 +245,8 @@ def _save_ridge(rows: list[dict], kind: str, task: str,
     # Single, conservative colour across panels. Model identity is encoded
     # by the vertical row label, not by hue. tab:blue is the matplotlib
     # default and reads cleanly in print.
-    BAR_COLOR = "#1f77b4"
-    EDGE_COLOR = "#0e3d63"
+    BAR_COLOR = "#4C9A8A"
+    EDGE_COLOR = "#2F6F63"
 
     n_rows = len(panel_data)
     lo_y = y_min_positive * 0.5 if np.isfinite(y_min_positive) else 1e-5
