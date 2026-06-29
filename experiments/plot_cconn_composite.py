@@ -155,13 +155,8 @@ def _render_grid(models: list[str], cache: dict,
         if last_im is not None:
             cbar = fig.colorbar(last_im, cax=cax)
             cbar.ax.tick_params(labelsize=6)
-            # Only label the first row's colorbar to reduce text clutter.
-            if ri == 0:
-                cbar.set_label(r"$C_{\mathrm{conn}}^{\gamma=" + f"{gamma:g}" + r"}$",
-                               fontsize=7, labelpad=1)
-            else:
-                cbar.set_label("")
-
+            cbar.set_label(r"Structural cost $C(u,v)$ (lower = stronger connectivity)", fontsize=7, labelpad=1)
+            
     fig.savefig(out_path, dpi=dpi)
     plt.close(fig)
     print(f"Saved {out_path}")
