@@ -335,8 +335,7 @@ def draw_per_task_heatmaps(S_slice, fig_title, fname):
     # left (where y-tick labels are flush against the figure edge), so the
     # visual centre of the trimmed PDF sits slightly LEFT of the original
     # figure centre x=0.5. x=0.49 puts the title at the visible centre.
-    fig.suptitle(fig_title, fontsize=16, fontweight="bold",
-                 x=0.43, y=0.96, ha="center")
+    # fig.suptitle(fig_title, fontsize=16, fontweight="bold", x=0.43, y=0.96, ha="center")
     fig.subplots_adjust(top=0.88, bottom=0.10, left=0.06, right=0.92,
                         wspace=0.25, hspace=0.60)
     cbar = fig.colorbar(im, ax=axes.tolist(), shrink=0.7, pad=0.02, location="right")
@@ -358,8 +357,7 @@ def _q_tag(q):
 for alpha in ALPHAS:
     for Q in QUANTILES:
         sl = S[:, :, alpha_idx(alpha), q_idx(Q)]
-        title = (f"Cross-model FGW similarity (Sparsification Q = {Q}, α = {alpha}, β = {FIXED_BETA})")
         fname = f"heatmap_a{alpha:g}_Q{_q_tag(Q)}.pdf"
-        draw_per_task_heatmaps(sl, title, fname)
+        draw_per_task_heatmaps(sl, None, fname)
 
 print(f"\nAll outputs in: {OUT_DIR}")
