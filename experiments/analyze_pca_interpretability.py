@@ -93,6 +93,52 @@ def _pca(F: np.ndarray) -> dict:
     }
 
 
+# -------------------- rank check + class-simplex audit --------------------
+def _rank_audit(F: np.ndarray, pca: dict) -> dict:
+    """Verify the effective rank of F. Our class histogram (last 5 cols) sums
+    to 1 per row, so the matrix has structural rank 9. Reports the singular
+    value drop-off and the class-simplex residual."""
+    class_cols = F[:, 5:10]                       # content..special
+    row_sums = class_cols.sum(axis=1)
+    simplex_err = float(np.abs(row_sums - 1.0).max())
+    sigmas = pca["sigmas"]
+    smin_ratio = float(sigmas[-1] / sigmas[0]) if sigmas[0] > 0 else float("nan")
+    effective_rank = int((sigmas > 1e-9 * sigmas[0]).sum())
+    return {
+        "simplex_residual_max": simplex_err,
+        "smallest_to_largest_singular_ratio": smin_ratio,
+        "effective_rank_tol_1e-9": effective_rank,
+        "interpretation": (
+            "Class histogram (last 5 cols) sums to 1 per expert (simplex "
+            "constraint), so F has structural rank D-1 = 9. PC10 is "
+            "numerically zero and should be reported as such, not as a 10th "
+            "independent axis."
+        ),
+    }
+
+
+# -------------------- model-identity contamination per PC -----------------
+def _model_identity_eta2(Z: np.ndarray, model_idx: np.ndarray,
+                         n_models: int, n_pcs: int = 10) -> np.ndarray:
+    """For each PC, return eta^2 = SS_between_models / SS_total. Range [0, 1].
+    eta^2 ~ 0: PC encodes a universal semantic axis (variance is within-model).
+    eta^2 ~ 1: PC encodes model identity (variance is between-model)."""
+    n_pcs = min(n_pcs, Z.shape[1])
+    eta2 = np.zeros(n_pcs)
+    for k in range(n_pcs):
+        z = Z[:, k]
+        grand = z.mean()
+        ss_total = float(((z - grand) ** 2).sum())
+        ss_between = 0.0
+        for mi in range(n_models):
+            mask = (model_idx == mi)
+            n_m = int(mask.sum())
+            if n_m == 0: continue
+            ss_between += n_m * (z[mask].mean() - grand) ** 2
+        eta2[k] = ss_between / ss_total if ss_total > 0 else 0.0
+    return eta2
+
+
 def _layer_index_per_expert(depth_col: np.ndarray,
                             model_idx: np.ndarray,
                             n_models: int) -> np.ndarray:
@@ -312,53 +358,85 @@ def _plot_scatter_by_model(pca: dict, model_idx: np.ndarray, models: list[str],
     print(f"  Saved {out_path}")
 
 
-def _extreme_experts(pca: dict, F: np.ndarray, model_idx: np.ndarray,
-                     models: list[str], top_n: int = 10,
-                     ks: tuple[int, ...] = (0, 1, 2)) -> dict:
-    """For each PC in ks, return top-N and bottom-N experts."""
+def _extreme_signatures(pca: dict, F: np.ndarray, model_idx: np.ndarray,
+                        models: list[str], top_n: int = 50,
+                        ks: tuple[int, ...] = (0, 1, 2, 3, 4)) -> dict:
+    """For each PC in ks: average raw feature vector + average z-score of the
+    top-N and bottom-N experts at that PC's tail, plus model composition of
+    the tail. This is the cleaner companion to per-expert listings:
+    "what does it mean to be on the + or - side of this axis?".
+
+    Optionally also returns the per-individual extremes (for sanity)."""
     Z = pca["Z"]
     layer_idx = _layer_index_per_expert(F[:, 0], model_idx, len(models))
+    global_mean = F.mean(axis=0)
+    global_std  = F.std(axis=0).clip(min=1e-9)
+
     out: dict[str, dict] = {}
     for k in ks:
         scores = Z[:, k]
-        order = np.argsort(scores)         # ascending
-        bottom = order[:top_n]
-        top    = order[-top_n:][::-1]
-        def _entry(idx):
+        order = np.argsort(scores)
+        bottom_idx = order[:top_n]
+        top_idx    = order[-top_n:][::-1]
+
+        def _signature(idx_arr):
+            sub = F[idx_arr]
+            mean_vec = sub.mean(axis=0)
+            z_vec = (mean_vec - global_mean) / global_std
+            mc = np.bincount(model_idx[idx_arr], minlength=len(models))
+            comp_order = np.argsort(-mc)
+            composition = [
+                {"model": models[mi], "n": int(mc[mi])}
+                for mi in comp_order if mc[mi] > 0
+            ]
             return {
-                "global_idx":   int(idx),
-                "model":        models[int(model_idx[idx])],
-                "layer":        int(layer_idx[idx]),
-                "depth":        float(F[idx, 0]),
-                "pc_score":     float(scores[idx]),
-                "feature_vec":  {FEATURE_NAMES[j]: float(F[idx, j])
-                                 for j in range(F.shape[1])},
+                "n":               int(len(idx_arr)),
+                "mean_pc_score":   float(scores[idx_arr].mean()),
+                "mean_feature":    {FEATURE_NAMES[j]: float(mean_vec[j])
+                                    for j in range(F.shape[1])},
+                "mean_z":          {FEATURE_NAMES[j]: float(z_vec[j])
+                                    for j in range(F.shape[1])},
+                "model_composition": composition,
+                "individual_extremes": [
+                    {
+                        "global_idx":  int(i),
+                        "model":       models[int(model_idx[i])],
+                        "layer":       int(layer_idx[i]),
+                        "depth":       float(F[i, 0]),
+                        "pc_score":    float(scores[i]),
+                        "feature_vec": {FEATURE_NAMES[j]: float(F[i, j])
+                                        for j in range(F.shape[1])},
+                    }
+                    for i in idx_arr[:10]
+                ],
             }
+
         out[f"PC{k+1}"] = {
-            "top":    [_entry(int(i)) for i in top],
-            "bottom": [_entry(int(i)) for i in bottom],
+            "var_ratio_pct": float(100 * pca["var_ratio"][k]),
+            "top":    _signature(top_idx),
+            "bottom": _signature(bottom_idx),
         }
     return out
 
 
-def _print_extremes_table(extr: dict, F: np.ndarray) -> None:
-    print("\n=== Extreme experts at the tails of each PC ===")
+def _print_extreme_signatures(extr: dict) -> None:
+    print("\n=== Averaged extreme-tail signatures (top-N / bottom-N per PC) ===")
+    print("Each tail: mean feature value + (z-score relative to global mean/std)")
     for pc_name, sides in extr.items():
-        print(f"\n--- {pc_name} extremes ---")
+        print(f"\n--- {pc_name}  ({sides['var_ratio_pct']:.1f}% var) ---")
         for side in ("top", "bottom"):
-            print(f"  {side}:")
-            print(f"    {'model':<18s} {'layer':>5s}  {'depth':>5s}  "
-                  f"{'pc_score':>9s}  signature (top-3 feature deviations)")
-            for e in sides[side]:
-                feat = e["feature_vec"]
-                global_mean = F.mean(axis=0)
-                global_std  = F.std(axis=0).clip(min=1e-9)
-                z = {fn: (feat[fn] - global_mean[i]) / global_std[i]
-                     for i, fn in enumerate(FEATURE_NAMES)}
-                top3 = sorted(z.items(), key=lambda kv: -abs(kv[1]))[:3]
-                sig  = ", ".join(f"{fn} (z={zv:+.2f})" for fn, zv in top3)
-                print(f"    {e['model']:<18s} {e['layer']:>5d}  "
-                      f"{e['depth']:>5.2f}  {e['pc_score']:>+9.3f}  {sig}")
+            s = sides[side]
+            # Sorted by |z| descending — most-deviated features first
+            z_pairs = sorted(s["mean_z"].items(), key=lambda kv: -abs(kv[1]))
+            feat_str = "  ".join(
+                f"{fn}={s['mean_feature'][fn]:.2f}(z{zv:+.2f})"
+                for fn, zv in z_pairs[:5]
+            )
+            mc = ", ".join(f"{c['model']}={c['n']}"
+                            for c in s["model_composition"])
+            print(f"  {side:<7s} (n={s['n']}, mean pc_score={s['mean_pc_score']:+.3f})")
+            print(f"            {feat_str}")
+            print(f"            models: {mc}")
 
 
 def main():
@@ -367,8 +445,10 @@ def main():
     p.add_argument("--task", default="c4")
     p.add_argument("--out-dir", default=str(DEFAULT_OUT_DIR))
     p.add_argument("--dpi", type=int, default=200)
-    p.add_argument("--top-n", type=int, default=10,
-                   help="Top-N extreme experts per PC tail.")
+    p.add_argument("--top-n", type=int, default=50,
+                   help="Tail size N for averaged extreme-signature per PC "
+                        "(default 50). Each PC reports the mean feature "
+                        "vector + z-scores of its top-N and bottom-N experts.")
     p.add_argument("--k-show", type=int, default=5,
                    help="Number of PCs in the correlation heatmap (default 5).")
     args = p.parse_args()
@@ -382,16 +462,40 @@ def main():
 
     pca = _pca(F)
 
+    # ---- rank audit ----------------------------------------------------------
+    rank_info = _rank_audit(F, pca)
+    print(f"\n=== Rank audit ===")
+    print(f"  class-histogram simplex residual (max |sum - 1|): "
+          f"{rank_info['simplex_residual_max']:.2e}")
+    print(f"  smallest/largest singular ratio: "
+          f"{rank_info['smallest_to_largest_singular_ratio']:.2e}")
+    print(f"  effective rank (tol = 1e-9 * sigma_max): "
+          f"{rank_info['effective_rank_tol_1e-9']}")
+    print(f"  -> {rank_info['interpretation']}")
+
     # ---- numbers to stdout ---------------------------------------------------
     D = F.shape[1]
-    print(f"\n  PC explained variance:")
+    print(f"\n=== PC explained variance ===")
     print(f"    {'PC':>3s}  {'%var':>6s}  {'cum %':>7s}")
     for k in range(D):
         print(f"    {k+1:>3d}  {100*pca['var_ratio'][k]:>5.2f}%  "
               f"{100*pca['cumvar'][k]:>6.2f}%")
 
+    # ---- model-identity contamination ---------------------------------------
+    eta2 = _model_identity_eta2(pca["Z"], model_idx, len(models), n_pcs=D)
+    print(f"\n=== Model-identity contamination per PC ===")
+    print(f"  eta^2 = SS_between_models / SS_total in [0, 1].")
+    print(f"  Low eta^2 -> universal semantic axis; high eta^2 -> "
+          f"PC encodes model identity.")
+    print(f"    {'PC':>3s}  {'eta^2':>7s}  reading")
+    for k in range(D):
+        reading = ("shared" if eta2[k] < 0.20
+                   else "mixed" if eta2[k] < 0.50
+                   else "mostly model-identity")
+        print(f"    {k+1:>3d}  {eta2[k]:>7.3f}  {reading}")
+
     # ---- figures -------------------------------------------------------------
-    print("\n  building figures ...", flush=True)
+    print("\n=== Building figures ===", flush=True)
     _plot_scree_and_loadings(pca, out_dir / "pca_scree_and_loadings.pdf",
                               args.dpi)
     R = _plot_correlation_matrix(pca, F, out_dir / "pca_correlation_matrix.pdf",
@@ -402,12 +506,13 @@ def main():
                             out_dir / "pca_scatter_by_model.pdf",
                             args.dpi)
 
-    # ---- extreme experts -----------------------------------------------------
-    extr = _extreme_experts(pca, F, model_idx, models, top_n=args.top_n)
-    _print_extremes_table(extr, F)
+    # ---- extreme-tail signatures (avg over top-N / bottom-N per PC) ---------
+    extr = _extreme_signatures(pca, F, model_idx, models, top_n=args.top_n,
+                               ks=tuple(range(args.k_show)))
+    _print_extreme_signatures(extr)
     out_extr = out_dir / "pca_extreme_experts.json"
     out_extr.write_text(json.dumps(extr, indent=2))
-    print(f"  Saved {out_extr}")
+    print(f"\n  Saved {out_extr}")
 
     # ---- summary JSON --------------------------------------------------------
     summary = {
@@ -425,6 +530,8 @@ def main():
         "loadings":        pca["loadings"].tolist(),    # rows = PC dirs
         "corr_matrix":     R.tolist(),                  # (k_show, D)
         "corr_k_show":     args.k_show,
+        "rank_audit":      rank_info,
+        "model_identity_eta2": eta2.tolist(),
     }
     out_sum = out_dir / "pca_interpretability_summary.json"
     out_sum.write_text(json.dumps(summary, indent=2))
