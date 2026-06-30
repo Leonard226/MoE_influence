@@ -216,11 +216,17 @@ def _save_correlation(F_all, model_idx, models, out_dir, dpi) -> Path:
                 if np.isnan(v):
                     continue
                 ax.text(jj, ii, f"{v:.2f}", ha="center", va="center",
-                        fontsize=8,
+                        fontsize=10,
                         color="white" if abs(v) > 0.5 else "black")
         col = i % 4
         ax.set_xticks(range(D))
-        ax.set_xticklabels(fnames, rotation=45, ha="right", fontsize=13)
+        ax.set_xticklabels(
+            fnames,
+            rotation=45,
+            rotation_mode="anchor",
+            ha="right",
+            fontsize=13,
+        )
         if col == 0:
             ax.set_yticks(range(D))
             ax.set_yticklabels(fnames, fontsize=13)
@@ -243,12 +249,12 @@ def _save_correlation(F_all, model_idx, models, out_dir, dpi) -> Path:
 
         # Colorbar exactly aligned with the grid
         pad = 0.015
-        width = 0.015
+        width = 0.012
         cax = fig.add_axes([right + pad, bottom, width, top - bottom])
 
         cbar = fig.colorbar(im, cax=cax)
         cbar.set_label("Pearson correlation", fontsize=16)
-        cbar.ax.tick_params(labelsize=11)
+        cbar.ax.tick_params(labelsize=13)
     out_path = out_dir / "features_correlation.pdf"
     fig.savefig(out_path, dpi=dpi)            # don't use bbox_inches="tight"
                                               # (would re-shift the manual cax)
