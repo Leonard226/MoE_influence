@@ -236,7 +236,7 @@ def _save_correlation(F_all, model_idx, models, out_dir, dpi) -> Path:
     # Reserve right margin for an EXPLICIT colorbar axes, then place the cax
     # manually. Avoids matplotlib's auto-layout pushing the colorbar into the
     # last column of subplots.
-    fig.subplots_adjust(left=0.04, right=0.92, top=0.95, bottom=0.07, wspace=0.12, hspace=0.18)
+    fig.subplots_adjust(left=0.06, right=0.92, top=0.95, bottom=0.07, wspace=0.12, hspace=0.18)
     if im is not None:
         fig.canvas.draw()
 
