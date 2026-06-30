@@ -54,8 +54,14 @@ from experiments.inspect_features import (   # noqa: E402
 # -------------------- HDBSCAN with graceful fallback -----------------------
 def _run_hdbscan(F: np.ndarray, min_cluster_size: int,
                  min_samples: int | None,
-                 cluster_selection_method: str = "eom") -> np.ndarray:
-    """Returns labels: -1 = noise, 0..K-1 = cluster ids."""
+                 cluster_selection_method: str = "eom"
+                 ) -> tuple[np.ndarray, np.ndarray]:
+    """Returns (labels, probabilities).
+    labels[i]:        -1 = noise, 0..K-1 = cluster id.
+    probabilities[i]: cluster membership strength in [0, 1] (HDBSCAN's
+                      probabilities_; 0 for noise points, near 1 for points
+                      deep inside a cluster's mutual-reachability core).
+    """
     # sklearn 1.3+ has HDBSCAN built-in; fall back to the standalone package.
     try:
         from sklearn.cluster import HDBSCAN
@@ -83,9 +89,41 @@ def _run_hdbscan(F: np.ndarray, min_cluster_size: int,
           f"min_samples={min_samples}, method={cluster_selection_method}) on "
           f"{len(F)} points...", flush=True)
     t0 = time.time()
-    labels = clusterer.fit_predict(F)
+    clusterer.fit(F)
+    labels = clusterer.labels_.astype(np.int64)
+    probs = getattr(clusterer, "probabilities_", None)
+    if probs is None:
+        # Defensive: very old hdbscan-learn might omit it. Treat all
+        # non-noise as full-confidence so the rest of the pipeline still runs.
+        probs = (labels >= 0).astype(np.float64)
     print(f"    done in {time.time() - t0:.1f}s", flush=True)
-    return labels
+    return labels, np.asarray(probs, dtype=np.float64)
+
+
+# -------------------- model composition stats per cluster ------------------
+def _model_composition_stats(cluster_mask: np.ndarray,
+                             model_idx: np.ndarray,
+                             n_models: int
+                             ) -> tuple[np.ndarray, float, float]:
+    """For one cluster (given by a boolean mask over experts), compute:
+        counts             : (n_models,) int — how many experts of each model.
+        dominant_fraction  : max_m counts[m] / total. 1.0 = single-model cluster,
+                              1/n_models = perfectly balanced. Range [1/M, 1].
+        normalised_entropy : H / log(n_models), where H = -sum p_m log p_m,
+                              p_m = counts[m] / total. Range [0, 1].
+                              0 = pure (single model), 1 = uniform across all
+                              n_models models.
+    """
+    counts = np.bincount(model_idx[cluster_mask], minlength=n_models)
+    total = int(counts.sum())
+    if total == 0:
+        return counts, float("nan"), float("nan")
+    p = counts.astype(np.float64) / total
+    dominant = float(p.max())
+    p_nz = p[p > 0]
+    H = -float((p_nz * np.log(p_nz)).sum())
+    H_norm = float(H / np.log(n_models)) if n_models > 1 else 0.0
+    return counts, dominant, H_norm
 
 
 # -------------------- signatures (z-score bars per cluster) ----------------
@@ -352,6 +390,7 @@ def _save_composite_umap(Z: np.ndarray, model_idx: np.ndarray,
 
 # -------------------- text summary -----------------------------------------
 def _save_summary(F_all: np.ndarray, labels: np.ndarray,
+                  probs: np.ndarray,
                   model_idx: np.ndarray, models: list[str],
                   args: argparse.Namespace, out_dir: Path) -> Path:
     D = F_all.shape[1]
@@ -380,6 +419,15 @@ def _save_summary(F_all: np.ndarray, labels: np.ndarray,
     w(f"  → {len(unique)} clusters discovered; "
       f"{n_noise} noise points ({100*n_noise/len(labels):.2f}%)")
     w("")
+    w("Per-cluster columns:")
+    w("  prob    = HDBSCAN membership probability (mean ± std over cluster members),")
+    w("            in [0, 1]. Near 1 = points deep inside the cluster's core; lower")
+    w("            values indicate looser fringe membership.")
+    w("  dom    = dominant-model fraction in {[1/M, 1]} (M = {n} models); 1.0 = all")
+    w("            experts from one model, 1/M = perfectly balanced.".format(n=len(models)))
+    w("  H_norm = normalised Shannon entropy of model distribution, in [0, 1]; 0 =")
+    w("            single-model cluster, 1 = uniform across all M models.")
+    w("")
 
     for c in unique:
         mask = labels == c
@@ -396,25 +444,132 @@ def _save_summary(F_all: np.ndarray, labels: np.ndarray,
 
         sig = _autoname_cluster(z, fnames, top_k=3)
 
-        # Per-model breakdown
-        m_counts = np.bincount(model_idx[mask], minlength=len(models))
-        m_order = np.argsort(-m_counts)
-        m_total = int(m_counts.sum())
-        m_lines = ", ".join(
-            f"{models[m]}={int(m_counts[m])} ({100*m_counts[m]/m_total:.1f}%)"
-            for m in m_order if m_counts[m] > 0
+        # Per-model breakdown + diversity stats.
+        _counts, dom_frac, H_norm = _model_composition_stats(
+            mask, model_idx, len(models)
         )
+        m_order = np.argsort(-_counts)
+        m_total = int(_counts.sum())
+        m_lines = ", ".join(
+            f"{models[m]}={int(_counts[m])} ({100*_counts[m]/m_total:.1f}%)"
+            for m in m_order if _counts[m] > 0
+        )
+
+        # Cluster-membership probability stats over the in-cluster experts.
+        p_cluster = probs[mask]
+        p_mean = float(p_cluster.mean()) if p_cluster.size else float("nan")
+        p_std  = float(p_cluster.std())  if p_cluster.size else float("nan")
+        p_med  = float(np.median(p_cluster)) if p_cluster.size else float("nan")
 
         w("-" * 78)
         w(f"Cluster {c}   n = {size}   ({100*size/len(labels):.2f}% of all experts)")
         w(f"  signature (z-score top-3):  {sig}")
         w(f"  top features:               {top_str}")
+        w(f"  prob:                       mean {p_mean:.3f} ± {p_std:.3f}  "
+          f"(median {p_med:.3f})")
+        w(f"  dom:                        {dom_frac:.3f}     "
+          f"H_norm: {H_norm:.3f}")
         w(f"  model composition:          {m_lines}")
     w("=" * 78)
 
     out_path = out_dir / "clusters_summary.txt"
     out_path.write_text("\n".join(lines))
     return out_path
+
+
+# -------------------- min_cluster_size sweep ------------------------------
+def _run_sweep(F_all: np.ndarray, model_idx: np.ndarray, models: list[str],
+               mcs_values: list[int], min_samples: int | None,
+               cluster_selection_method: str, out_dir: Path) -> Path:
+    """Run HDBSCAN for each min_cluster_size value and print a comparison
+    table. No plots — this is for picking the best setting before a single
+    full run. Per-cluster mean/std of (probability, dominant_fraction,
+    normalised_entropy) is aggregated across discovered clusters."""
+    import json
+
+    n_models = len(models)
+    rows: list[dict] = []
+    print(f"\n=== Sweep over min_cluster_size ===\n")
+    for mcs in mcs_values:
+        labels, probs = _run_hdbscan(
+            F_all,
+            min_cluster_size=mcs,
+            min_samples=min_samples,
+            cluster_selection_method=cluster_selection_method,
+        )
+        unique = sorted(set(int(c) for c in labels) - {-1})
+        n_clusters = len(unique)
+        n_noise = int((labels == -1).sum())
+        noise_pct = 100.0 * n_noise / len(labels)
+
+        # Per-cluster stats
+        sizes, p_means, doms, Hs = [], [], [], []
+        for c in unique:
+            mask = labels == c
+            sizes.append(int(mask.sum()))
+            p_means.append(float(probs[mask].mean()) if mask.any() else float("nan"))
+            _, dom, H_norm = _model_composition_stats(mask, model_idx, n_models)
+            doms.append(dom); Hs.append(H_norm)
+
+        rows.append({
+            "min_cluster_size":   mcs,
+            "min_samples":        min_samples,
+            "n_clusters":         n_clusters,
+            "n_noise":            n_noise,
+            "noise_pct":          noise_pct,
+            "mean_cluster_size":  float(np.mean(sizes)) if sizes else float("nan"),
+            "min_cluster_size_obs": int(np.min(sizes)) if sizes else 0,
+            "max_cluster_size_obs": int(np.max(sizes)) if sizes else 0,
+            "mean_prob":          float(np.mean(p_means)) if p_means else float("nan"),
+            "mean_dom":           float(np.mean(doms))    if doms    else float("nan"),
+            "mean_H_norm":        float(np.mean(Hs))      if Hs      else float("nan"),
+        })
+
+    # ------------ Pretty-print table ----------------------------------------
+    lines: list[str] = []
+    def w(s: str = ""):
+        lines.append(s); print(s)
+
+    w("")
+    w("=" * 110)
+    w(f"HDBSCAN sweep — min_samples = {min_samples}, "
+      f"cluster_selection_method = {cluster_selection_method}")
+    w(f"Aggregate stats per setting (means across discovered clusters):")
+    w("=" * 110)
+    w(f"  mcs   n_clusters   noise (%)        mean_size  (min..max)     "
+      f"mean_prob   mean_dom   mean_H_norm")
+    w("-" * 110)
+    for r in rows:
+        if r["n_clusters"] > 0:
+            sz = (f"{r['mean_cluster_size']:>9.1f}  "
+                  f"({r['min_cluster_size_obs']}..{r['max_cluster_size_obs']})")
+            stat = (f"{r['mean_prob']:>9.3f}   "
+                    f"{r['mean_dom']:>8.3f}   "
+                    f"{r['mean_H_norm']:>11.3f}")
+        else:
+            sz = "   (no clusters)"; stat = ""
+        w(f"  {r['min_cluster_size']:<5d} {r['n_clusters']:>10d}   "
+          f"{r['n_noise']:>6d} ({r['noise_pct']:>5.2f}%)  {sz}  {stat}")
+    w("=" * 110)
+    w("Legend:")
+    w("  mean_prob  = mean HDBSCAN membership probability across clusters (higher = tighter cores).")
+    w("  mean_dom   = mean dominant-model fraction. 1.0 → clusters dominated by one model;")
+    w("              1/{:d} ({:.3f}) → perfectly balanced.".format(n_models, 1.0/n_models))
+    w("  mean_H_norm= mean normalised model-distribution entropy in [0, 1]; 0 = pure clusters,")
+    w("              1 = uniform across all {} models.".format(n_models))
+
+    out_txt = out_dir / "clusters_mcs_sweep.txt"
+    out_txt.write_text("\n".join(lines))
+    out_json = out_dir / "clusters_mcs_sweep.json"
+    out_json.write_text(json.dumps({
+        "task": None,  # filled by caller if desired
+        "min_samples": min_samples,
+        "cluster_selection_method": cluster_selection_method,
+        "results": rows,
+    }, indent=2))
+    print(f"\n  Saved {out_txt}")
+    print(f"  Saved {out_json}")
+    return out_txt
 
 
 # -------------------- entry point ------------------------------------------
@@ -428,15 +583,28 @@ def main():
     parser.add_argument("--dpi", type=int, default=180)
     parser.add_argument("--min-cluster-size", type=int, default=100,
                         help="HDBSCAN min cluster size. Larger → fewer / "
-                             "coarser clusters (default 100).")
-    parser.add_argument("--min-samples", type=int, default=None,
-                        help="HDBSCAN min_samples. None → defaults to "
-                             "min_cluster_size (more conservative).")
+                             "coarser clusters (default 100). Ignored when "
+                             "--sweep is set.")
+    parser.add_argument("--min-samples", type=int, default=15,
+                        help="HDBSCAN min_samples (default 15). Controls "
+                             "how conservative the density estimate is; "
+                             "larger → only denser regions form clusters.")
     parser.add_argument("--cluster-selection-method", default="eom",
                         choices=["eom", "leaf"],
                         help="HDBSCAN cluster selection: 'eom' (excess of "
                              "mass, default) gives stable big clusters; "
                              "'leaf' returns finer-grained clusters.")
+    parser.add_argument("--sweep", action="store_true",
+                        help="Sweep min_cluster_size ∈ {25, 50, 100, 200, "
+                             "400} at the chosen --min-samples and "
+                             "--cluster-selection-method, and print a "
+                             "comparison table. Skips the full plot + "
+                             "summary pipeline (use a single-value run to "
+                             "generate plots once you pick the best mcs).")
+    parser.add_argument("--sweep-values", type=int, nargs="+",
+                        default=[25, 50, 100, 200, 400],
+                        help="Override the min_cluster_size values used by "
+                             "--sweep (default: 25 50 100 200 400).")
     parser.add_argument("--recompute-embedding", action="store_true",
                         help="Force-recompute the canonical UMAP+PCA from "
                              "scratch (default loads from cache if present).")
@@ -457,7 +625,17 @@ def main():
     umap_2d = emb["umap_2d"]
     print(f"\n  Total: {len(F_all)} experts × {F_all.shape[1]} features\n")
 
-    labels = _run_hdbscan(
+    if args.sweep:
+        _run_sweep(
+            F_all, model_idx, models,
+            mcs_values=list(args.sweep_values),
+            min_samples=args.min_samples,
+            cluster_selection_method=args.cluster_selection_method,
+            out_dir=out_dir,
+        )
+        return
+
+    labels, probs = _run_hdbscan(
         F_all,
         min_cluster_size=args.min_cluster_size,
         min_samples=args.min_samples,
@@ -474,7 +652,8 @@ def main():
     paths.append(_save_umap_by_cluster(umap_2d, labels, out_dir, args.dpi))
     paths.append(_save_composite_umap(umap_2d, model_idx, models, labels,
                                       out_dir, args.dpi))
-    paths.append(_save_summary(F_all, labels, model_idx, models, args, out_dir))
+    paths.append(_save_summary(F_all, labels, probs, model_idx, models,
+                               args, out_dir))
 
     print(f"\n  saved:")
     for p in paths:
