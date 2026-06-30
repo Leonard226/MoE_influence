@@ -216,7 +216,7 @@ def _save_correlation(F_all, model_idx, models, out_dir, dpi) -> Path:
                 if np.isnan(v):
                     continue
                 ax.text(jj, ii, f"{v:.2f}", ha="center", va="center",
-                        fontsize=10,
+                        fontsize=12,
                         color="white" if abs(v) > 0.5 else "black")
         col = i % 4
         ax.set_xticks(range(D))
@@ -225,14 +225,14 @@ def _save_correlation(F_all, model_idx, models, out_dir, dpi) -> Path:
             rotation=45,
             rotation_mode="anchor",
             ha="right",
-            fontsize=13,
+            fontsize=16,
         )
         if col == 0:
             ax.set_yticks(range(D))
-            ax.set_yticklabels(fnames, fontsize=13)
+            ax.set_yticklabels(fnames, fontsize=16)
         else:
             ax.set_yticks([])
-        ax.set_title(f"{model}", fontsize=16)
+        ax.set_title(f"{model}", fontsize=20)
     # Reserve right margin for an EXPLICIT colorbar axes, then place the cax
     # manually. Avoids matplotlib's auto-layout pushing the colorbar into the
     # last column of subplots.
@@ -253,8 +253,8 @@ def _save_correlation(F_all, model_idx, models, out_dir, dpi) -> Path:
         cax = fig.add_axes([right + pad, bottom, width, top - bottom])
 
         cbar = fig.colorbar(im, cax=cax)
-        cbar.set_label("Pearson correlation", fontsize=16)
-        cbar.ax.tick_params(labelsize=13)
+        cbar.set_label("Pearson correlation", fontsize=20)
+        cbar.ax.tick_params(labelsize=16)
     out_path = out_dir / "features_correlation.pdf"
     fig.savefig(out_path, dpi=dpi)            # don't use bbox_inches="tight"
                                               # (would re-shift the manual cax)
