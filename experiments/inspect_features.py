@@ -64,10 +64,7 @@ CIRCUITS_DIR = Path(_config["result_path"]) / "circuits"
 CLASSIFY_DIR = CIRCUITS_DIR / "classifications"
 DEFAULT_OUT_DIR = CIRCUITS_DIR / "feature_inspection"
 
-FEATURE_NAMES = [
-    "depth", "out", "in", "load", "act",
-    "content", "functional", "punctuation", "numeric", "special",
-]
+FEATURE_NAMES = ["depth", "out", "in", "load", "act", "content", "functional", "punctuation", "numeric", "special"]
 
 
 def _model_palette(n: int):
@@ -201,7 +198,7 @@ def _save_correlation(F_all, model_idx, models, out_dir, dpi) -> Path:
     cmap = plt.get_cmap("RdBu_r").copy()
     cmap.set_bad("lightgray")           # NaN cells (zero-variance feature)
 
-    fig, axes = plt.subplots(2, 4, figsize=(24, 13))
+    fig, axes = plt.subplots(2, 4, figsize=(28, 15))
     im = None
     for i, (ax, model) in enumerate(zip(axes.flatten(), models)):
         mask = (model_idx == i)
@@ -212,7 +209,7 @@ def _save_correlation(F_all, model_idx, models, out_dir, dpi) -> Path:
         with np.errstate(divide="ignore", invalid="ignore"):
             corr = np.corrcoef(F_all[mask].T)
         corr_masked = np.ma.masked_invalid(corr)
-        im = ax.imshow(corr_masked, cmap=cmap, vmin=-1, vmax=1)
+        im = ax.imshow(corr_masked, cmap=cmap, vmin=-1, vmax=1, aspect="equal")
         for ii in range(D):
             for jj in range(D):
                 v = corr[ii, jj]
@@ -223,24 +220,34 @@ def _save_correlation(F_all, model_idx, models, out_dir, dpi) -> Path:
                         color="white" if abs(v) > 0.5 else "black")
         col = i % 4
         ax.set_xticks(range(D))
-        ax.set_xticklabels(fnames, rotation=45, ha="right", fontsize=12)
+        ax.set_xticklabels(fnames, rotation=45, ha="right", fontsize=13)
         if col == 0:
             ax.set_yticks(range(D))
-            ax.set_yticklabels(fnames, fontsize=12)
+            ax.set_yticklabels(fnames, fontsize=13)
         else:
             ax.set_yticks([])
-        ax.set_title(f"{model}  (n={int(mask.sum())})", fontsize=13)
-
-    fig.suptitle("Pairwise Feature Correlations per Model", fontsize=18, y=0.99)
+        ax.set_title(f"{model}", fontsize=16)
     # Reserve right margin for an EXPLICIT colorbar axes, then place the cax
     # manually. Avoids matplotlib's auto-layout pushing the colorbar into the
     # last column of subplots.
-    fig.subplots_adjust(top=0.93, right=0.91, left=0.05,
-                        wspace=0.18, hspace=0.30)
+    fig.subplots_adjust(left=0.04, right=0.92, top=0.95, bottom=0.07, wspace=0.12, hspace=0.18)
     if im is not None:
-        cax = fig.add_axes([0.935, 0.10, 0.012, 0.78])
+        fig.canvas.draw()
+
+        # Bounding box of the subplot grid
+        boxes = [ax.get_position() for ax in axes.ravel()]
+        left   = min(b.x0 for b in boxes)
+        right  = max(b.x1 for b in boxes)
+        bottom = min(b.y0 for b in boxes)
+        top    = max(b.y1 for b in boxes)
+
+        # Colorbar exactly aligned with the grid
+        pad = 0.015
+        width = 0.015
+        cax = fig.add_axes([right + pad, bottom, width, top - bottom])
+
         cbar = fig.colorbar(im, cax=cax)
-        cbar.set_label("Pearson coefficient", fontsize=13)
+        cbar.set_label("Pearson coefficient", fontsize=16)
         cbar.ax.tick_params(labelsize=11)
     out_path = out_dir / "features_correlation.pdf"
     fig.savefig(out_path, dpi=dpi)            # don't use bbox_inches="tight"
