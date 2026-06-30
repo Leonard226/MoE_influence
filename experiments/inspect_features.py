@@ -247,7 +247,7 @@ def _save_correlation(F_all, model_idx, models, out_dir, dpi) -> Path:
         cax = fig.add_axes([right + pad, bottom, width, top - bottom])
 
         cbar = fig.colorbar(im, cax=cax)
-        cbar.set_label("Pearson coefficient", fontsize=16)
+        cbar.set_label("Pearson correlation", fontsize=16)
         cbar.ax.tick_params(labelsize=11)
     out_path = out_dir / "features_correlation.pdf"
     fig.savefig(out_path, dpi=dpi)            # don't use bbox_inches="tight"
