@@ -22,11 +22,19 @@ Cross-model subspace alignment:
     Default k = 3 (covers >90% var on most models; configurable via --k).
 
 Outputs (under results/circuits/feature_inspection/):
-  features_rank_spectrum.pdf    -- 2-panel: (a) singular values per model,
-                                            (b) cumulative variance explained
-  features_subspace_overlap.pdf -- (n_models x n_models) heatmap of grassmann_overlap
-  features_rank_summary.json    -- per-model effective ranks, sigmas, plus the
-                                   pairwise grassmann_overlap matrix
+  features_rank_spectrum.pdf            -- 2-panel: (a) singular values per
+                                           model, (b) cumulative variance
+  features_subspace_overlap.pdf         -- (n_models x n_models) heatmap of
+                                           grassmann_overlap
+  features_shared_axis_distributions.pdf -- per-model histograms of expert
+                                           projections onto the top-k axes of
+                                           the GLOBAL (pooled-F) SVD. Same axes
+                                           for every model, so where models
+                                           disagree on the distribution shape
+                                           is visible at a glance.
+  features_rank_summary.json            -- per-model effective ranks, sigmas,
+                                           pairwise grassmann_overlap matrix,
+                                           and the global cumulative variance.
 
 Usage (on piora, where the DAGs live):
     python3 experiments/analyze_feature_rank.py
@@ -200,6 +208,55 @@ def main() -> None:
     plt.close(fig)
     print(f"Saved {out_b}")
 
+    # ---------- 5b. Distribution along shared axes ---------------------------
+    # Build a COMMON basis by SVD on the pooled, globally-centered F_all.
+    # Project each model's experts onto the top-k pooled PCs and plot the
+    # per-model marginal distribution along each PC. If models truly share
+    # principal axes, the structure (modes, spread) of these distributions is
+    # where their disagreements actually live.
+    F_list = [Fs[m] for m in model_list]
+    n_per_model = [F.shape[0] for F in F_list]
+    F_all = np.concatenate(F_list, axis=0)
+    mu_global = F_all.mean(axis=0, keepdims=True)
+    F_all_c = F_all - mu_global
+    _, S_global, Vt_global = np.linalg.svd(F_all_c, full_matrices=False)
+    V_top = Vt_global[:args.k]   # (k, D) rows are global PC directions
+    cum_var_global = np.cumsum(S_global ** 2) / (S_global ** 2).sum()
+
+    fig, axes = plt.subplots(1, args.k, figsize=(5.2 * args.k, 4.4), sharey=True)
+    if args.k == 1:
+        axes = [axes]
+    start = 0
+    for i, m in enumerate(model_list):
+        F_m = F_list[i]
+        F_m_c = F_m - mu_global    # use GLOBAL mean to keep axes common
+        proj = F_m_c @ V_top.T     # (N_m, k)
+        for pc_idx in range(args.k):
+            axes[pc_idx].hist(
+                proj[:, pc_idx], bins=60, histtype="step", density=True,
+                color=colors[i], label=m, linewidth=1.4,
+            )
+        start += F_m.shape[0]
+    for pc_idx in range(args.k):
+        axes[pc_idx].set_xlabel(
+            f"projection on global PC{pc_idx+1}"
+            f"  ({100*S_global[pc_idx]**2/(S_global**2).sum():.1f}% var)",
+            fontsize=11,
+        )
+        axes[pc_idx].grid(alpha=0.3)
+    axes[0].set_ylabel("density (per model)", fontsize=11)
+    axes[-1].legend(fontsize=7, loc="upper right")
+    fig.suptitle(
+        "Expert distributions along the global top-{} principal axes\n"
+        "(common basis from pooled, mean-centered F_all)".format(args.k),
+        fontsize=12,
+    )
+    fig.tight_layout()
+    out_c = OUT_DIR / "features_shared_axis_distributions.pdf"
+    fig.savefig(out_c, dpi=200)
+    plt.close(fig)
+    print(f"Saved {out_c}")
+
     # ---------- 6. JSON summary ----------------------------------------------
     summary = {
         "task": args.task,
@@ -209,6 +266,10 @@ def main() -> None:
         "grassmann_overlap": {
             mi: {mj: float(G[i, j]) for j, mj in enumerate(model_list)}
             for i, mi in enumerate(model_list)
+        },
+        "global_pooled": {
+            "sigmas":  S_global.tolist(),
+            "cum_var": cum_var_global.tolist(),
         },
     }
     out_json = OUT_DIR / "features_rank_summary.json"
