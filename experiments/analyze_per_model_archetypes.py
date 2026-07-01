@@ -275,10 +275,10 @@ def main():
     Z_all = Fc_all @ V.T                   # (N, D)
     x_all, y_all = Z_all[:, 0], Z_all[:, 1]
 
-    fig, ax = plt.subplots(figsize=(10.5, 9))
+    fig, ax = plt.subplots(figsize=(10, 10))
 
-    # Background pool of all 31,520 experts is intentionally NOT drawn
-    # here -- the figure focuses on the 18 cluster centroids + 3 archetypes.
+    # Background pool of all 31,520 experts is intentionally NOT drawn -- the
+    # figure focuses on the 18 cluster centroids + 3 archetypes.
 
     # Cluster centroids. Size scales roughly linearly with cluster count so
     # a 1003-expert cluster looks visibly larger than a 22-expert one.
@@ -290,48 +290,65 @@ def main():
         ax.scatter(pc[0], pc[1], s=size, color=colors[mi],
                    edgecolor="black", linewidth=0.9, alpha=0.90,
                    zorder=3)
+        ax.annotate(f"{c['model'].split('-')[0][:6]}:c{c['cluster_id']}",
+                    (pc[0], pc[1]),
+                    xytext=(4, 4), textcoords="offset points",
+                    fontsize=7, alpha=0.85, zorder=4)
 
-    # Archetype centroids: rendered as a bold, short-name label ("A1", "A2",
-    # "A3") boxed in white and placed AT the centroid coordinate. No marker
-    # circle -- the label itself is the visual object, so it can't be
-    # confused with a cluster dot. Full semantic description of each
-    # archetype lives in the LaTeX caption.
+    # Archetype centroids: large open black circles (original style). Short
+    # "A1"/"A2"/"A3" labels placed radially outward with an arrow connector
+    # so they never overlap the cluster labels. Full semantic descriptions
+    # of the archetypes live in the LaTeX caption.
+    cx, cy = 0.0, 0.0   # plot centre (matches [-1, 1] x [-1, 1] limits)
     for a, info in archetypes.items():
         pc = info["pc_centroid"]
-        ax.text(pc[0], pc[1], f"A{a}",
-                fontsize=20, fontweight="bold",
-                color="black",
-                ha="center", va="center",
-                bbox=dict(boxstyle="round,pad=0.35",
-                           facecolor="white", edgecolor="black",
-                           linewidth=1.5, alpha=0.96),
-                zorder=6)
+        ax.scatter(pc[0], pc[1], s=350, facecolor="none",
+                   edgecolor="black", linewidth=2.0, zorder=2,
+                   marker="o")
+        dx, dy = pc[0] - cx, pc[1] - cy
+        norm = float(np.hypot(dx, dy)) if (dx or dy) else 1.0
+        off_x = 32 * dx / norm
+        off_y = 32 * dy / norm
+        ax.annotate(f"A{a}", (pc[0], pc[1]),
+                    xytext=(off_x, off_y), textcoords="offset points",
+                    fontsize=14, fontweight="bold",
+                    ha=("left" if dx > 0 else "right"),
+                    va=("bottom" if dy > 0 else "top"),
+                    bbox=dict(boxstyle="round,pad=0.28",
+                               facecolor="white", edgecolor="black",
+                               linewidth=1.2, alpha=0.95),
+                    arrowprops=dict(arrowstyle="-", color="black",
+                                    linewidth=0.7, alpha=0.6),
+                    zorder=6)
 
+    # ---- Axes --------------------------------------------------------------
+    ax.set_xlim(-1, 1)
+    ax.set_ylim(-1, 1)
+    ax.set_aspect("equal", adjustable="box")
     ax.set_xlabel(f"PC1  ({100*var_ratio[0]:.1f}% var, "
                    f"specialisation: content$-$/functional$+$)",
                   fontsize=12)
     ax.set_ylabel(f"PC2  ({100*var_ratio[1]:.1f}% var, "
                    f"depth: deep$-$/shallow$+$)",
                   fontsize=12)
-    # Equal aspect ratio: physical distance for a 0.25-unit step is the
-    # same on both axes, so distances in this plane are readable geometrically.
-    ax.set_aspect("equal", adjustable="box")
     # No title -- caption in main.tex will describe the figure.
 
-    # ---- Legends -----------------------------------------------------------
-    # (A) Models -- uniform-size markers so the legend isn't confusing.
+    # ---- Legends: both in bottom-right corner, side by side ----------------
+    # (A) Model legend on the left of the pair.
     model_handles = [
         Line2D([0], [0], marker="o", color="none",
                markerfacecolor=colors[i], markeredgecolor="black",
                markersize=10, markeredgewidth=0.8, label=m)
         for i, m in enumerate(MODELS)
     ]
-    leg_models = ax.legend(handles=model_handles, loc="upper left",
-                           fontsize=9, framealpha=0.9, title="Model",
-                           title_fontsize=10, borderpad=0.6)
-    ax.add_artist(leg_models)   # keep this legend after we add the next one
+    leg_models = ax.legend(handles=model_handles,
+                           loc="lower right",
+                           bbox_to_anchor=(0.60, 0.02),
+                           fontsize=9, framealpha=0.9,
+                           title="Model", title_fontsize=10, borderpad=0.6)
+    ax.add_artist(leg_models)
 
-    # (B) Cluster-size reference -- shows readers how to decode dot sizes.
+    # (B) Cluster-size reference legend on the right of the pair.
     ref_sizes = [50, 200, 500, 1000]
     size_handles = [
         Line2D([0], [0], marker="o", color="none",
@@ -340,8 +357,11 @@ def main():
                markeredgewidth=0.7, label=f"n = {s}")
         for s in ref_sizes
     ]
-    ax.legend(handles=size_handles, loc="lower left", fontsize=9,
-              framealpha=0.9, title="Cluster size (n experts)",
+    ax.legend(handles=size_handles,
+              loc="lower right",
+              bbox_to_anchor=(0.99, 0.02),
+              fontsize=9, framealpha=0.9,
+              title="Cluster size (n experts)",
               title_fontsize=10, borderpad=0.6, labelspacing=1.4)
 
     fig.tight_layout()
