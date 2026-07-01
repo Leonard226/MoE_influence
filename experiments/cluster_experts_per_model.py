@@ -215,7 +215,15 @@ def main():
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--task", default="c4")
     p.add_argument("--min-frac", type=float, default=0.02,
-                   help="min_cluster_size = max(min_floor, floor(min_frac * n_experts)).")
+                   help="Default min_frac used for any model not overridden by "
+                        "--min-frac-file. min_cluster_size = "
+                        "max(min_floor, floor(min_frac * n_experts)).")
+    p.add_argument("--min-frac-file", default=None,
+                   help="Optional path to a JSON file mapping "
+                        "{model_name: min_frac} to override --min-frac on a "
+                        "per-model basis. Missing models fall back to --min-frac. "
+                        "Use this to generate a figure where each panel uses its "
+                        "model's sweet-spot from the sweep table.")
     p.add_argument("--min-floor", type=int, default=10,
                    help="Floor on min_cluster_size (default 10).")
     p.add_argument("--min-samples", type=int, default=15,
@@ -262,14 +270,33 @@ def main():
         )
         return
 
+    # Optional per-model min_frac overrides.
+    frac_overrides: dict[str, float] = {}
+    if args.min_frac_file:
+        import json
+        fp = Path(args.min_frac_file)
+        if not fp.exists():
+            print(f"ERROR: --min-frac-file not found: {fp}", file=sys.stderr)
+            sys.exit(1)
+        raw = json.loads(fp.read_text())
+        # Skip keys starting with "_" (documentation / comment keys).
+        frac_overrides = {k: float(v) for k, v in raw.items()
+                          if not k.startswith("_")}
+        print(f"Loaded per-model min_frac overrides from {fp}")
+        for k, v in frac_overrides.items():
+            print(f"  {k}: {v}")
+
     # Per-model clustering.
     per_model: dict[str, dict] = {}
     for mi, model in enumerate(MODELS):
         mask = (model_idx == mi)
         F_m = F_all[mask]
         n = F_m.shape[0]
-        mcs = max(args.min_floor, int(args.min_frac * n))
-        print(f"\n[{model}] n_experts={n}; min_cluster_size={mcs}")
+        frac = frac_overrides.get(model, args.min_frac)
+        mcs = max(args.min_floor, int(frac * n))
+        override_flag = " (override)" if model in frac_overrides else ""
+        print(f"\n[{model}] n_experts={n}; min_frac={frac}{override_flag}; "
+              f"min_cluster_size={mcs}")
         labels, probs = _hdbscan(F_m, mcs, min_samples=args.min_samples,
                                  method=args.method)
         print(f"  HDBSCAN → {labels.max() + 1} clusters, "
