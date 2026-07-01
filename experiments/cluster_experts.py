@@ -198,7 +198,7 @@ def _save_signatures(F_all: np.ndarray, labels: np.ndarray,
         m_top = [(models[m], int(m_counts[m])) for m in m_order
                  if m_counts[m] > 0][:3]
         m_str = ", ".join(f"{m}:{n}" for m, n in m_top)
-        ax.set_title(f"Cluster {c}   (size={size})\n"
+        ax.set_title(f"Cluster {c}   (n={size})\n"
                      f"signature: {sig}",
                      fontsize=10)
 
@@ -240,13 +240,13 @@ def _save_umap_by_cluster(Z: np.ndarray, labels: np.ndarray,
         if show_noise and noise.any():
             ax.scatter(Z[noise, 0], Z[noise, 1], s=1.5, color="lightgray",
                        alpha=0.10, edgecolors="none", rasterized=True,
-                       label=f"noise (size={int(noise.sum())})")
+                       label=f"noise (n={int(noise.sum())})")
         for c in draw_order:
             col = palette[unique.index(c)]
             mask = labels == c
             ax.scatter(Z[mask, 0], Z[mask, 1], s=7, color=col, alpha=0.85,
                        edgecolors="none", rasterized=True,
-                       label=f"cluster {c} (size={cluster_sizes[c]})")
+                       label=f"cluster {c} (n={cluster_sizes[c]})")
         for c in unique:
             if cluster_sizes[c] < label_min_size:
                 continue
