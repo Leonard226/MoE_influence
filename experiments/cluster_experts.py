@@ -186,8 +186,8 @@ def _save_signatures(F_all: np.ndarray, labels: np.ndarray,
         ax.bar(range(D), z, color=colours, edgecolor="black", linewidth=0.4)
         ax.axhline(0, color="black", linewidth=0.6)
         ax.set_xticks(range(D))
-        ax.set_xticklabels(fnames, rotation=45, ha="right", fontsize=9)
-        ax.set_ylabel("z-score vs global mean", fontsize=9)
+        ax.set_xticklabels(fnames, rotation=45, ha="right", fontsize=10)
+        ax.set_ylabel("z-score vs global mean", fontsize=12)
         ax.set_ylim(-ymax, ymax)
         ax.grid(alpha=0.18, axis="y")
 
@@ -198,10 +198,9 @@ def _save_signatures(F_all: np.ndarray, labels: np.ndarray,
         m_top = [(models[m], int(m_counts[m])) for m in m_order
                  if m_counts[m] > 0][:3]
         m_str = ", ".join(f"{m}:{n}" for m, n in m_top)
-        ax.set_title(f"Cluster {c}   n={size}\n"
-                     f"signature: {sig}\n"
-                     f"top models: {m_str}",
-                     fontsize=9.5)
+        ax.set_title(f"Cluster {c}   (size={size})\n"
+                     f"signature: {sig}",
+                     fontsize=10)
 
     # Hide unused subplots.
     for idx in range(n_clusters, n_rows * n_cols):
@@ -209,10 +208,8 @@ def _save_signatures(F_all: np.ndarray, labels: np.ndarray,
 
     n_noise = int((labels == -1).sum())
     fig.suptitle(
-        f"HDBSCAN cluster signatures ({n_clusters} clusters; "
-        f"{n_noise} noise points = {100*n_noise/len(labels):.1f}%)\n"
-        "red bars = feature above global mean; blue = below; |z| ≥ 1 ≈ noteworthy",
-        fontsize=14,
+        f"HDBSCAN Cluster Signatures"
+        fontsize=20,
     )
     fig.tight_layout(rect=(0, 0, 1, 0.95))
     out_path = out_dir / "clusters_signatures.pdf"
