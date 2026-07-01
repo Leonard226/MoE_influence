@@ -102,6 +102,11 @@ def main() -> None:
     p.add_argument("--task", default="c4")
     p.add_argument("--k", type=int, default=3,
                    help="Subspace dimension for cross-model alignment (default 3).")
+    p.add_argument("--k-hist", type=int, default=4,
+                   help="Number of principal axes to show as histograms in "
+                        "features_shared_axis_distributions.pdf (default 4). "
+                        "Independent of --k so the Grassmann-overlap heatmap "
+                        "stays at whatever --k dictates.")
     args = p.parse_args()
 
     # ---------- 1. Load F_m for every model -----------------------------------
@@ -228,24 +233,25 @@ def main() -> None:
     mu_global = F_all.mean(axis=0, keepdims=True)
     F_all_c = F_all - mu_global
     _, S_global, Vt_global = np.linalg.svd(F_all_c, full_matrices=False)
-    V_top = Vt_global[:args.k]   # (k, D) rows are global PC directions
+    k_hist = min(args.k_hist, Vt_global.shape[0])
+    V_top = Vt_global[:k_hist]   # (k_hist, D) rows are global PC directions
     cum_var_global = np.cumsum(S_global ** 2) / (S_global ** 2).sum()
 
-    fig, axes = plt.subplots(1, args.k, figsize=(5.2 * args.k, 4.4), sharey=True)
-    if args.k == 1:
+    fig, axes = plt.subplots(1, k_hist, figsize=(5.2 * k_hist, 4.4), sharey=True)
+    if k_hist == 1:
         axes = [axes]
     start = 0
     for i, m in enumerate(model_list):
         F_m = F_list[i]
         F_m_c = F_m - mu_global    # use GLOBAL mean to keep axes common
-        proj = F_m_c @ V_top.T     # (N_m, k)
-        for pc_idx in range(args.k):
+        proj = F_m_c @ V_top.T     # (N_m, k_hist)
+        for pc_idx in range(k_hist):
             axes[pc_idx].hist(
                 proj[:, pc_idx], bins=60, histtype="step", density=True,
                 color=colors[i], label=m, linewidth=1.4,
             )
         start += F_m.shape[0]
-    for pc_idx in range(args.k):
+    for pc_idx in range(k_hist):
         axes[pc_idx].set_xlabel(
             f"projection on global PC{pc_idx+1}"
             f"  ({100*S_global[pc_idx]**2/(S_global**2).sum():.1f}% var)",
@@ -256,7 +262,7 @@ def main() -> None:
     axes[-1].legend(fontsize=7, loc="upper right")
     fig.suptitle(
         "Expert distributions along the global top-{} principal axes\n"
-        "(common basis from pooled, mean-centered F_all)".format(args.k),
+        "(common basis from pooled, mean-centered F_all)".format(k_hist),
         fontsize=12,
     )
     fig.tight_layout()
