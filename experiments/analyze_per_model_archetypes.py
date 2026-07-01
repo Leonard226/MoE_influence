@@ -290,30 +290,27 @@ def main():
         ax.scatter(pc[0], pc[1], s=size, color=colors[mi],
                    edgecolor="black", linewidth=0.9, alpha=0.90,
                    zorder=3)
-        ax.annotate(f"{c['model'].split('-')[0][:6]}:c{c['cluster_id']}",
+        # Full model name (not the abbreviated `mixtra` / `deepse` cut-offs),
+        # with a larger offset so the label doesn't sit on top of the dot.
+        ax.annotate(f"{c['model']}:c{c['cluster_id']}",
                     (pc[0], pc[1]),
-                    xytext=(4, 4), textcoords="offset points",
-                    fontsize=7, alpha=0.85, zorder=4)
+                    xytext=(10, 10), textcoords="offset points",
+                    fontsize=7, alpha=0.9, zorder=4)
 
-    # Archetype centroids: large open black circles (original style). Short
-    # "A1"/"A2"/"A3" labels placed radially outward with an arrow connector
-    # so they never overlap the cluster labels. Full semantic descriptions
-    # of the archetypes live in the LaTeX caption.
-    cx, cy = 0.0, 0.0   # plot centre (matches [-1, 1] x [-1, 1] limits)
+    # Archetype centroids: large open black circles (original style, bigger
+    # than before so they read clearly as archetype regions). Short A1/A2/A3
+    # labels are always placed on the RIGHT of the archetype centroid, so
+    # they don't cover cluster dots that lie on the archetype's left side.
+    # Full semantic descriptions of the archetypes live in the LaTeX caption.
     for a, info in archetypes.items():
         pc = info["pc_centroid"]
-        ax.scatter(pc[0], pc[1], s=350, facecolor="none",
+        ax.scatter(pc[0], pc[1], s=1500, facecolor="none",
                    edgecolor="black", linewidth=2.0, zorder=2,
                    marker="o")
-        dx, dy = pc[0] - cx, pc[1] - cy
-        norm = float(np.hypot(dx, dy)) if (dx or dy) else 1.0
-        off_x = 32 * dx / norm
-        off_y = 32 * dy / norm
         ax.annotate(f"A{a}", (pc[0], pc[1]),
-                    xytext=(off_x, off_y), textcoords="offset points",
+                    xytext=(36, 6), textcoords="offset points",
                     fontsize=14, fontweight="bold",
-                    ha=("left" if dx > 0 else "right"),
-                    va=("bottom" if dy > 0 else "top"),
+                    ha="left", va="center",
                     bbox=dict(boxstyle="round,pad=0.28",
                                facecolor="white", edgecolor="black",
                                linewidth=1.2, alpha=0.95),
@@ -333,8 +330,11 @@ def main():
                   fontsize=12)
     # No title -- caption in main.tex will describe the figure.
 
-    # ---- Legends: both in bottom-right corner, side by side ----------------
-    # (A) Model legend on the left of the pair.
+    # ---- Legends: both in the bottom-right corner, side by side, with
+    # their bottom edges aligned (loc="lower right" + same y in bbox_to_anchor).
+    # Model legend on the far right; cluster-size legend just to its left.
+
+    # (A) Model legend -- bottom-right corner.
     model_handles = [
         Line2D([0], [0], marker="o", color="none",
                markerfacecolor=colors[i], markeredgecolor="black",
@@ -343,12 +343,12 @@ def main():
     ]
     leg_models = ax.legend(handles=model_handles,
                            loc="lower right",
-                           bbox_to_anchor=(0.60, 0.02),
+                           bbox_to_anchor=(0.99, 0.02),
                            fontsize=9, framealpha=0.9,
                            title="Model", title_fontsize=10, borderpad=0.6)
     ax.add_artist(leg_models)
 
-    # (B) Cluster-size reference legend on the right of the pair.
+    # (B) Cluster-size reference legend -- to the LEFT of the model legend.
     ref_sizes = [50, 200, 500, 1000]
     size_handles = [
         Line2D([0], [0], marker="o", color="none",
@@ -359,7 +359,7 @@ def main():
     ]
     ax.legend(handles=size_handles,
               loc="lower right",
-              bbox_to_anchor=(0.99, 0.02),
+              bbox_to_anchor=(0.73, 0.02),
               fontsize=9, framealpha=0.9,
               title="Cluster size (n experts)",
               title_fontsize=10, borderpad=0.6, labelspacing=1.4)
