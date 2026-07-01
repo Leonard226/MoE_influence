@@ -265,6 +265,7 @@ def main():
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
+    from matplotlib.lines import Line2D
     import colorsys
     n_models = len(MODELS)
     colors = [colorsys.hsv_to_rgb(i / n_models, 0.85, 0.85)
@@ -274,54 +275,89 @@ def main():
     Z_all = Fc_all @ V.T                   # (N, D)
     x_all, y_all = Z_all[:, 0], Z_all[:, 1]
 
-    fig, ax = plt.subplots(figsize=(11, 8.5))
-    ax.scatter(x_all, y_all, s=1.0, c="lightgray", alpha=0.15, linewidths=0,
-               rasterized=True, label="all experts (background)")
+    fig, ax = plt.subplots(figsize=(11.5, 8.5))
 
-    seen_labels = set()
+    # Background: all 31,520 experts. More visible than before but still
+    # clearly a background layer.
+    ax.scatter(x_all, y_all, s=3.0, c="#bfbfbf", alpha=0.35, linewidths=0,
+               rasterized=True, zorder=1)
+
+    # Cluster centroids. Size scales roughly linearly with cluster count so
+    # a 1003-expert cluster looks visibly larger than a 22-expert one.
+    #   s ~= 40 + 12*sqrt(count)  ->  n=22: 96,  n=1003: 420.
     for c in all_clusters:
         mi = MODELS.index(c["model"])
         pc = c["pc"]
-        size = 30 + 3.0 * np.sqrt(c["size"])
-        label = c["model"] if c["model"] not in seen_labels else None
-        seen_labels.add(c["model"])
+        size = 40 + 12.0 * np.sqrt(c["size"])
         ax.scatter(pc[0], pc[1], s=size, color=colors[mi],
-                   edgecolor="black", linewidth=0.9, alpha=0.9,
-                   label=label, zorder=3)
-        ax.annotate(f"{c['model'].split('-')[0][:6]}:c{c['cluster_id']}",
-                    (pc[0], pc[1]),
-                    xytext=(4, 4), textcoords="offset points",
-                    fontsize=7, alpha=0.85, zorder=4)
+                   edgecolor="black", linewidth=0.9, alpha=0.90,
+                   zorder=3)
 
-    # Archetype centroids as large open circles.
+    # Archetype centroids: large open circles, always drawn under clusters
+    # so clusters remain readable. Labels placed radially outward using
+    # arrow annotations so they never overlap the cluster points.
+    x_min, x_max = ax.get_xlim()
+    y_min, y_max = ax.get_ylim()
+    x_span, y_span = x_max - x_min, y_max - y_min
     for a, info in archetypes.items():
         pc = info["pc_centroid"]
-        ax.scatter(pc[0], pc[1], s=350, facecolor="none",
-                   edgecolor="black", linewidth=2.0, zorder=2,
-                   marker="o")
+        ax.scatter(pc[0], pc[1], s=1600, facecolor="none",
+                   edgecolor="black", linewidth=1.6, linestyle="--",
+                   zorder=2, marker="o")
+        # Radial offset: push label away from plot center along the
+        # centroid direction (avoids the dense-cluster interior).
+        cx, cy = (x_min + x_max) / 2, (y_min + y_max) / 2
+        dx, dy = pc[0] - cx, pc[1] - cy
+        norm = float(np.hypot(dx, dy)) if (dx or dy) else 1.0
+        off_x = 45 * dx / norm
+        off_y = 45 * dy / norm
         ax.annotate(f"Archetype {a}: {info['auto_name']}",
                     (pc[0], pc[1]),
-                    xytext=(0, -18), textcoords="offset points",
-                    fontsize=9, ha="center",
-                    bbox=dict(boxstyle="round,pad=0.2",
+                    xytext=(off_x, off_y), textcoords="offset points",
+                    fontsize=10, fontweight="bold",
+                    ha=("left" if dx > 0 else "right"),
+                    va=("bottom" if dy > 0 else "top"),
+                    bbox=dict(boxstyle="round,pad=0.3",
                                facecolor="white", edgecolor="black",
-                               linewidth=0.5, alpha=0.85),
+                               linewidth=0.8, alpha=0.92),
+                    arrowprops=dict(arrowstyle="-", color="black",
+                                    linewidth=0.7, alpha=0.6),
                     zorder=5)
 
     ax.set_xlabel(f"PC1  ({100*var_ratio[0]:.1f}% var, "
                    f"specialisation: content$-$/functional$+$)",
-                  fontsize=11)
+                  fontsize=12)
     ax.set_ylabel(f"PC2  ({100*var_ratio[1]:.1f}% var, "
                    f"depth: deep$-$/shallow$+$)",
-                  fontsize=11)
-    ax.set_title(
-        f"Per-model cluster centroids in the pooled PCA basis (task = {args.task})\n"
-        f"Do the same expert archetypes emerge across architectures?",
-        fontsize=12,
-    )
-    leg = ax.legend(loc="best", fontsize=8, markerscale=1.2, framealpha=0.85)
-    for h in leg.legend_handles:
-        h.set_alpha(1.0)
+                  fontsize=12)
+    # No title -- caption in main.tex will describe the figure.
+
+    # ---- Legends -----------------------------------------------------------
+    # (A) Models -- uniform-size markers so the legend isn't confusing.
+    model_handles = [
+        Line2D([0], [0], marker="o", color="none",
+               markerfacecolor=colors[i], markeredgecolor="black",
+               markersize=10, markeredgewidth=0.8, label=m)
+        for i, m in enumerate(MODELS)
+    ]
+    leg_models = ax.legend(handles=model_handles, loc="upper left",
+                           fontsize=9, framealpha=0.9, title="Model",
+                           title_fontsize=10, borderpad=0.6)
+    ax.add_artist(leg_models)   # keep this legend after we add the next one
+
+    # (B) Cluster-size reference -- shows readers how to decode dot sizes.
+    ref_sizes = [50, 200, 500, 1000]
+    size_handles = [
+        Line2D([0], [0], marker="o", color="none",
+               markerfacecolor="#aaaaaa", markeredgecolor="black",
+               markersize=np.sqrt(40 + 12.0 * np.sqrt(s)),
+               markeredgewidth=0.7, label=f"n = {s}")
+        for s in ref_sizes
+    ]
+    ax.legend(handles=size_handles, loc="lower left", fontsize=9,
+              framealpha=0.9, title="Cluster size (n experts)",
+              title_fontsize=10, borderpad=0.6, labelspacing=1.4)
+
     fig.tight_layout()
     out_fig = out_dir / "per_model_cluster_archetypes.pdf"
     fig.savefig(out_fig, dpi=args.dpi)
