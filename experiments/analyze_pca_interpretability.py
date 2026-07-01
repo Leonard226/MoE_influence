@@ -17,7 +17,7 @@ Outputs (all under results/circuits/feature_inspection/):
   pca_scatter_by_feature.pdf      2x5 grid of PC1xPC2 scatter, one panel per
                                   feature (continuous colormap). Visual proof
                                   of the interpretation from the heatmap.
-  pca_scatter_by_model.pdf        PC1xPC2 scatter, coloured by model. Companion
+  pca_scatter_by_model.pdf        PC1xPC2 scatter, colored by model. Companion
                                   to scatter_by_feature -- "where do the
                                   models sit in this semantic space".
   pca_extreme_experts.json        top/bottom 10 experts per PC1/PC2/PC3
@@ -172,18 +172,24 @@ def _plot_scree_and_loadings(pca: dict, out_path: Path, dpi: int) -> None:
                           left=0.06, right=0.93, top=0.93, bottom=0.10)
 
     # ---- Top: scree bar + cumvar overlay -------------------------------------
+    # ---- Top: scree bar + cumvar overlay -------------------------------------
     ax = fig.add_subplot(gs[0, :])
     ks = np.arange(1, D + 1)
     ax.bar(ks, 100 * pca["var_ratio"], color="#1f6cb0",
            edgecolor="black", linewidth=0.5, label="per-PC variance")
     ax.set_xticks(ks)
     ax.set_xlabel("Principal component $k$", fontsize=12)
-    ax.set_ylabel("Variance explained (%)", fontsize=12)
+    
+    # 1. Changed label color to match the blue ticks/bars
+    ax.set_ylabel("Variance explained (%)", fontsize=12, color="#1f6cb0")
     ax.tick_params(axis="y", labelcolor="#1f6cb0") 
     ax.set_ylim(0, max(100 * pca["var_ratio"].max() * 1.15, 5))
+    
     # Cumvar on secondary axis.
     ax2 = ax.twinx()
-    ax2.plot(ks, 100 * pca["cumvar"], marker="o", linewidth=2.0, markersize=5, label="Cumulative variance")
+    
+    # 2. Added color="#c8324c" to the plot line so it matches the red label/ticks
+    ax2.plot(ks, 100 * pca["cumvar"], color="#c8324c", marker="o", linewidth=2.0, markersize=5, label="Cumulative variance")
     ax2.set_ylabel("Cumulative variance (%)", fontsize=12, color="#c8324c")
     ax2.tick_params(axis="y", labelcolor="#c8324c")
     ax2.set_ylim(0, 105)
@@ -222,7 +228,7 @@ def _plot_scree_and_loadings(pca: dict, out_path: Path, dpi: int) -> None:
         # Updated: Gives each subplot its own specific loading number label
         ax.set_ylabel(f"Loading $v_{{{k+1},j}}$", fontsize=12)
         ax.grid(axis="y", alpha=0.25)
-        
+
     fig.savefig(out_path, dpi=dpi)
     plt.close(fig)
     print(f"  Saved {out_path}")
@@ -235,6 +241,9 @@ def _plot_correlation_matrix(pca: dict, F: np.ndarray, out_path: Path,
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
+    # 1. Import the axis divider tool
+    from mpl_toolkits.axes_grid1 import make_axes_locatable 
+    
     Z = pca["Z"]                    # (N, D) -- PC scores
     D = F.shape[1]
     k_show = min(k_show, Z.shape[1])
@@ -258,18 +267,20 @@ def _plot_correlation_matrix(pca: dict, F: np.ndarray, out_path: Path,
             ax.text(j, i, f"{v:+.2f}", ha="center", va="center",
                     fontsize=10, color=txt_col)
     ax.set_xticks(range(D))
-    ax.set_xticklabels(FEATURE_NAMES, rotation=45, ha="right", fontsize=11)
+    ax.set_xticklabels(FEATURE_NAMES, rotation=45, ha="right", fontsize=12)
     ax.set_yticks(range(k_show))
     ax.set_yticklabels(
-        [f"PC{i+1} ({100*pca['var_ratio'][i]:.1f}%)" for i in range(k_show)],
-        fontsize=11,
+        [f"PC{i+1} ({100*pca['var_ratio'][i]:.1f}%)" for i in range(k_show)], fontsize=12,
     )
-    cbar = fig.colorbar(im, ax=ax, shrink=0.85)
-    cbar.set_label("Pearson correlation", fontsize=11)
-    ax.set_title("PC--feature correlation: what does each principal axis mean?\n"
-                 r"$r_{ij} = \mathrm{corr}(\mathrm{PC}_i\ \mathrm{score},\ "
-                 r"\mathrm{feature}_j)$",
-                 fontsize=12, pad=10)
+    
+    # 2. Replaced the old colorbar code with a dynamically sized axis divider
+    divider = make_axes_locatable(ax)
+    # This creates an axis to the right of 'ax' that matches its exact height (100%)
+    cax = divider.append_axes("right", size="4%", pad=0.15)
+    cbar = fig.colorbar(im, cax=cax)
+    
+    cbar.set_label("Pearson correlation", fontsize=14)
+    ax.set_title("Correlation between principal components and features", fontsize=16, fontweight="bold", pad=10)
     fig.tight_layout()
     fig.savefig(out_path, dpi=dpi)
     plt.close(fig)
@@ -283,6 +294,9 @@ def _plot_scatter_by_feature(pca: dict, F: np.ndarray, out_path: Path,
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
+    # 1. Import the axis divider tool
+    from mpl_toolkits.axes_grid1 import make_axes_locatable
+
     Z = pca["Z"]
     x, y = Z[:, 0], Z[:, 1]
     var1, var2 = 100 * pca["var_ratio"][0], 100 * pca["var_ratio"][1]
@@ -306,22 +320,20 @@ def _plot_scatter_by_feature(pca: dict, F: np.ndarray, out_path: Path,
                         cmap="viridis", rasterized=True,
                         vmin=float(vals.min()), vmax=float(vals.max()))
         ax.set_xlim(x_lim); ax.set_ylim(y_lim)
-        ax.set_title(f"colour = {FEATURE_NAMES[j]}", fontsize=11)
+        ax.set_title(r"Colored by $\mathbf{" + f"{FEATURE_NAMES[j]}" + r"}$", fontsize=16)
         ax.set_xticks([]); ax.set_yticks([])
-        cbar = fig.colorbar(sc, ax=ax, fraction=0.046, pad=0.02)
-        cbar.ax.tick_params(labelsize=8)
+        
+        # 2. Swap out the old fractional colorbar for the locked axis divider
+        divider = make_axes_locatable(ax)
+        cax = divider.append_axes("right", size="5%", pad=0.08) # Slices a tiny box on the right
+        cbar = fig.colorbar(sc, cax=cax)
+        
+        cbar.ax.tick_params(labelsize=10)
+
     # Hide empty panels (D may be < n_rows*n_cols).
     for j in range(D, n_rows * n_cols):
         r, c = j // n_cols, j % n_cols
         axes[r, c].set_visible(False)
-    fig.suptitle(
-        f"PC1 vs.\ PC2 scatter, coloured by each engineered feature "
-        f"(pooled $\\mathbf{{F}}_\\mathrm{{all}}$, $n = {len(x):,d}$).\n"
-        f"PC1 = {var1:.1f}% var, PC2 = {var2:.1f}% var.  "
-        f"A clean horizontal gradient $\\Rightarrow$ PC1 \"is\" that feature; "
-        f"vertical gradient $\\Rightarrow$ PC2 \"is\" that feature.",
-        fontsize=12, y=1.01,
-    )
     fig.tight_layout()
     fig.savefig(out_path, dpi=dpi)
     plt.close(fig)
@@ -330,7 +342,7 @@ def _plot_scatter_by_feature(pca: dict, F: np.ndarray, out_path: Path,
 
 def _plot_scatter_by_model(pca: dict, model_idx: np.ndarray, models: list[str],
                             out_path: Path, dpi: int) -> None:
-    """PC1 vs PC2 scatter, coloured by model."""
+    """PC1 vs PC2 scatter, colored by model."""
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
@@ -350,12 +362,10 @@ def _plot_scatter_by_model(pca: dict, model_idx: np.ndarray, models: list[str],
         m_mask = (model_idx == mi)
         ax.scatter(x[m_mask], y[m_mask], s=2.0, alpha=0.6, linewidths=0,
                    color=colors[mi], rasterized=True, label=models[mi])
-    ax.set_xlabel(f"PC1  ({var1:.1f}% var)", fontsize=12)
-    ax.set_ylabel(f"PC2  ({var2:.1f}% var)", fontsize=12)
-    ax.set_title("PC1 vs.\ PC2 scatter coloured by model\n"
-                 r"(where does each architecture sit in the semantic PC space?)",
-                 fontsize=12)
-    leg = ax.legend(loc="best", fontsize=9, markerscale=3.0,
+    ax.set_xlabel(f"PC1  ({var1:.1f}% var)", fontsize=14)
+    ax.set_ylabel(f"PC2  ({var2:.1f}% var)", fontsize=14)
+    ax.set_title(r"Colored by $\mathbf{model}$", fontsize=16)
+    leg = ax.legend(loc="best", fontsize=10, markerscale=3.0,
                     framealpha=0.85)
     for handle in leg.legend_handles:
         handle.set_alpha(1.0)

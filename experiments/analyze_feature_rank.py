@@ -190,6 +190,8 @@ def main() -> None:
     print(f"\nSaved {out_a}")
 
     # (c) subspace overlap heatmap
+    from mpl_toolkits.axes_grid1 import make_axes_locatable  # Added import
+    
     fig, ax = plt.subplots(figsize=(9, 8))
     im = ax.imshow(G, cmap="viridis", vmin=0.0, vmax=1.0, aspect="equal")
     for i in range(n):
@@ -197,11 +199,17 @@ def main() -> None:
             txt_col = "black" if G[i, j] > 0.55 else "white"
             ax.text(j, i, f"{G[i, j]:.2f}", ha="center", va="center", fontsize=10, color=txt_col)
     ax.set_xticks(range(n)); ax.set_yticks(range(n))
-    ax.set_xticklabels(model_list, rotation=45, ha="right")
-    ax.set_yticklabels(model_list)
-    fig.colorbar(im, ax=ax, label=f"Grassmann overlap (top-{args.k})")
-    ax.set_title(f"Cross-model alignment of top-{args.k} principal subspaces\n"
-                 r"$\frac{1}{k}\sum_i \cos^2(\theta_i)$ between right-singular subspaces of F")
+    ax.set_xticklabels(model_list, rotation=45, ha="right", fontsize=12)
+    ax.set_yticklabels(model_list, fontsize=12)
+    
+    # --- Updated Colorbar Logic ---
+    divider = make_axes_locatable(ax)
+    cax = divider.append_axes("right", size="5%", pad=0.15)  # Creates an axis with locked height
+    cbar = fig.colorbar(im, cax=cax)                         # Draws colorbar inside the new axis
+    cbar.set_label("Grassmann overlap", fontsize=12)         # Set label on cbar object directly
+    # ------------------------------
+    
+    ax.set_title(f"Similarity of principal subspaces across models", fontsize=16, fontweight="bold")
     fig.tight_layout()
     out_b = OUT_DIR / "features_subspace_overlap.pdf"
     fig.savefig(out_b, dpi=200)
