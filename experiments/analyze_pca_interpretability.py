@@ -195,8 +195,18 @@ def _plot_scree_and_loadings(pca: dict, out_path: Path, dpi: int) -> None:
     ax.set_title("Scree plot: variance explained per principal component", fontsize=16, fontweight="bold")
 
     # ---- Bottom row: loading bars for PC1, PC2, PC3 --------------------------
+    # 1. Create the first subplot normally
+    ax_bottom_1 = fig.add_subplot(gs[1, 0])
+    
+    # 2. Store all three bottom axes in a list, sharing the y-axis with the first one
+    bottom_axes = [
+        ax_bottom_1,
+        fig.add_subplot(gs[1, 1], sharey=ax_bottom_1),
+        fig.add_subplot(gs[1, 2], sharey=ax_bottom_1)
+    ]
+
     for k in range(3):
-        ax = fig.add_subplot(gs[1, k])
+        ax = bottom_axes[k]  # Use the shared-axis subplot
         loadings_k = pca["loadings"][k]  # length D
         colors = ["#4C78A8" if v >= 0 else "#E45756" for v in loadings_k]
         ax.bar(range(D), loadings_k, color=colors,
@@ -208,9 +218,11 @@ def _plot_scree_and_loadings(pca: dict, out_path: Path, dpi: int) -> None:
             f"PC{k+1} loadings  ({100*pca['var_ratio'][k]:.1f}% var)",
             fontsize=12,
         )
-        ax.set_ylabel("loading $v_{" + str(k+1) + ",j}$" if k == 0 else "",
-                       fontsize=12)
+        
+        # Updated: Gives each subplot its own specific loading number label
+        ax.set_ylabel(f"Loading $v_{{{k+1},j}}$", fontsize=12)
         ax.grid(axis="y", alpha=0.25)
+        
     fig.savefig(out_path, dpi=dpi)
     plt.close(fig)
     print(f"  Saved {out_path}")
