@@ -340,11 +340,11 @@ def main():
                            rasterized=True)
         ax.set_title(f"{model}\n($n = {len(labels)}$, $K = {n_clusters}$, "
                       f"noise $= {100*(labels==-1).mean():.0f}\\%$)",
-                      fontsize=9)
+                      fontsize=14)
         ax.set_xticks([])
         ax.set_yticks([])
         if n_clusters and n_clusters <= 8:
-            ax.legend(loc="best", fontsize=7, framealpha=0.85,
+            ax.legend(loc="best", fontsize=10, framealpha=0.85,
                       markerscale=1.5, handletextpad=0.3)
 
     # Hide unused panels.
