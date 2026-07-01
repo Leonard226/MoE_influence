@@ -275,12 +275,10 @@ def main():
     Z_all = Fc_all @ V.T                   # (N, D)
     x_all, y_all = Z_all[:, 0], Z_all[:, 1]
 
-    fig, ax = plt.subplots(figsize=(11.5, 8.5))
+    fig, ax = plt.subplots(figsize=(10.5, 9))
 
-    # Background: all 31,520 experts. More visible than before but still
-    # clearly a background layer.
-    ax.scatter(x_all, y_all, s=3.0, c="#bfbfbf", alpha=0.35, linewidths=0,
-               rasterized=True, zorder=1)
+    # Background pool of all 31,520 experts is intentionally NOT drawn
+    # here -- the figure focuses on the 18 cluster centroids + 3 archetypes.
 
     # Cluster centroids. Size scales roughly linearly with cluster count so
     # a 1003-expert cluster looks visibly larger than a 22-expert one.
@@ -293,36 +291,21 @@ def main():
                    edgecolor="black", linewidth=0.9, alpha=0.90,
                    zorder=3)
 
-    # Archetype centroids: large open circles, always drawn under clusters
-    # so clusters remain readable. Labels placed radially outward using
-    # arrow annotations so they never overlap the cluster points.
-    x_min, x_max = ax.get_xlim()
-    y_min, y_max = ax.get_ylim()
-    x_span, y_span = x_max - x_min, y_max - y_min
+    # Archetype centroids: rendered as a bold, short-name label ("A1", "A2",
+    # "A3") boxed in white and placed AT the centroid coordinate. No marker
+    # circle -- the label itself is the visual object, so it can't be
+    # confused with a cluster dot. Full semantic description of each
+    # archetype lives in the LaTeX caption.
     for a, info in archetypes.items():
         pc = info["pc_centroid"]
-        ax.scatter(pc[0], pc[1], s=1600, facecolor="none",
-                   edgecolor="black", linewidth=1.6, linestyle="--",
-                   zorder=2, marker="o")
-        # Radial offset: push label away from plot center along the
-        # centroid direction (avoids the dense-cluster interior).
-        cx, cy = (x_min + x_max) / 2, (y_min + y_max) / 2
-        dx, dy = pc[0] - cx, pc[1] - cy
-        norm = float(np.hypot(dx, dy)) if (dx or dy) else 1.0
-        off_x = 45 * dx / norm
-        off_y = 45 * dy / norm
-        ax.annotate(f"Archetype {a}: {info['auto_name']}",
-                    (pc[0], pc[1]),
-                    xytext=(off_x, off_y), textcoords="offset points",
-                    fontsize=10, fontweight="bold",
-                    ha=("left" if dx > 0 else "right"),
-                    va=("bottom" if dy > 0 else "top"),
-                    bbox=dict(boxstyle="round,pad=0.3",
-                               facecolor="white", edgecolor="black",
-                               linewidth=0.8, alpha=0.92),
-                    arrowprops=dict(arrowstyle="-", color="black",
-                                    linewidth=0.7, alpha=0.6),
-                    zorder=5)
+        ax.text(pc[0], pc[1], f"A{a}",
+                fontsize=20, fontweight="bold",
+                color="black",
+                ha="center", va="center",
+                bbox=dict(boxstyle="round,pad=0.35",
+                           facecolor="white", edgecolor="black",
+                           linewidth=1.5, alpha=0.96),
+                zorder=6)
 
     ax.set_xlabel(f"PC1  ({100*var_ratio[0]:.1f}% var, "
                    f"specialisation: content$-$/functional$+$)",
@@ -330,6 +313,9 @@ def main():
     ax.set_ylabel(f"PC2  ({100*var_ratio[1]:.1f}% var, "
                    f"depth: deep$-$/shallow$+$)",
                   fontsize=12)
+    # Equal aspect ratio: physical distance for a 0.25-unit step is the
+    # same on both axes, so distances in this plane are readable geometrically.
+    ax.set_aspect("equal", adjustable="box")
     # No title -- caption in main.tex will describe the figure.
 
     # ---- Legends -----------------------------------------------------------
