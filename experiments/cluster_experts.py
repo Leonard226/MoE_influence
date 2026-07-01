@@ -336,8 +336,8 @@ def _save_composite_umap(Z: np.ndarray, model_idx: np.ndarray,
                         color=model_colors[i], alpha=0.55,
                         edgecolors="none", rasterized=True,
                         label=f"{models[i]} (n={int(mask.sum())})")
-    axes[0].set_title("Coloured by model", fontsize=18)
-    axes[0].legend(loc="upper right", fontsize=16, framealpha=0.92,
+    axes[0].set_title("Coloured by model", fontsize=20)
+    axes[0].legend(loc="upper right", fontsize=15, framealpha=0.92,
                    markerscale=3.0)
 
     # ----- Right: coloured by HDBSCAN cluster -----
@@ -367,8 +367,8 @@ def _save_composite_umap(Z: np.ndarray, model_idx: np.ndarray,
                      ha="center", va="center",
                      bbox=dict(boxstyle="round,pad=0.22", facecolor="white",
                                edgecolor="black", linewidth=0.7, alpha=0.92))
-    axes[1].set_title("Coloured by HDBSCAN cluster", fontsize=18)
-    axes[1].legend(loc="upper left", fontsize=16, framealpha=0.92,
+    axes[1].set_title("Coloured by HDBSCAN cluster", fontsize=20)
+    axes[1].legend(loc="upper right", fontsize=15, framealpha=0.92,
                    markerscale=2.5,
                    ncol=2 if len(unique) > 8 else 1)
 
