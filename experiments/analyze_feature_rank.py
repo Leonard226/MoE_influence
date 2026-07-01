@@ -261,7 +261,7 @@ def main() -> None:
     axes[0].set_ylabel("density (per model)", fontsize=12)
     axes[-1].legend(fontsize=9, loc="upper right")
     fig.suptitle(
-        "Expert distributions along the global top-{} principal axes\n"
+        "Expert distributions along the global top-4 principal axes",
         fontsize=16,
     )
     fig.tight_layout()
