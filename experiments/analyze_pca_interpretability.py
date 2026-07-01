@@ -169,35 +169,30 @@ def _plot_scree_and_loadings(pca: dict, out_path: Path, dpi: int) -> None:
     D = len(pca["var_ratio"])
     fig = plt.figure(figsize=_figsize(15.5, 7.5))
     gs = fig.add_gridspec(2, 3, height_ratios=[1.0, 0.9], hspace=0.42, wspace=0.28,
-                          left=0.06, right=0.98, top=0.93, bottom=0.10)
+                          left=0.06, right=0.93, top=0.93, bottom=0.10)
 
     # ---- Top: scree bar + cumvar overlay -------------------------------------
     ax = fig.add_subplot(gs[0, :])
     ks = np.arange(1, D + 1)
-    ax.bar(ks, 100 * pca["var_ratio"], color="#4C78A8",
+    ax.bar(ks, 100 * pca["var_ratio"], color="#1f6cb0",
            edgecolor="black", linewidth=0.5, label="per-PC variance")
     ax.set_xticks(ks)
     ax.set_xlabel("Principal component $k$", fontsize=12)
-    ax.set_ylabel("Variance explained (%)", fontsize=12, color="#4C78A8")
-    ax.tick_params(axis="y", labelcolor="#4C78A8")
+    ax.set_ylabel("Variance explained (%)", fontsize=12)
+    ax.tick_params(axis="y", labelcolor="#1f6cb0") 
     ax.set_ylim(0, max(100 * pca["var_ratio"].max() * 1.15, 5))
     # Cumvar on secondary axis.
     ax2 = ax.twinx()
-    ax2.plot(ks, 100 * pca["cumvar"], color="#E45756",
-             marker="o", linewidth=2.0, markersize=5, label="cumulative variance")
-    ax2.axhline(90, color="gray", linestyle=":", linewidth=0.8)
-    ax2.axhline(95, color="gray", linestyle=":", linewidth=0.8)
-    ax2.set_ylabel("Cumulative variance (%)", fontsize=12, color="#E45756")
-    ax2.tick_params(axis="y", labelcolor="#E45756")
+    ax2.plot(ks, 100 * pca["cumvar"], marker="o", linewidth=2.0, markersize=5, label="Cumulative variance")
+    ax2.set_ylabel("Cumulative variance (%)", fontsize=12, color="#c8324c")
+    ax2.tick_params(axis="y", labelcolor="#c8324c")
     ax2.set_ylim(0, 105)
     # Annotate individual % on bars for PCs 1-5.
     for k in range(min(5, D)):
         ax.text(ks[k], 100 * pca["var_ratio"][k] + 0.7,
                 f"{100*pca['var_ratio'][k]:.1f}%",
                 ha="center", va="bottom", fontsize=9)
-    ax.set_title("Scree plot: variance explained per principal component "
-                 "(pooled, mean-centred $\\mathbf{F}_\\mathrm{all}$)",
-                 fontsize=13)
+    ax.set_title("Scree plot: variance explained per principal component", fontsize=16, fontweight="bold")
 
     # ---- Bottom row: loading bars for PC1, PC2, PC3 --------------------------
     for k in range(3):
@@ -211,10 +206,10 @@ def _plot_scree_and_loadings(pca: dict, out_path: Path, dpi: int) -> None:
         ax.set_xticklabels(FEATURE_NAMES, rotation=45, ha="right", fontsize=9)
         ax.set_title(
             f"PC{k+1} loadings  ({100*pca['var_ratio'][k]:.1f}% var)",
-            fontsize=11,
+            fontsize=12,
         )
         ax.set_ylabel("loading $v_{" + str(k+1) + ",j}$" if k == 0 else "",
-                       fontsize=10)
+                       fontsize=12)
         ax.grid(axis="y", alpha=0.25)
     fig.savefig(out_path, dpi=dpi)
     plt.close(fig)
