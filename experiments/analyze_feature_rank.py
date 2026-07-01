@@ -259,7 +259,7 @@ def main() -> None:
         )
         axes[pc_idx].grid(alpha=0.3)
     axes[0].set_ylabel("density (per model)", fontsize=12)
-    axes[-1].legend(fontsize=9, loc="upper right")
+    axes[-1].legend(fontsize=9, loc="upper left")
     fig.suptitle(
         "Expert distributions along the global top-4 principal axes",
         fontsize=16,
