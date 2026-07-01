@@ -208,7 +208,7 @@ def _save_signatures(F_all: np.ndarray, labels: np.ndarray,
 
     n_noise = int((labels == -1).sum())
     fig.suptitle(
-        f"HDBSCAN Cluster Signatures"
+        f"HDBSCAN Cluster Signatures",
         fontsize=18,
     )
     fig.tight_layout(rect=(0, 0, 1, 0.95))
