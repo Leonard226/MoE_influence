@@ -258,12 +258,11 @@ def main() -> None:
             fontsize=11,
         )
         axes[pc_idx].grid(alpha=0.3)
-    axes[0].set_ylabel("density (per model)", fontsize=11)
-    axes[-1].legend(fontsize=7, loc="upper right")
+    axes[0].set_ylabel("density (per model)", fontsize=12)
+    axes[-1].legend(fontsize=9, loc="upper right")
     fig.suptitle(
         "Expert distributions along the global top-{} principal axes\n"
-        "(common basis from pooled, mean-centered F_all)".format(k_hist),
-        fontsize=12,
+        fontsize=16,
     )
     fig.tight_layout()
     out_c = OUT_DIR / "features_shared_axis_distributions.pdf"
