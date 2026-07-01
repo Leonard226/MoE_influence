@@ -209,7 +209,7 @@ def _save_signatures(F_all: np.ndarray, labels: np.ndarray,
     n_noise = int((labels == -1).sum())
     fig.suptitle(
         f"HDBSCAN Cluster Signatures"
-        fontsize=20,
+        fontsize=18,
     )
     fig.tight_layout(rect=(0, 0, 1, 0.95))
     out_path = out_dir / "clusters_signatures.pdf"
@@ -244,13 +244,13 @@ def _save_umap_by_cluster(Z: np.ndarray, labels: np.ndarray,
         if show_noise and noise.any():
             ax.scatter(Z[noise, 0], Z[noise, 1], s=1.5, color="lightgray",
                        alpha=0.10, edgecolors="none", rasterized=True,
-                       label=f"noise (n={int(noise.sum())})")
+                       label=f"noise (size={int(noise.sum())})")
         for c in draw_order:
             col = palette[unique.index(c)]
             mask = labels == c
             ax.scatter(Z[mask, 0], Z[mask, 1], s=7, color=col, alpha=0.85,
                        edgecolors="none", rasterized=True,
-                       label=f"cluster {c} (n={cluster_sizes[c]})")
+                       label=f"cluster {c} (size={cluster_sizes[c]})")
         for c in unique:
             if cluster_sizes[c] < label_min_size:
                 continue
@@ -262,8 +262,8 @@ def _save_umap_by_cluster(Z: np.ndarray, labels: np.ndarray,
                               facecolor="white", edgecolor="black",
                               linewidth=0.7, alpha=0.92))
         ax.set_xticks([]); ax.set_yticks([])
-        ax.set_xlabel("UMAP-1", fontsize=13)
-        ax.set_ylabel("UMAP-2", fontsize=13)
+        ax.set_xlabel("UMAP-1", fontsize=16)
+        ax.set_ylabel("UMAP-2", fontsize=16)
 
     fig, axes = plt.subplots(1, 2, figsize=(22, 10))
     _draw_panel(axes[0], show_noise=True, label_min_size=50)
@@ -336,8 +336,8 @@ def _save_composite_umap(Z: np.ndarray, model_idx: np.ndarray,
                         color=model_colors[i], alpha=0.55,
                         edgecolors="none", rasterized=True,
                         label=f"{models[i]} (n={int(mask.sum())})")
-    axes[0].set_title("Coloured by model", fontsize=14)
-    axes[0].legend(loc="upper left", fontsize=10, framealpha=0.92,
+    axes[0].set_title("Coloured by model", fontsize=18)
+    axes[0].legend(loc="upper right", fontsize=16, framealpha=0.92,
                    markerscale=3.0)
 
     # ----- Right: coloured by HDBSCAN cluster -----
@@ -363,20 +363,20 @@ def _save_composite_umap(Z: np.ndarray, model_idx: np.ndarray,
             continue
         mask = labels == c
         cx, cy = Z[mask, 0].mean(), Z[mask, 1].mean()
-        axes[1].text(cx, cy, str(c), fontsize=11, fontweight="bold",
+        axes[1].text(cx, cy, str(c), fontsize=12, fontweight="bold",
                      ha="center", va="center",
                      bbox=dict(boxstyle="round,pad=0.22", facecolor="white",
                                edgecolor="black", linewidth=0.7, alpha=0.92))
-    axes[1].set_title("Coloured by HDBSCAN cluster", fontsize=14)
-    axes[1].legend(loc="upper left", fontsize=8, framealpha=0.92,
+    axes[1].set_title("Coloured by HDBSCAN cluster", fontsize=18)
+    axes[1].legend(loc="upper left", fontsize=16, framealpha=0.92,
                    markerscale=2.5,
                    ncol=2 if len(unique) > 8 else 1)
 
     for ax in axes:
         ax.set_xticks([]); ax.set_yticks([])
         ax.set_xlim(xlim); ax.set_ylim(ylim)
-        ax.set_xlabel("UMAP-1", fontsize=13)
-    axes[0].set_ylabel("UMAP-2", fontsize=13)
+        ax.set_xlabel("UMAP-1", fontsize=14)
+    axes[0].set_ylabel("UMAP-2", fontsize=14)
 
     fig.tight_layout()
     out_path = out_dir / "clusters_composite_umap.pdf"
