@@ -207,10 +207,6 @@ def _save_signatures(F_all: np.ndarray, labels: np.ndarray,
         axes[idx // n_cols, idx % n_cols].axis("off")
 
     n_noise = int((labels == -1).sum())
-    fig.suptitle(
-        f"HDBSCAN Cluster Signatures",
-        fontsize=18,
-    )
     fig.tight_layout(rect=(0, 0, 1, 0.95))
     out_path = out_dir / "clusters_signatures.pdf"
     fig.savefig(out_path, dpi=dpi)
