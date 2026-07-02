@@ -41,12 +41,20 @@ def main() -> None:
     p = argparse.ArgumentParser(description=__doc__,
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--task", default="c4")
+    p.add_argument("--top-n-ids", type=int, default=10,
+                   help="Also print (layer, expert_idx_in_layer, out) for the "
+                        "top-N experts per model (default 10). Useful for "
+                        "identifying which specific experts sit at the head "
+                        "of the out-strength distribution.")
     args = p.parse_args()
 
+    # -------- Block 1: the rank-value summary (as before) ------------------
     header = (f"{'model':<18s} {'V':>6s}  "
               + "  ".join(f"{'top' + str(k):>11s}" for k in RANKS))
     print(header)
     print("-" * len(header))
+
+    top_id_records: dict[str, list[dict]] = {}
     for m in MODELS:
         path = CIRCUITS / f"dag_{m}_{args.task}.pt"
         if not path.exists():
@@ -64,12 +72,46 @@ def main() -> None:
         fwd = (s_idx < r_idx).expand_as(W)
         W_fwd = W * fwd.to(W.dtype)
         # out(v) = sum over receivers (l, n) of |W(v -> l, n)|
-        out_strength = W_fwd.abs().sum(dim=(2, 3)).reshape(-1).numpy()
-        V = int(out_strength.size)
-        sorted_desc = np.sort(out_strength)[::-1]
+        out_LN = W_fwd.abs().sum(dim=(2, 3)).cpu().numpy()   # shape (L, N)
+        out_flat = out_LN.reshape(-1)                        # flat[l*N + n]
+        V = int(out_flat.size)
+        # Rank all experts descending by out-strength.
+        order = np.argsort(-out_flat)
+        sorted_desc = out_flat[order]
         tops = [float(sorted_desc[k - 1]) for k in RANKS]
         print(f"{m:<18s} {V:>6d}  "
               + "  ".join(f"{t:>11.4g}" for t in tops))
+
+        # Stash top-N (layer, expert_idx, value) records for Block 2 below.
+        records = []
+        for rank in range(min(args.top_n_ids, V)):
+            flat = int(order[rank])
+            layer_idx = flat // N
+            expert_idx = flat % N
+            records.append({
+                "rank": rank + 1,
+                "layer": layer_idx,
+                "expert_in_layer": expert_idx,
+                "out": float(out_flat[flat]),
+                "L": L, "N": N,
+            })
+        top_id_records[m] = records
+
+    # -------- Block 2: (layer, expert_idx) of top-N experts per model ------
+    print()
+    print("=" * 70)
+    print(f"Top-{args.top_n_ids} experts per model with (layer, expert_idx_in_layer)")
+    print("=" * 70)
+    for m in MODELS:
+        if m not in top_id_records:
+            continue
+        recs = top_id_records[m]
+        L = recs[0]["L"]; N = recs[0]["N"]
+        print(f"\n[{m}]  (L = {L} layers, N = {N} experts per layer)")
+        print(f"  {'rank':>4s}  {'layer':>5s}  {'expert':>6s}  {'out(v)':>10s}")
+        for r in recs:
+            print(f"  {r['rank']:>4d}  {r['layer']:>5d}  "
+                  f"{r['expert_in_layer']:>6d}  {r['out']:>10.4g}")
 
 
 if __name__ == "__main__":
