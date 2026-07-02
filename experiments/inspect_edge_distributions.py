@@ -71,6 +71,7 @@ def _compute_stats(model: str, task: str) -> dict:
     W_abs = W_fwd.abs().reshape(V, V).cpu().numpy().astype(np.float64)
     edges = W_abs[W_abs > 0]                  # nonzero forward edges only
     out_mass = W_abs.sum(axis=1)              # outgoing mass per expert (V,)
+    in_mass  = W_abs.sum(axis=0)              # incoming mass per expert (V,)
 
     # Q-quantile thresholds taken over the same set the sweep uses (nonzero forward).
     thresholds = {Q: float(np.quantile(edges, Q)) if len(edges) > 0 else 0.0
@@ -96,9 +97,18 @@ def _compute_stats(model: str, task: str) -> dict:
         "out_mass_pct": (np.percentile(out_mass[out_mass > 0],
                                         [1, 5, 25, 50, 75, 95, 99]).tolist()
                          if (out_mass > 0).any() else []),
+        "in_mass_zero_count": int((in_mass == 0).sum()),
+        "in_mass_min": float(in_mass.min()),
+        "in_mass_max": float(in_mass.max()),
+        "in_mass_mean": float(in_mass.mean()),
+        "in_mass_median": float(np.median(in_mass)),
+        "in_mass_pct": (np.percentile(in_mass[in_mass > 0],
+                                       [1, 5, 25, 50, 75, 95, 99]).tolist()
+                        if (in_mass > 0).any() else []),
         "thresholds": thresholds,
         "edges": edges,                        # raw |W| (plot on log axis)
-        "out_mass": out_mass,                  # raw per-expert mass
+        "out_mass": out_mass,                  # raw per-expert out-strength
+        "in_mass":  in_mass,                   # raw per-expert in-strength (sensitivity)
     }
 
 
@@ -146,7 +156,12 @@ def _save_per_model_panels(rows: list[dict], kind: str, task: str,
             xlabel = "|W|  (forward, nonzero edges only; log-scale)"
             title = (f"{r['model']}\nV={r['V']}, |E|={r['n_fwd_present']:,} "
                      f"({100*r['edge_density']:.1f}% density)")
-        else:  # mass
+        elif kind == "in_mass":
+            data = r["in_mass"][r["in_mass"] > 0]
+            xlabel = "incoming mass per expert  (log-scale)"
+            title = (f"{r['model']}\n"
+                     f"zero-in-mass experts: {r['in_mass_zero_count']}/{r['V']}")
+        else:  # 'mass' (outgoing)
             data = r["out_mass"][r["out_mass"] > 0]
             xlabel = "outgoing mass per expert  (log-scale)"
             title = (f"{r['model']}\n"
@@ -172,14 +187,18 @@ def _save_per_model_panels(rows: list[dict], kind: str, task: str,
     for j in range(len(rows), 8):
         axes[j].axis("off")
 
-    fig.suptitle(
-        ("Forward |W| distribution per model (log x-axis)" if kind == "edges"
-         else "Outgoing mass per expert per model (log x-axis)")
-        + f"   (task = {task})",
-        fontsize=14,
-    )
+    if kind == "edges":
+        suptitle = "Forward |W| distribution per model (log x-axis)"
+        fname_stem = "edge_weights"
+    elif kind == "in_mass":
+        suptitle = "Incoming mass per expert per model (log x-axis)"
+        fname_stem = "incoming_mass"
+    else:
+        suptitle = "Outgoing mass per expert per model (log x-axis)"
+        fname_stem = "outgoing_mass"
+    fig.suptitle(f"{suptitle}   (task = {task})", fontsize=14)
     fig.tight_layout()
-    out_path = out_dir / f"{'edge_weights' if kind == 'edges' else 'outgoing_mass'}_{task}.pdf"
+    out_path = out_dir / f"{fname_stem}_{task}.pdf"
     fig.savefig(out_path, dpi=dpi)
     plt.close(fig)
     return out_path
@@ -210,6 +229,11 @@ def _save_ridge(rows: list[dict], kind: str, task: str,
         xlabel = r"Edge weight magnitude ($W_{\mathrm{softmax}}$)"
         ylabel = "Fraction of edges per bin"
         fname = f"edge_weights_ridge_{task}.pdf"
+    elif kind == "in_mass":
+        get_data = lambda r: r["in_mass"][r["in_mass"] > 0]
+        xlabel = r"Per-expert sensitivity ($\mathrm{in}(v)$)"
+        ylabel = "Fraction of experts per bin"
+        fname = f"incoming_mass_ridge_{task}.pdf"
     else:
         get_data = lambda r: r["out_mass"][r["out_mass"] > 0]
         xlabel = r"Per-expert global influence ($\mathrm{out}(v)$)"
@@ -337,12 +361,14 @@ def main():
 
     _print_summary(rows)
 
-    p1 = _save_per_model_panels(rows, "edges", args.task, out_dir, args.dpi)
-    p2 = _save_per_model_panels(rows, "mass", args.task, out_dir, args.dpi)
-    p5 = _save_ridge(rows, "edges", args.task, out_dir, args.dpi)
-    p6 = _save_ridge(rows, "mass", args.task, out_dir, args.dpi)
+    p1 = _save_per_model_panels(rows, "edges",   args.task, out_dir, args.dpi)
+    p2 = _save_per_model_panels(rows, "mass",    args.task, out_dir, args.dpi)
+    p3 = _save_per_model_panels(rows, "in_mass", args.task, out_dir, args.dpi)
+    p5 = _save_ridge(rows, "edges",   args.task, out_dir, args.dpi)
+    p6 = _save_ridge(rows, "mass",    args.task, out_dir, args.dpi)
+    p7 = _save_ridge(rows, "in_mass", args.task, out_dir, args.dpi)
     print(f"\n  saved:")
-    for p in (p1, p2, p5, p6):
+    for p in (p1, p2, p3, p5, p6, p7):
         print(f"    {p}")
 
 
