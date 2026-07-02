@@ -337,6 +337,131 @@ def _save_ridge(rows: list[dict], kind: str, task: str,
 
 
 
+def _save_ridge_out_in(rows: list[dict], task: str,
+                       out_dir: Path, dpi: int) -> Path:
+    """Combined ridge overlaying out(v) and in(v) per-model distributions in
+    a single figure: 2 columns (linear, log y) x n_models rows, shared x-axis
+    (log, spanning both distributions' combined range). Within each panel the
+    two histograms are drawn on identical axes, so the asymmetry per model is
+    directly visible: where the out tail sits vs where the in tail sits.
+    """
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    from matplotlib.patches import Patch
+
+    rows = [r for r in rows if not r.get("missing")]
+    if not rows:
+        return out_dir / "ridge_empty.pdf"
+    rows = sorted(rows, key=lambda r: MODELS.index(r["model"])
+                                       if r["model"] in MODELS else 99)
+
+    OUT_COLOR = "#4C9A8A"      # matches the existing single-mass ridge (out).
+    OUT_EDGE  = "#2F6F63"
+    IN_COLOR  = "#D9843B"      # complementary orange for in.
+    IN_EDGE   = "#8A5424"
+
+    # Pull both arrays per model, dropping missing.
+    arrays: list[tuple[str, np.ndarray, np.ndarray]] = []
+    for r in rows:
+        out = r["out_mass"][r["out_mass"] > 0]
+        inm = r["in_mass"][r["in_mass"]  > 0]
+        if len(out) == 0 and len(inm) == 0:
+            continue
+        arrays.append((r["model"], out, inm))
+    if not arrays:
+        return out_dir / f"out_in_ridge_{task}.pdf"
+
+    # Global bin range: min/max across BOTH out and in across ALL models.
+    N_BINS = 100
+    all_pos = np.concatenate([np.concatenate([o, i]) for _, o, i in arrays])
+    global_min = float(all_pos.min())
+    global_max = float(all_pos.max())
+    bins = np.geomspace(global_min, global_max, N_BINS)
+
+    # Histograms + shared-scale bookkeeping.
+    panel_data: list[tuple[str, np.ndarray, np.ndarray]] = []
+    y_max = 0.0
+    y_min_pos = float("inf")
+    for model, out, inm in arrays:
+        cnt_o, _ = np.histogram(out, bins=bins)
+        cnt_i, _ = np.histogram(inm, bins=bins)
+        frac_o = cnt_o / cnt_o.sum() if cnt_o.sum() else cnt_o.astype(float)
+        frac_i = cnt_i / cnt_i.sum() if cnt_i.sum() else cnt_i.astype(float)
+        panel_data.append((model, frac_o, frac_i))
+        for frac in (frac_o, frac_i):
+            if frac.size:
+                y_max = max(y_max, float(frac.max()))
+                pos = frac[frac > 0]
+                if pos.size:
+                    y_min_pos = min(y_min_pos, float(pos.min()))
+    y_max_disp = y_max * 1.08 if y_max > 0 else 1.0
+    lo_y = y_min_pos * 0.5 if np.isfinite(y_min_pos) else 1e-5
+
+    n_rows = len(panel_data)
+    fig, axes = plt.subplots(n_rows, 2,
+                             figsize=(13, 1.55 * n_rows + 1.0),
+                             sharex=True, sharey=False)
+    if n_rows == 1:
+        axes = axes.reshape(1, 2)
+
+    for ri, (model, frac_o, frac_i) in enumerate(panel_data):
+        for ci, scale in enumerate(("linear", "log")):
+            ax = axes[ri, ci]
+            # Draw OUT (behind) and IN (front) as semi-transparent stairs.
+            ax.stairs(frac_o, edges=bins, fill=True,
+                      facecolor=OUT_COLOR, edgecolor=OUT_EDGE,
+                      linewidth=0.6, alpha=0.65)
+            ax.stairs(frac_i, edges=bins, fill=True,
+                      facecolor=IN_COLOR,  edgecolor=IN_EDGE,
+                      linewidth=0.6, alpha=0.55)
+            ax.set_xscale("log")
+            ax.set_xlim(global_min, global_max)
+            if scale == "linear":
+                ax.set_ylim(0, y_max_disp)
+            else:
+                ax.set_yscale("log")
+                ax.set_ylim(lo_y, y_max_disp)
+            ax.tick_params(axis="x", which="major", labelsize=10)
+            ax.tick_params(axis="x", which="minor", labelsize=0, length=2)
+            ax.tick_params(axis="y", which="major", labelsize=9)
+            for sp in ("top", "right"):
+                ax.spines[sp].set_visible(False)
+            ax.grid(axis="y", linestyle="--", linewidth=0.4, alpha=0.45)
+            if ci == 1:
+                ax.yaxis.set_label_position("right")
+                ax.set_ylabel(model, rotation=90, ha="center", va="center",
+                              fontsize=10, labelpad=12)
+
+    axes[0, 0].set_title("Linear scale",      fontsize=14, pad=4, fontweight="bold")
+    axes[0, 1].set_title("Logarithmic scale", fontsize=14, pad=4, fontweight="bold")
+
+    xlabel = r"Per-expert mass:  $\mathrm{out}(v)$ vs.\ $\mathrm{in}(v)$"
+    for ci in (0, 1):
+        axes[-1, ci].set_xlabel(xlabel, fontsize=13, labelpad=6, fontweight="bold")
+
+    fig.supylabel("Fraction of experts per bin",
+                  fontsize=13, x=0.028, fontweight="bold")
+
+    # Single top-level legend distinguishing the two distributions.
+    handles = [
+        Patch(facecolor=OUT_COLOR, edgecolor=OUT_EDGE,
+              alpha=0.65, label=r"$\mathrm{out}(v)$  (global influence)"),
+        Patch(facecolor=IN_COLOR,  edgecolor=IN_EDGE,
+              alpha=0.55, label=r"$\mathrm{in}(v)$  (sensitivity)"),
+    ]
+    fig.legend(handles=handles, loc="upper center", ncol=2,
+               fontsize=11, frameon=False,
+               bbox_to_anchor=(0.5, 0.995))
+
+    # Reserve top-strip for the legend + right margin for model labels.
+    fig.tight_layout(rect=(0.035, 0, 0.96, 0.965))
+    out_path = out_dir / f"out_in_ridge_{task}.pdf"
+    fig.savefig(out_path, dpi=dpi)
+    plt.close(fig)
+    return out_path
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -367,8 +492,9 @@ def main():
     p5 = _save_ridge(rows, "edges",   args.task, out_dir, args.dpi)
     p6 = _save_ridge(rows, "mass",    args.task, out_dir, args.dpi)
     p7 = _save_ridge(rows, "in_mass", args.task, out_dir, args.dpi)
+    p8 = _save_ridge_out_in(rows,     args.task, out_dir, args.dpi)
     print(f"\n  saved:")
-    for p in (p1, p2, p3, p5, p6, p7):
+    for p in (p1, p2, p3, p5, p6, p7, p8):
         print(f"    {p}")
 
 
