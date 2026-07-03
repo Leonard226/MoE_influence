@@ -120,7 +120,8 @@ def main() -> None:
     p.add_argument("--include-layers", type=float, default=0.75,
                    help="Su's include_layers fraction for the SE overlay (default 0.75).")
     p.add_argument("--top-k-global", type=int, default=5,
-                   help="Number of top-out experts to overlay as 'Top-K by out' (default 5).")
+                   help="Number of top experts (by the --x-axis metric) to "
+                        "overlay as 'Top-K by <x-axis>' (default 5).")
     p.add_argument("--out-dir", default=str(DEFAULT_OUT_DIR))
     args = p.parse_args()
 
@@ -181,12 +182,12 @@ def main() -> None:
                        s=60, linewidths=1.3,
                        label=f"Super Expert (n={se_mask.sum()})")
 
-        # Overlay: top-K globals by out as black squares
-        top_g = np.argsort(-d["out"])[:args.top_k_global]
+        # Overlay: top-K by the x-axis metric, as black squares
+        top_g = np.argsort(-d[x_key])[:args.top_k_global]
         ax.scatter(x_v[top_g], act_v[top_g],
                    facecolors="none", edgecolors="black",
                    marker="s", s=80, linewidths=1.3,
-                   label=f"Top-{args.top_k_global} by out")
+                   label=f"Top-{args.top_k_global} by {x_key}")
 
         ax.set_xscale("log")
         ax.set_yscale("log")
