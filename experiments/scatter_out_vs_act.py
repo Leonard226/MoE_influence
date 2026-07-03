@@ -118,10 +118,12 @@ def main() -> None:
     p = argparse.ArgumentParser(description=__doc__,
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--task", default="c4")
-    p.add_argument("--x-axis", choices=["out", "in", "load"], default="out",
-                   help="Which routing-graph strength to put on the x-axis "
-                        "(default 'out'). Overlays: red circles = Super Experts, "
-                        "black squares = top-K by the same x-axis metric.")
+    p.add_argument("--x-axis", choices=["out", "in", "load", "act"], default="out",
+                   help="X-axis metric (default 'out'). Overlays: red circles "
+                        "= Super Experts, black squares = top-K by the x-axis "
+                        "metric.")
+    p.add_argument("--y-axis", choices=["out", "in", "load", "act"], default="act",
+                   help="Y-axis metric (default 'act').")
     p.add_argument("--include-layers", type=float, default=0.75,
                    help="Su's include_layers fraction for the SE overlay (default 0.75).")
     p.add_argument("--top-k-global", type=int, default=5,
@@ -162,34 +164,35 @@ def main() -> None:
     axes = axes.ravel()
     cmap = plt.get_cmap("viridis")
 
-    x_key = args.x_axis
+    x_key, y_key = args.x_axis, args.y_axis
     x_label = rf"$\mathrm{{{x_key}}}(v)$"
+    y_label = rf"$\mathrm{{{y_key}}}(v)$"
     sc = None
     for i, (m, d) in enumerate(data.items()):
         ax = axes[i]
         x_v = d[x_key].copy()
-        act_v = d["act"].copy()
+        y_v = d[y_key].copy()
         # Log axes: replace non-positives with (min positive)/10 so the point
         # is still visible at the axis floor.
-        for arr in (x_v, act_v):
+        for arr in (x_v, y_v):
             pos = arr[arr > 0]
             floor = pos.min() / 10 if pos.size else 1e-12
             arr[arr <= 0] = floor
         depth_frac = d["depth"] / max(1, d["L"] - 1)
-        sc = ax.scatter(x_v, act_v, c=depth_frac, cmap=cmap, vmin=0, vmax=1,
+        sc = ax.scatter(x_v, y_v, c=depth_frac, cmap=cmap, vmin=0, vmax=1,
                         s=6, alpha=0.5, edgecolors="none")
 
         # Overlay: SE (Su-exact) as red circles
         se_mask = _se_mask(m, d["act_LN"], args.include_layers)
         if se_mask.any():
-            ax.scatter(x_v[se_mask], act_v[se_mask],
+            ax.scatter(x_v[se_mask], y_v[se_mask],
                        facecolors="none", edgecolors="crimson",
                        s=60, linewidths=1.3,
                        label=f"Super Expert (n={se_mask.sum()})")
 
         # Overlay: top-K by the x-axis metric, as black squares
         top_g = np.argsort(-d[x_key])[:args.top_k_global]
-        ax.scatter(x_v[top_g], act_v[top_g],
+        ax.scatter(x_v[top_g], y_v[top_g],
                    facecolors="none", edgecolors="black",
                    marker="s", s=80, linewidths=1.3,
                    label=f"Top-{args.top_k_global} by {x_key}")
@@ -198,7 +201,7 @@ def main() -> None:
         ax.set_yscale("log")
         ax.set_title(m, fontsize=12)
         ax.set_xlabel(x_label)
-        ax.set_ylabel(r"$\mathrm{act}(v)$")
+        ax.set_ylabel(y_label)
         ax.grid(True, which="both", alpha=0.2)
         ax.legend(fontsize=8, loc="lower left", framealpha=0.85,
                   labelspacing=1.2, handletextpad=0.8, borderpad=0.6)
@@ -211,7 +214,7 @@ def main() -> None:
                             label="fractional layer depth")
         cbar.set_ticks([0.0, 0.25, 0.5, 0.75, 1.0])
 
-    out_path = out_dir / f"{args.x_axis}_vs_act_scatter_{args.task}.pdf"
+    out_path = out_dir / f"{args.x_axis}_vs_{args.y_axis}_scatter_{args.task}.pdf"
     fig.savefig(out_path, dpi=200)
     print(f"\nSaved: {out_path}")
 
