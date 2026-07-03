@@ -126,8 +126,8 @@ def main() -> None:
     # --- Collect features + correlations ---
     data = {}
     print(f"{'model':<18s} {'V':>6s}  {'rho(out,act)':>13s}  {'rho(in,act)':>13s}  "
-          f"{'rho(out,in)':>13s}  {'rho(out,act|d)':>15s}")
-    print("-" * 86)
+          f"{'rho(out,in)':>13s}  {'rho(out,act|d)':>15s}  {'rho(in,act|d)':>14s}")
+    print("-" * 102)
     for m in MODELS:
         r = _load_features(m, args.task)
         if r is None:
@@ -136,11 +136,12 @@ def main() -> None:
         rho_out_act, _ = spearmanr(r["out"], r["act"])
         rho_in_act, _ = spearmanr(r["in"], r["act"])
         rho_out_in, _ = spearmanr(r["out"], r["in"])
-        rho_partial = _partial_spearman(r["out"], r["act"], r["depth"])
+        rho_partial_out = _partial_spearman(r["out"], r["act"], r["depth"])
+        rho_partial_in = _partial_spearman(r["in"], r["act"], r["depth"])
         V = r["out"].size
         print(f"{m:<18s} {V:>6d}  {rho_out_act:>13.3f}  {rho_in_act:>13.3f}  "
-              f"{rho_out_in:>13.3f}  {rho_partial:>15.3f}")
-        data[m] = {**r, "rho_out_act": rho_out_act, "rho_partial": rho_partial}
+              f"{rho_out_in:>13.3f}  {rho_partial_out:>15.3f}  {rho_partial_in:>14.3f}")
+        data[m] = {**r, "rho_out_act": rho_out_act, "rho_partial": rho_partial_out}
 
     if not data:
         print("No models found; aborting.")
@@ -171,31 +172,30 @@ def main() -> None:
         if se_mask.any():
             ax.scatter(out_v[se_mask], act_v[se_mask],
                        facecolors="none", edgecolors="crimson",
-                       s=90, linewidths=1.4, label=f"SE (Su-exact, n={se_mask.sum()})")
+                       s=60, linewidths=1.3,
+                       label=f"Super Expert (Su et al., n={se_mask.sum()})")
 
         # Overlay: top-K globals by out as black squares
         top_g = np.argsort(-d["out"])[:args.top_k_global]
         ax.scatter(out_v[top_g], act_v[top_g],
                    facecolors="none", edgecolors="black",
-                   marker="s", s=140, linewidths=1.4,
-                   label=f"Global (top-{args.top_k_global} by out)")
+                   marker="s", s=80, linewidths=1.3,
+                   label=f"Top-{args.top_k_global} by out")
 
         ax.set_xscale("log")
         ax.set_yscale("log")
-        ax.set_title(f"{m}  "
-                     rf"$\rho_S={d['rho_out_act']:.2f}$, "
-                     rf"$\rho_{{S|d}}={d['rho_partial']:.2f}$",
-                     fontsize=10)
+        ax.set_title(m, fontsize=12)
         ax.set_xlabel(r"$\mathrm{out}(v)$")
         ax.set_ylabel(r"$\mathrm{act}(v)$")
         ax.grid(True, which="both", alpha=0.2)
-        ax.legend(fontsize=7, loc="lower right", framealpha=0.85)
+        ax.legend(fontsize=8, loc="lower left", framealpha=0.85,
+                  labelspacing=1.2, handletextpad=0.8, borderpad=0.6)
 
     for j in range(len(data), len(axes)):
         axes[j].set_visible(False)
 
     if sc is not None:
-        cbar = fig.colorbar(sc, ax=axes.tolist(), shrink=0.7,
+        cbar = fig.colorbar(sc, ax=axes.tolist(), shrink=1.0, aspect=40,
                             label="fractional layer depth")
         cbar.set_ticks([0.0, 0.25, 0.5, 0.75, 1.0])
 
