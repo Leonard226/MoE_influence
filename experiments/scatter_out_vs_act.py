@@ -57,12 +57,13 @@ NUM_DENSE = {
 
 
 def _load_features(model: str, task: str):
-    """Return dict with flat np.float64 arrays: out, in, act, depth (+L, N)."""
+    """Return dict with flat np.float64 arrays: out, in, load, act, depth (+L, N).
+    load(v) = n_tok(v) / mean_{n'} n_tok(l, n')  (per-layer mean-normalised)."""
     path = CIRCUITS_DIR / f"dag_{model}_{task}.pt"
     if not path.exists():
         return None
     dag = torch.load(path, weights_only=False, map_location="cpu")
-    if "W_softmax" not in dag or "act" not in dag:
+    if "W_softmax" not in dag or "act" not in dag or "n_tokens_selected" not in dag:
         return None
     W = dag["W_softmax"].to(torch.float64)
     L, N, _, _ = W.shape
@@ -73,8 +74,12 @@ def _load_features(model: str, task: str):
     out_LN = W_fwd.abs().sum(dim=(2, 3)).numpy()   # sender side
     in_LN = W_fwd.abs().sum(dim=(0, 1)).numpy()    # receiver side
     act_LN = dag["act"].to(torch.float64).numpy()
+    n_tok = dag["n_tokens_selected"].to(torch.float64).numpy()  # [L, N]
+    layer_mean = n_tok.mean(axis=1, keepdims=True).clip(min=1e-12)
+    load_LN = n_tok / layer_mean                    # [L, N], mean = 1 per layer
     depth_LN = np.broadcast_to(np.arange(L)[:, None], (L, N)).astype(np.float64)
     return {"out": out_LN.reshape(-1), "in": in_LN.reshape(-1),
+            "load": load_LN.reshape(-1),
             "act": act_LN.reshape(-1), "depth": depth_LN.reshape(-1),
             "L": L, "N": N, "act_LN": act_LN}
 
@@ -113,10 +118,10 @@ def main() -> None:
     p = argparse.ArgumentParser(description=__doc__,
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--task", default="c4")
-    p.add_argument("--x-axis", choices=["out", "in"], default="out",
+    p.add_argument("--x-axis", choices=["out", "in", "load"], default="out",
                    help="Which routing-graph strength to put on the x-axis "
-                        "(default 'out'). Overlays are unchanged: red circles = "
-                        "Super Experts, black squares = top-K by out.")
+                        "(default 'out'). Overlays: red circles = Super Experts, "
+                        "black squares = top-K by the same x-axis metric.")
     p.add_argument("--include-layers", type=float, default=0.75,
                    help="Su's include_layers fraction for the SE overlay (default 0.75).")
     p.add_argument("--top-k-global", type=int, default=5,
