@@ -328,13 +328,18 @@ def show_enhanced_layered_graph(g, quantile: float, target: str, model: str, dat
     G = nx.DiGraph()
     pos, labels = {}, {}
 
-    # Left-to-right DAG layout: layer index on the x-axis (increasing to
-    # the right), expert index on the y-axis (expert 0 at the top, indices
-    # increasing downward, mirroring how layers used to be laid out).
+    # Orientation is chosen by shape: DEEP models (more layers than experts)
+    # are drawn left-to-right (layers on x-axis); WIDE models (more experts
+    # than layers) are drawn top-to-bottom (experts on x-axis). Keeps every
+    # plot roughly landscape-ish rather than exploding one dimension.
+    is_deep = N_LAYERS > N_EXPERTS
     X_SPACING, Y_SPACING = 1000, 300
     for node_idx in active_node_indices:
         layer, expert_idx = node_idx // N_EXPERTS, node_idx % N_EXPERTS
-        pos[node_idx] = (layer * X_SPACING, -expert_idx * Y_SPACING)
+        if is_deep:
+            pos[node_idx] = (layer * X_SPACING, -expert_idx * Y_SPACING)
+        else:
+            pos[node_idx] = (expert_idx * X_SPACING, -layer * Y_SPACING)
         labels[node_idx] = f"L{layer_labels[layer]}\nE{expert_idx}"
         G.add_node(node_idx)
 
@@ -386,20 +391,22 @@ def show_enhanced_layered_graph(g, quantile: float, target: str, model: str, dat
     _node_diameter_in = 2 * np.sqrt(_max_marker_area / np.pi) / 72
 
     # Center-to-center spacing (inches) between rendered nodes. Adjacent
-    # experts (now on the y-axis) get the tighter 1.00x spacing; adjacent
-    # layers (now on the x-axis) get 1.03x for a hairline visible gap.
-    _spacing_h_in = _node_diameter_in * 1.03   # horizontal = between layers
-    _spacing_v_in = _node_diameter_in * 1.00   # vertical   = between experts
+    # experts get the tighter 1.00x spacing (nodes just touch); adjacent
+    # layers get 1.03x for a hairline visible gap. Which axis gets which
+    # multiplier follows the orientation chosen above.
+    _spacing_layer_in = _node_diameter_in * 1.03
+    _spacing_expert_in = _node_diameter_in * 1.00
 
-    # ax x-span (in X_SPACING units) = N_LAYERS (0.5-unit padding on each
-    # side of layer 0 / layer L-1, see ax.set_xlim below).
-    # ax y-span (in Y_SPACING units) = N_EXPERTS (0.5-unit padding on each
-    # side of expert 0 / expert N-1, see ax.set_ylim below).
-    # Margins reserve space for title (top), x/y-axis labels + ticks,
-    # colorbar (right).
+    # Deep -> x is layers, y is experts. Wide -> x is experts, y is layers.
+    # Margins reserve space for title (top), x/y-axis labels + ticks, and
+    # the colorbar (right).
     MARGIN_W, MARGIN_H = 4.5, 3.5
-    fig_w = max(6.0, N_LAYERS * _spacing_h_in + MARGIN_W)
-    fig_h = max(5.0, N_EXPERTS * _spacing_v_in + MARGIN_H)
+    if is_deep:
+        fig_w = max(6.0, N_LAYERS * _spacing_layer_in + MARGIN_W)
+        fig_h = max(5.0, N_EXPERTS * _spacing_expert_in + MARGIN_H)
+    else:
+        fig_w = max(6.0, N_EXPERTS * _spacing_expert_in + MARGIN_W)
+        fig_h = max(5.0, N_LAYERS * _spacing_layer_in + MARGIN_H)
     plt.figure(figsize=(fig_w, fig_h))
     ax = plt.gca()
 
@@ -466,22 +473,31 @@ def show_enhanced_layered_graph(g, quantile: float, target: str, model: str, dat
     ax.set_axis_on()
     ax.tick_params(left=True, bottom=True, labelleft=True, labelbottom=True)
     ax.xaxis.set_major_locator(MultipleLocator(1 * X_SPACING))
-    def _layer_tick_x(x, _p, _ll=layer_labels):
-        # X-axis position of layer L is L * X_SPACING (increasing to the
-        # right). Suppress any tick outside [0, N_LAYERS - 1].
-        idx = int(round(x / X_SPACING))
-        return f"{_ll[idx]}" if 0 <= idx < len(_ll) else ""
-    ax.xaxis.set_major_formatter(FuncFormatter(_layer_tick_x))
     ax.yaxis.set_major_locator(MultipleLocator(1 * Y_SPACING))
-    def _expert_tick_y(y, _p, _N=N_EXPERTS):
-        # Expert 0 is at y=0; each subsequent expert is one Y_SPACING
-        # *below*. Positive y is padding above expert 0 -- suppress the
-        # phantom tick that would otherwise mirror as "expert 1".
-        if y > 1e-9:
-            return ""
-        idx = int(round(-y / Y_SPACING))
-        return f"{idx}" if 0 <= idx < _N else ""
-    ax.yaxis.set_major_formatter(FuncFormatter(_expert_tick_y))
+    if is_deep:
+        # DEEP orientation: x-axis carries layers (positive, left-to-right),
+        # y-axis carries experts (expert 0 at top, indices increasing down).
+        def _x_tick(x, _p, _ll=layer_labels):
+            idx = int(round(x / X_SPACING))
+            return f"{_ll[idx]}" if 0 <= idx < len(_ll) else ""
+        def _y_tick(y, _p, _N=N_EXPERTS):
+            if y > 1e-9:      # padding above expert 0
+                return ""
+            idx = int(round(-y / Y_SPACING))
+            return f"{idx}" if 0 <= idx < _N else ""
+    else:
+        # WIDE orientation: x-axis carries experts (positive, left-to-right),
+        # y-axis carries layers (layer 0 at top, indices increasing down).
+        def _x_tick(x, _p, _N=N_EXPERTS):
+            idx = int(round(x / X_SPACING))
+            return f"{idx}" if 0 <= idx < _N else ""
+        def _y_tick(y, _p, _ll=layer_labels):
+            if y > 1e-9:      # padding above layer 0
+                return ""
+            idx = int(round(-y / Y_SPACING))
+            return f"{_ll[idx]}" if 0 <= idx < len(_ll) else ""
+    ax.xaxis.set_major_formatter(FuncFormatter(_x_tick))
+    ax.yaxis.set_major_formatter(FuncFormatter(_y_tick))
 
     sm = plt.cm.ScalarMappable(cmap=cmap, norm=norm)
     sm.set_array([])
@@ -507,16 +523,20 @@ def show_enhanced_layered_graph(g, quantile: float, target: str, model: str, dat
     # intentionally left blank rather than cropped — this makes layer position
     # readable across models and prevents the viz from misrepresenting where
     # super-experts sit in the stack.
-    # 0.5-unit padding on each side of the outermost layer/expert. Keeps
-    # visible whitespace symmetric on both sides, and holds the top padding
-    # below one full Y_SPACING so the tick locator never places a tick at
-    # +Y_SPACING (which would otherwise mirror as a bogus "expert 1" above
-    # expert 0).
-    ax.set_xlim(-X_SPACING * 0.5, (N_LAYERS - 1) * X_SPACING + X_SPACING * 0.5)
-    ax.set_ylim(-(N_EXPERTS - 1) * Y_SPACING - Y_SPACING * 0.5, Y_SPACING * 0.5)
-
-    ax.set_xlabel("Layers l")
-    ax.set_ylabel("Experts e")
+    # 0.5-unit padding on each side of the outermost node keeps whitespace
+    # symmetric, and the top padding is kept below one full Y_SPACING so
+    # the tick locator never places a tick at +Y_SPACING (which would
+    # otherwise mirror as a bogus "1" above whichever axis carries index 0).
+    if is_deep:
+        ax.set_xlim(-X_SPACING * 0.5, (N_LAYERS - 1) * X_SPACING + X_SPACING * 0.5)
+        ax.set_ylim(-(N_EXPERTS - 1) * Y_SPACING - Y_SPACING * 0.5, Y_SPACING * 0.5)
+        ax.set_xlabel("Layers l")
+        ax.set_ylabel("Experts e")
+    else:
+        ax.set_xlim(-X_SPACING * 0.5, (N_EXPERTS - 1) * X_SPACING + X_SPACING * 0.5)
+        ax.set_ylim(-(N_LAYERS - 1) * Y_SPACING - Y_SPACING * 0.5, Y_SPACING * 0.5)
+        ax.set_xlabel("Experts e")
+        ax.set_ylabel("Layers l")
     plt.tight_layout()
     plt.show()
 
