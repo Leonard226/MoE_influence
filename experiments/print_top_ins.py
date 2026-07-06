@@ -8,9 +8,10 @@ This is the raw (unnormalised) "sensitivity" of each expert: how strongly
 upstream experts' perturbations propagate into v's routing. The log-max-
 normalised version (in / max_v' in) is what feeds the F matrix as hat{in}(v).
 
-For each model, experts are sorted by in(v) descending and the values at
-ranks 1, 2, 3, 4, 5, 10 are reported (Block 1). A second block lists the
-(layer, expert_idx_in_layer, in) records for the top-N experts.
+For each model, experts are sorted by in(v) descending and the values
+at ranks 1..10, 20, plus the graph-wide median are reported (Block 1).
+A second block lists the (layer, expert_idx_in_layer, in) records for
+the top-N experts.
 
 Usage:
     python experiments/print_top_ins.py
@@ -36,7 +37,7 @@ MODELS = [
     "deepseek-v2-lite", "olmoe",
     "qwen3-30b-a3b", "qwen3-235b-a22b", "deepseek-v2",
 ]
-RANKS = [1, 2, 3, 4, 5, 10]
+RANKS = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 20]
 
 
 def main() -> None:
@@ -52,7 +53,8 @@ def main() -> None:
 
     # -------- Block 1: the rank-value summary ------------------------------
     header = (f"{'model':<18s} {'V':>6s}  "
-              + "  ".join(f"{'top' + str(k):>11s}" for k in RANKS))
+              + "  ".join(f"{'top' + str(k):>11s}" for k in RANKS)
+              + f"  {'median':>11s}")
     print(header)
     print("-" * len(header))
 
@@ -82,9 +84,12 @@ def main() -> None:
         # Rank all experts descending by in-strength.
         order = np.argsort(-in_flat)
         sorted_desc = in_flat[order]
-        tops = [float(sorted_desc[k - 1]) for k in RANKS]
+        tops = [float(sorted_desc[k - 1]) if k <= V else float("nan")
+                for k in RANKS]
+        med = float(np.median(sorted_desc))
         print(f"{m:<18s} {V:>6d}  "
-              + "  ".join(f"{t:>11.4g}" for t in tops))
+              + "  ".join(f"{t:>11.4g}" for t in tops)
+              + f"  {med:>11.4g}")
 
         # Stash top-N (layer, expert_idx, value) records for Block 2 below.
         records = []
