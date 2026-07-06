@@ -3,6 +3,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.colors as mcolors
 from matplotlib.ticker import MultipleLocator, FuncFormatter
+from mpl_toolkits.axes_grid1.inset_locator import inset_axes
 import networkx as nx
 
 def update_topk_per_sender(top_weight, top_prompt, top_pos, top_token,
@@ -383,13 +384,13 @@ def show_enhanced_layered_graph(g, quantile: float, target: str, model: str, dat
     ax = plt.gca()
 
     title_str = (
-        f"{model.upper()} Expert Routing DAG\n"
+        f"{model.upper()}\n"
         f"Metric: {target} | Task: {dataset} ({n_prompts} prompts)\n"
         f"Threshold: {quantile} | max_w: {max_w:.2f} | min_w: {min_w:.2f}\n"
         f"Nodes: {n_nodes_used}/{TOTAL_POSSIBLE_NODES} ({node_sparsity:.2f}%) | "
         f"Edges: {n_edges_used}/{TOTAL_POSSIBLE_EDGES} ({edge_sparsity:.4f}%)"
     )
-    plt.title(title_str, fontsize=20, fontweight='bold', pad=25)
+    plt.title(title_str, fontsize=13, pad=18)
 
     # Circle size (in points^2, matplotlib scatter convention). Font size on
     # the labels is unchanged — only the disk shrinks. Keep NODE_SIZE and the
@@ -403,6 +404,15 @@ def show_enhanced_layered_graph(g, quantile: float, target: str, model: str, dat
                            connectionstyle="arc3,rad=0.05", ax=ax, node_size=NODE_SIZE,
                            min_source_margin=15, min_target_margin=18)
 
+    # Sender vs receiver split: nodes with any outgoing edge get a soft fill
+    # tint so the reader can pick out senders at a glance; pure receivers
+    # (only incoming edges) stay plain white. Kept intentionally shy — no red
+    # / orange, no gold — so the fill hue doesn't compete with the reds
+    # colormap on the edges.
+    SENDER_FILL = "#e6f0fa"   # very pale sky blue
+    RECEIVER_FILL = "white"
+    sender_set = {v.index for v in g.vs if g.degree(v.index, mode="out") > 0}
+
     # Split active nodes by super-expert status if the "is_super" vertex
     # attribute is present (set by the caller before calling this function).
     # Super-experts are drawn larger with a gold fill and red border so they
@@ -411,19 +421,28 @@ def show_enhanced_layered_graph(g, quantile: float, target: str, model: str, dat
     if has_is_super:
         super_active = [n for n in active_node_indices if g.vs[n]["is_super"]]
         other_active = [n for n in active_node_indices if not g.vs[n]["is_super"]]
-        nx.draw_networkx_nodes(G, pos, nodelist=other_active, node_size=NODE_SIZE,
-                               node_color='white', edgecolors='black', linewidths=1.2, ax=ax)
+        # Still apply the sender-tint to the non-super majority.
+        other_senders = [n for n in other_active if n in sender_set]
+        other_receivers = [n for n in other_active if n not in sender_set]
+        nx.draw_networkx_nodes(G, pos, nodelist=other_receivers, node_size=NODE_SIZE,
+                               node_color=RECEIVER_FILL, edgecolors='black', linewidths=1.2, ax=ax)
+        nx.draw_networkx_nodes(G, pos, nodelist=other_senders, node_size=NODE_SIZE,
+                               node_color=SENDER_FILL, edgecolors='black', linewidths=1.2, ax=ax)
         nx.draw_networkx_nodes(G, pos, nodelist=super_active, node_size=SUPER_NODE_SIZE,
                                node_color='gold', edgecolors='red', linewidths=2.5, ax=ax)
     else:
-        nx.draw_networkx_nodes(G, pos, node_size=NODE_SIZE, node_color='white',
-                               edgecolors='black', linewidths=1.2, ax=ax)
+        senders = [n for n in active_node_indices if n in sender_set]
+        receivers = [n for n in active_node_indices if n not in sender_set]
+        nx.draw_networkx_nodes(G, pos, nodelist=receivers, node_size=NODE_SIZE,
+                               node_color=RECEIVER_FILL, edgecolors='black', linewidths=1.2, ax=ax)
+        nx.draw_networkx_nodes(G, pos, nodelist=senders, node_size=NODE_SIZE,
+                               node_color=SENDER_FILL, edgecolors='black', linewidths=1.2, ax=ax)
     nx.draw_networkx_labels(G, pos, labels, font_size=7, font_weight='bold', ax=ax)
 
     # --- AXIS & COLORBAR ---
     ax.set_axis_on()
     ax.tick_params(left=True, bottom=True, labelleft=True, labelbottom=True)
-    ax.xaxis.set_major_locator(MultipleLocator(5 * X_SPACING))
+    ax.xaxis.set_major_locator(MultipleLocator(2 * X_SPACING))
     ax.xaxis.set_major_formatter(FuncFormatter(lambda x, p: f"{int(round(x / X_SPACING))}"))
     ax.yaxis.set_major_locator(MultipleLocator(1 * Y_SPACING))
     def _layer_tick(x, _p, _ll=layer_labels):
@@ -433,8 +452,18 @@ def show_enhanced_layered_graph(g, quantile: float, target: str, model: str, dat
 
     sm = plt.cm.ScalarMappable(cmap=cmap, norm=norm)
     sm.set_array([])
-    cbar = plt.colorbar(sm, ax=ax, pad=0.02, aspect=30)
-    cbar.set_label(cbar_label, fontsize=16)
+    # Fixed-width colorbar: 0.3 inches wide regardless of figure size, height
+    # matches the axes height. inset_axes takes width in inches when passed a
+    # float, and a percentage-of-parent string for height.
+    cax = inset_axes(
+        ax, width=0.3, height="100%",
+        loc="center left",
+        bbox_to_anchor=(1.02, 0.0, 1.0, 1.0),
+        bbox_transform=ax.transAxes,
+        borderpad=0,
+    )
+    cbar = plt.colorbar(sm, cax=cax)
+    cbar.set_label(cbar_label, fontsize=13)
 
     for spine in ax.spines.values():
         spine.set_visible(True)
