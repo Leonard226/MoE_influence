@@ -3,7 +3,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.colors as mcolors
 from matplotlib.ticker import MultipleLocator, FuncFormatter
-from mpl_toolkits.axes_grid1.inset_locator import inset_axes
+from mpl_toolkits.axes_grid1 import make_axes_locatable
 import networkx as nx
 
 def update_topk_per_sender(top_weight, top_prompt, top_pos, top_token,
@@ -371,15 +371,31 @@ def show_enhanced_layered_graph(g, quantile: float, target: str, model: str, dat
         edge_widths.append(1.2 + (w_norm * 4.3))
 
     # --- DRAWING ---
-    # Figure size scales with the DAG's dimensions so cross-model plots share
-    # a fixed cm-per-layer / cm-per-expert. Bigger models -> bigger figures
-    # (rather than squashing them into a fixed canvas). Margins account for
-    # title, xlabel/ylabel, and colorbar under tight_layout.
-    INCH_PER_LAYER = 0.30      # ~0.76 cm per layer on the y-axis
-    INCH_PER_EXPERT = 0.30     # ~0.76 cm per expert on the x-axis
+    # Circle sizes in points^2 (matplotlib scatter marker-area convention).
+    # Defined up-front so the figure sizing below can derive the required
+    # per-unit spacing directly from the diameter.
+    NODE_SIZE = 700
+    SUPER_NODE_SIZE = 950
+
+    # Node diameter in inches. Marker area = pi * r^2 (points^2), so
+    # diameter_pt = 2 * sqrt(area / pi), and 1 pt = 1/72 inch.
+    _max_marker_area = SUPER_NODE_SIZE if has_is_super else NODE_SIZE
+    _node_diameter_in = 2 * np.sqrt(_max_marker_area / np.pi) / 72
+
+    # Center-to-center spacing (inches) between rendered nodes. 1.25x
+    # diameter leaves a visible gap and absorbs the small shrinkage that
+    # tight_layout applies to fit title / xlabel / ylabel / colorbar.
+    _spacing_in = _node_diameter_in * 1.25
+
+    # ax spans (N_EXPERTS + 2) X_SPACING units horizontally (1.5-unit
+    # padding on each side, see xlim below) and (N_LAYERS + 1) Y_SPACING
+    # units vertically (1-unit padding on each side, see ylim below). Size
+    # the figure so, after subtracting the margin reserved for title / axis
+    # labels / colorbar, the ax area delivers >= _spacing_in inches per
+    # unit -> consecutive circles never overlap.
     MARGIN_W, MARGIN_H = 4.5, 3.5
-    fig_w = max(6.0, N_EXPERTS * INCH_PER_EXPERT + MARGIN_W)
-    fig_h = max(5.0, N_LAYERS * INCH_PER_LAYER + MARGIN_H)
+    fig_w = max(6.0, (N_EXPERTS + 2) * _spacing_in + MARGIN_W)
+    fig_h = max(5.0, (N_LAYERS + 1) * _spacing_in + MARGIN_H)
     plt.figure(figsize=(fig_w, fig_h))
     ax = plt.gca()
 
@@ -388,17 +404,15 @@ def show_enhanced_layered_graph(g, quantile: float, target: str, model: str, dat
         f"Metric: {target} | Task: {dataset} ({n_prompts} prompts)\n"
         f"Threshold: {quantile} | max_w: {max_w:.2f} | min_w: {min_w:.2f}\n"
         f"Nodes: {n_nodes_used}/{TOTAL_POSSIBLE_NODES} ({node_sparsity:.2f}%) | "
-        f"Edges: {n_edges_used}/{TOTAL_POSSIBLE_EDGES} ({edge_sparsity:.4f}%)"
+        f"Edges: {n_edges_used}/{TOTAL_POSSIBLE_EDGES} ({edge_sparsity:.2f}%)"
     )
     plt.title(title_str, fontsize=13, pad=18)
 
-    # Circle size (in points^2, matplotlib scatter convention). Font size on
-    # the labels is unchanged — only the disk shrinks. Keep NODE_SIZE and the
-    # `node_size` passed to draw_networkx_edges in sync so arrow endpoints
-    # terminate on the actual circle boundary rather than in empty space or
-    # inside the disk.
-    NODE_SIZE = 700
-    SUPER_NODE_SIZE = 950
+    # Keep the `node_size` passed to draw_networkx_edges in sync with the
+    # NODE_SIZE we use to draw the circles so arrow endpoints terminate on
+    # the actual circle boundary rather than in empty space or inside the
+    # disk. (NODE_SIZE / SUPER_NODE_SIZE were set up above so figure sizing
+    # can derive the required per-unit spacing from the circle diameter.)
     nx.draw_networkx_edges(G, pos, width=edge_widths, edge_color=edge_colors, alpha=0.85,
                            arrows=True, arrowsize=18, arrowstyle='-|>',
                            connectionstyle="arc3,rad=0.05", ax=ax, node_size=NODE_SIZE,
@@ -452,16 +466,12 @@ def show_enhanced_layered_graph(g, quantile: float, target: str, model: str, dat
 
     sm = plt.cm.ScalarMappable(cmap=cmap, norm=norm)
     sm.set_array([])
-    # Fixed-width colorbar: 0.3 inches wide regardless of figure size, height
-    # matches the axes height. inset_axes takes width in inches when passed a
-    # float, and a percentage-of-parent string for height.
-    cax = inset_axes(
-        ax, width=0.3, height="100%",
-        loc="center left",
-        bbox_to_anchor=(1.02, 0.0, 1.0, 1.0),
-        bbox_transform=ax.transAxes,
-        borderpad=0,
-    )
+    # Fixed-width colorbar via axes_grid1: 0.3 inches wide regardless of
+    # figure size, height locked to the main axes. Unlike inset_axes this
+    # cooperates with tight_layout — the divider shares the space with `ax`,
+    # so the colorbar shrinks/grows in lockstep with the plotting area.
+    divider = make_axes_locatable(ax)
+    cax = divider.append_axes("right", size=0.3, pad=0.15)
     cbar = plt.colorbar(sm, cax=cax)
     cbar.set_label(cbar_label, fontsize=13)
 
