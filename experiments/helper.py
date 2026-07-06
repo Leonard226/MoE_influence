@@ -382,21 +382,22 @@ def show_enhanced_layered_graph(g, quantile: float, target: str, model: str, dat
     _max_marker_area = SUPER_NODE_SIZE if has_is_super else NODE_SIZE
     _node_diameter_in = 2 * np.sqrt(_max_marker_area / np.pi) / 72
 
-    # Center-to-center spacing (inches) between rendered nodes. 1.03x
-    # diameter is a hairline visible gap — nodes clearly don't touch but
-    # there's no wasted whitespace. If tight_layout squeezing pushes rare
-    # cases into contact, bump this multiplier.
-    _spacing_in = _node_diameter_in * 1.03
+    # Center-to-center spacing (inches) between rendered nodes. Horizontal
+    # is tighter than vertical because the user wants adjacent-expert columns
+    # closer together than adjacent-layer rows; 1.00x = nodes just touching
+    # horizontally, 1.03x = hairline visible gap vertically.
+    _spacing_h_in = _node_diameter_in * 1.00
+    _spacing_v_in = _node_diameter_in * 1.03
 
-    # ax spans (N_EXPERTS + 2) X_SPACING units horizontally (1.5-unit
-    # padding on each side, see xlim below) and (N_LAYERS + 1) Y_SPACING
-    # units vertically (1-unit padding on each side, see ylim below). Size
-    # the figure so, after subtracting the margin reserved for title / axis
-    # labels / colorbar, the ax area delivers >= _spacing_in inches per
-    # unit -> consecutive circles never overlap.
+    # ax x-span (in X_SPACING units) = N_EXPERTS (0.5-unit padding on each
+    # side of the leftmost/rightmost expert, see ax.set_xlim below).
+    # ax y-span (in Y_SPACING units) = N_LAYERS (0.5-unit padding on each
+    # side of layer 0 / layer L-1, see ax.set_ylim below).
+    # Margins reserve space for title (top), x/y-axis labels + ticks,
+    # colorbar (right).
     MARGIN_W, MARGIN_H = 4.5, 3.5
-    fig_w = max(6.0, (N_EXPERTS + 2) * _spacing_in + MARGIN_W)
-    fig_h = max(5.0, (N_LAYERS + 1) * _spacing_in + MARGIN_H)
+    fig_w = max(6.0, N_EXPERTS * _spacing_h_in + MARGIN_W)
+    fig_h = max(5.0, N_LAYERS * _spacing_v_in + MARGIN_H)
     plt.figure(figsize=(fig_w, fig_h))
     ax = plt.gca()
 
@@ -462,11 +463,23 @@ def show_enhanced_layered_graph(g, quantile: float, target: str, model: str, dat
     # --- AXIS & COLORBAR ---
     ax.set_axis_on()
     ax.tick_params(left=True, bottom=True, labelleft=True, labelbottom=True)
-    ax.xaxis.set_major_locator(MultipleLocator(2 * X_SPACING))
-    ax.xaxis.set_major_formatter(FuncFormatter(lambda x, p: f"{int(round(x / X_SPACING))}"))
+    ax.xaxis.set_major_locator(MultipleLocator(1 * X_SPACING))
+    def _expert_tick(x, _p, _N=N_EXPERTS):
+        # Suppress any tick label whose expert index falls outside [0, N-1].
+        # Guards against xlim padding or floating-point rounding placing a
+        # tick at position N * X_SPACING or -X_SPACING.
+        idx = int(round(x / X_SPACING))
+        return f"{idx}" if 0 <= idx < _N else ""
+    ax.xaxis.set_major_formatter(FuncFormatter(_expert_tick))
     ax.yaxis.set_major_locator(MultipleLocator(1 * Y_SPACING))
     def _layer_tick(x, _p, _ll=layer_labels):
-        idx = int(round(abs(x) / Y_SPACING))
+        # Layer 0 is at y=0; each subsequent layer is one Y_SPACING *below*.
+        # Positive y (any tick above 0) is the top padding — the previous
+        # abs(x) formatter mirrored it as "layer 1", which produced a bogus
+        # "1" at the top of every plot. Suppress it explicitly.
+        if x > 1e-9:
+            return ""
+        idx = int(round(-x / Y_SPACING))
         return f"{_ll[idx]}" if 0 <= idx < len(_ll) else ""
     ax.yaxis.set_major_formatter(FuncFormatter(_layer_tick))
 
@@ -494,8 +507,13 @@ def show_enhanced_layered_graph(g, quantile: float, target: str, model: str, dat
     # intentionally left blank rather than cropped — this makes layer position
     # readable across models and prevents the viz from misrepresenting where
     # super-experts sit in the stack.
-    ax.set_xlim(-X_SPACING * 1.5, (N_EXPERTS - 1) * X_SPACING + X_SPACING * 1.5)
-    ax.set_ylim(-(N_LAYERS - 1) * Y_SPACING - Y_SPACING, Y_SPACING)
+    # 0.5-unit padding on each side of the outermost expert/layer -- keeps
+    # visible whitespace symmetric with the right edge of the plot, and makes
+    # the top padding smaller than one full Y_SPACING so the tick locator
+    # never places a tick at +Y_SPACING (which would otherwise appear as a
+    # bogus "layer 1" above layer 0).
+    ax.set_xlim(-X_SPACING * 0.5, (N_EXPERTS - 1) * X_SPACING + X_SPACING * 0.5)
+    ax.set_ylim(-(N_LAYERS - 1) * Y_SPACING - Y_SPACING * 0.5, Y_SPACING * 0.5)
 
     ax.set_xlabel("Experts e")
     ax.set_ylabel("Layers l")
