@@ -382,11 +382,11 @@ def show_enhanced_layered_graph(g, quantile: float, target: str, model: str, dat
     _max_marker_area = SUPER_NODE_SIZE if has_is_super else NODE_SIZE
     _node_diameter_in = 2 * np.sqrt(_max_marker_area / np.pi) / 72
 
-    # Center-to-center spacing (inches) between rendered nodes. 1.10x
-    # diameter leaves a hairline gap between adjacent circles — enough that
-    # they visibly don't touch, without wasting whitespace. If tight_layout
-    # squeezing pushes rare cases into contact, bump this multiplier.
-    _spacing_in = _node_diameter_in * 1.10
+    # Center-to-center spacing (inches) between rendered nodes. 1.03x
+    # diameter is a hairline visible gap — nodes clearly don't touch but
+    # there's no wasted whitespace. If tight_layout squeezing pushes rare
+    # cases into contact, bump this multiplier.
+    _spacing_in = _node_diameter_in * 1.03
 
     # ax spans (N_EXPERTS + 2) X_SPACING units horizontally (1.5-unit
     # padding on each side, see xlim below) and (N_LAYERS + 1) Y_SPACING
@@ -414,10 +414,15 @@ def show_enhanced_layered_graph(g, quantile: float, target: str, model: str, dat
     # the actual circle boundary rather than in empty space or inside the
     # disk. (NODE_SIZE / SUPER_NODE_SIZE were set up above so figure sizing
     # can derive the required per-unit spacing from the circle diameter.)
+    # `node_size=NODE_SIZE` tells networkx where the node boundary sits so
+    # arrows terminate at the circle edge (not its centre). `min_*_margin`
+    # is the extra gap added on top; keep it near zero so arrowheads land
+    # right on the boundary rather than floating in space. `arrowsize` is
+    # the arrowhead length in points — smaller now that circles are smaller.
     nx.draw_networkx_edges(G, pos, width=edge_widths, edge_color=edge_colors, alpha=0.85,
-                           arrows=True, arrowsize=18, arrowstyle='-|>',
+                           arrows=True, arrowsize=11, arrowstyle='-|>',
                            connectionstyle="arc3,rad=0.05", ax=ax, node_size=NODE_SIZE,
-                           min_source_margin=15, min_target_margin=18)
+                           min_source_margin=1, min_target_margin=1)
 
     # Sender vs receiver split: nodes with any outgoing edge get a soft fill
     # tint so the reader can pick out senders at a glance; pure receivers
