@@ -477,18 +477,22 @@ def show_enhanced_layered_graph(g, quantile: float, target: str, model: str, dat
 
     for spine in ax.spines.values():
         spine.set_visible(True)
-    plt.grid(True, linestyle='--', alpha=0.15)
+    # NB: after plt.colorbar(sm, cax=cax), the "current axes" is the colorbar's
+    # axes, so plt.xlim / plt.ylim / plt.xlabel / plt.ylabel / plt.grid would
+    # silently modify the colorbar instead of the main plot. Always address
+    # `ax` directly here.
+    ax.grid(True, linestyle='--', alpha=0.15)
 
     # Always span the full architectural grid: experts 0..N_EXPERTS-1 on x,
     # layers 0..N_LAYERS-1 on y. Empty rows (layers with no active node) are
     # intentionally left blank rather than cropped — this makes layer position
     # readable across models and prevents the viz from misrepresenting where
     # super-experts sit in the stack.
-    plt.xlim(-X_SPACING * 1.5, (N_EXPERTS - 1) * X_SPACING + X_SPACING * 1.5)
-    plt.ylim(-(N_LAYERS - 1) * Y_SPACING - Y_SPACING, Y_SPACING)
+    ax.set_xlim(-X_SPACING * 1.5, (N_EXPERTS - 1) * X_SPACING + X_SPACING * 1.5)
+    ax.set_ylim(-(N_LAYERS - 1) * Y_SPACING - Y_SPACING, Y_SPACING)
 
-    plt.xlabel("Experts e")
-    plt.ylabel("Layers l")
+    ax.set_xlabel("Experts e")
+    ax.set_ylabel("Layers l")
     plt.tight_layout()
     plt.show()
 
