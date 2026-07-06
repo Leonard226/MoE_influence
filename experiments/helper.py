@@ -382,10 +382,11 @@ def show_enhanced_layered_graph(g, quantile: float, target: str, model: str, dat
     _max_marker_area = SUPER_NODE_SIZE if has_is_super else NODE_SIZE
     _node_diameter_in = 2 * np.sqrt(_max_marker_area / np.pi) / 72
 
-    # Center-to-center spacing (inches) between rendered nodes. 1.25x
-    # diameter leaves a visible gap and absorbs the small shrinkage that
-    # tight_layout applies to fit title / xlabel / ylabel / colorbar.
-    _spacing_in = _node_diameter_in * 1.25
+    # Center-to-center spacing (inches) between rendered nodes. 1.10x
+    # diameter leaves a hairline gap between adjacent circles — enough that
+    # they visibly don't touch, without wasting whitespace. If tight_layout
+    # squeezing pushes rare cases into contact, bump this multiplier.
+    _spacing_in = _node_diameter_in * 1.10
 
     # ax spans (N_EXPERTS + 2) X_SPACING units horizontally (1.5-unit
     # padding on each side, see xlim below) and (N_LAYERS + 1) Y_SPACING
@@ -423,7 +424,7 @@ def show_enhanced_layered_graph(g, quantile: float, target: str, model: str, dat
     # (only incoming edges) stay plain white. Kept intentionally shy — no red
     # / orange, no gold — so the fill hue doesn't compete with the reds
     # colormap on the edges.
-    SENDER_FILL = "#e6f0fa"   # very pale sky blue
+    SENDER_FILL = "#c8dcef"   # pale sky blue, slightly darker
     RECEIVER_FILL = "white"
     sender_set = {v.index for v in g.vs if g.degree(v.index, mode="out") > 0}
 
