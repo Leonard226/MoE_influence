@@ -331,7 +331,7 @@ def show_enhanced_layered_graph(g, quantile: float, target: str, model: str, dat
     for node_idx in active_node_indices:
         layer, expert_idx = node_idx // N_EXPERTS, node_idx % N_EXPERTS
         pos[node_idx] = (expert_idx * X_SPACING, -layer * Y_SPACING)
-        labels[node_idx] = f"M{layer_labels[layer]}\nE{expert_idx}"
+        labels[node_idx] = f"L{layer_labels[layer]}\nE{expert_idx}"
         G.add_node(node_idx)
 
     # --- COLOR LOGIC ---
@@ -370,7 +370,16 @@ def show_enhanced_layered_graph(g, quantile: float, target: str, model: str, dat
         edge_widths.append(1.2 + (w_norm * 4.3))
 
     # --- DRAWING ---
-    plt.figure(figsize=(25, 13))
+    # Figure size scales with the DAG's dimensions so cross-model plots share
+    # a fixed cm-per-layer / cm-per-expert. Bigger models -> bigger figures
+    # (rather than squashing them into a fixed canvas). Margins account for
+    # title, xlabel/ylabel, and colorbar under tight_layout.
+    INCH_PER_LAYER = 0.30      # ~0.76 cm per layer on the y-axis
+    INCH_PER_EXPERT = 0.30     # ~0.76 cm per expert on the x-axis
+    MARGIN_W, MARGIN_H = 4.5, 3.5
+    fig_w = max(6.0, N_EXPERTS * INCH_PER_EXPERT + MARGIN_W)
+    fig_h = max(5.0, N_LAYERS * INCH_PER_LAYER + MARGIN_H)
+    plt.figure(figsize=(fig_w, fig_h))
     ax = plt.gca()
 
     title_str = (
@@ -382,9 +391,16 @@ def show_enhanced_layered_graph(g, quantile: float, target: str, model: str, dat
     )
     plt.title(title_str, fontsize=20, fontweight='bold', pad=25)
 
+    # Circle size (in points^2, matplotlib scatter convention). Font size on
+    # the labels is unchanged — only the disk shrinks. Keep NODE_SIZE and the
+    # `node_size` passed to draw_networkx_edges in sync so arrow endpoints
+    # terminate on the actual circle boundary rather than in empty space or
+    # inside the disk.
+    NODE_SIZE = 700
+    SUPER_NODE_SIZE = 950
     nx.draw_networkx_edges(G, pos, width=edge_widths, edge_color=edge_colors, alpha=0.85,
                            arrows=True, arrowsize=18, arrowstyle='-|>',
-                           connectionstyle="arc3,rad=0.05", ax=ax, node_size=1100,
+                           connectionstyle="arc3,rad=0.05", ax=ax, node_size=NODE_SIZE,
                            min_source_margin=15, min_target_margin=18)
 
     # Split active nodes by super-expert status if the "is_super" vertex
@@ -395,12 +411,12 @@ def show_enhanced_layered_graph(g, quantile: float, target: str, model: str, dat
     if has_is_super:
         super_active = [n for n in active_node_indices if g.vs[n]["is_super"]]
         other_active = [n for n in active_node_indices if not g.vs[n]["is_super"]]
-        nx.draw_networkx_nodes(G, pos, nodelist=other_active, node_size=1000,
+        nx.draw_networkx_nodes(G, pos, nodelist=other_active, node_size=NODE_SIZE,
                                node_color='white', edgecolors='black', linewidths=1.2, ax=ax)
-        nx.draw_networkx_nodes(G, pos, nodelist=super_active, node_size=1400,
+        nx.draw_networkx_nodes(G, pos, nodelist=super_active, node_size=SUPER_NODE_SIZE,
                                node_color='gold', edgecolors='red', linewidths=2.5, ax=ax)
     else:
-        nx.draw_networkx_nodes(G, pos, node_size=1000, node_color='white',
+        nx.draw_networkx_nodes(G, pos, node_size=NODE_SIZE, node_color='white',
                                edgecolors='black', linewidths=1.2, ax=ax)
     nx.draw_networkx_labels(G, pos, labels, font_size=7, font_weight='bold', ax=ax)
 
