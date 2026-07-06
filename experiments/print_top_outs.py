@@ -8,7 +8,7 @@ This is the raw (unnormalised) "global influence" of each expert. The
 log-max-normalised version (out / max_v' out) is what feeds the F matrix.
 
 For each model, experts are sorted by out(v) descending and the values
-at ranks 1, 2, 3, 5, 10 are reported.
+at ranks 1..10, 20, plus the graph-wide median are reported.
 
 Usage:
     python experiments/print_top_outs.py
@@ -34,7 +34,7 @@ MODELS = [
     "deepseek-v2-lite", "olmoe",
     "qwen3-30b-a3b", "qwen3-235b-a22b", "deepseek-v2",
 ]
-RANKS = [1, 2, 3, 4, 5, 10]
+RANKS = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 20]
 
 
 def main() -> None:
@@ -50,7 +50,8 @@ def main() -> None:
 
     # -------- Block 1: the rank-value summary (as before) ------------------
     header = (f"{'model':<18s} {'V':>6s}  "
-              + "  ".join(f"{'top' + str(k):>11s}" for k in RANKS))
+              + "  ".join(f"{'top' + str(k):>11s}" for k in RANKS)
+              + f"  {'median':>11s}")
     print(header)
     print("-" * len(header))
 
@@ -78,9 +79,12 @@ def main() -> None:
         # Rank all experts descending by out-strength.
         order = np.argsort(-out_flat)
         sorted_desc = out_flat[order]
-        tops = [float(sorted_desc[k - 1]) for k in RANKS]
+        tops = [float(sorted_desc[k - 1]) if k <= V else float("nan")
+                for k in RANKS]
+        med = float(np.median(sorted_desc))
         print(f"{m:<18s} {V:>6d}  "
-              + "  ".join(f"{t:>11.4g}" for t in tops))
+              + "  ".join(f"{t:>11.4g}" for t in tops)
+              + f"  {med:>11.4g}")
 
         # Stash top-N (layer, expert_idx, value) records for Block 2 below.
         records = []
