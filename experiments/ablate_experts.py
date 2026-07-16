@@ -48,28 +48,33 @@ with open(ROOT / "config.yaml") as f:
     CFG = yaml.safe_load(f)
 CIRCUITS = Path(CFG["result_path"]) / "circuits"
 
+# multi_gpu: model is too big for one GPU -> shard via device_map="auto".
+# Single-GPU models are loaded and moved with .to("cuda") explicitly, which
+# is deterministic (device_map="auto" can silently leave weights on CPU).
 MODELS = {
     "olmoe": {"id": "allenai/OLMoE-1B-7B-0924", "n_experts": 64,
               "n_layers": 16, "experts_path": "mlp.experts",
-              "down_attr": "down_proj", "num_dense": 0},
+              "down_attr": "down_proj", "num_dense": 0, "multi_gpu": False},
     "mixtral-8x7b": {"id": "mistralai/Mixtral-8x7B-v0.1", "n_experts": 8,
                      "n_layers": 32,
                      "experts_path": "block_sparse_moe.experts",
-                     "down_attr": "w2", "num_dense": 0},
+                     "down_attr": "w2", "num_dense": 0, "multi_gpu": True},
     "mixtral-8x22b": {"id": "mistralai/Mixtral-8x22B-v0.1", "n_experts": 8,
                       "n_layers": 56,
                       "experts_path": "block_sparse_moe.experts",
-                      "down_attr": "w2", "num_dense": 0},
+                      "down_attr": "w2", "num_dense": 0, "multi_gpu": True},
     "phi-3.5-moe": {"id": "microsoft/Phi-3.5-MoE-instruct", "n_experts": 16,
                     "n_layers": 32,
                     "experts_path": "block_sparse_moe.experts",
-                    "down_attr": "w2", "num_dense": 0},
+                    "down_attr": "w2", "num_dense": 0, "multi_gpu": True},
     "qwen3-30b-a3b": {"id": "Qwen/Qwen3-30B-A3B", "n_experts": 128,
                       "n_layers": 48, "experts_path": "mlp.experts",
-                      "down_attr": "down_proj", "num_dense": 0},
+                      "down_attr": "down_proj", "num_dense": 0,
+                      "multi_gpu": False},
     "qwen3-235b-a22b": {"id": "Qwen/Qwen3-235B-A22B", "n_experts": 128,
                         "n_layers": 94, "experts_path": "mlp.experts",
-                        "down_attr": "down_proj", "num_dense": 0},
+                        "down_attr": "down_proj", "num_dense": 0,
+                        "multi_gpu": True},
 }
 
 # Single-expert FP/FN candidates from the token/cross-rank/archetype
@@ -235,10 +240,22 @@ def main() -> None:
     # sdpa for the (many) PPL forwards; the sink pass requests
     # output_attentions=True, for which transformers falls back to eager
     # attention on that call automatically.
-    model = AutoModelForCausalLM.from_pretrained(
-        cfg["id"], torch_dtype=torch.bfloat16, device_map="auto",
-        attn_implementation="sdpa").eval()
-    print(f"device map: {getattr(model, 'hf_device_map', 'single device')}")
+    load_kwargs = dict(torch_dtype=torch.bfloat16, attn_implementation="sdpa")
+    if cfg["multi_gpu"]:
+        # Shard across all visible GPUs.
+        model = AutoModelForCausalLM.from_pretrained(
+            cfg["id"], device_map="auto", **load_kwargs).eval()
+        print(f"device map: {model.hf_device_map}", flush=True)
+    else:
+        # Single GPU: explicit .to('cuda') is deterministic; device_map='auto'
+        # can silently leave weights on CPU (~100x slower).
+        model = AutoModelForCausalLM.from_pretrained(
+            cfg["id"], **load_kwargs).to("cuda").eval()
+        print(f"loaded on {next(model.parameters()).device}", flush=True)
+    dev = next(model.parameters()).device
+    if dev.type != "cuda":
+        sys.exit(f"Model landed on {dev}, not cuda -- aborting (would run "
+                 f"at CPU speed). Check GPU allocation / CUDA_VISIBLE_DEVICES.")
 
     windows = su_c4_eval_windows(tok, args.n_seqs, args.seq_len)
     sink_ids = torch.stack([w[:args.sink_seq_len]
