@@ -245,17 +245,20 @@ def main() -> None:
         # Shard across all visible GPUs.
         model = AutoModelForCausalLM.from_pretrained(
             cfg["id"], device_map="auto", **load_kwargs).eval()
-        print(f"device map: {model.hf_device_map}", flush=True)
     else:
         # Single GPU: explicit .to('cuda') is deterministic; device_map='auto'
         # can silently leave weights on CPU (~100x slower).
         model = AutoModelForCausalLM.from_pretrained(
             cfg["id"], **load_kwargs).to("cuda").eval()
-        print(f"loaded on {next(model.parameters()).device}", flush=True)
-    dev = next(model.parameters()).device
-    if dev.type != "cuda":
-        sys.exit(f"Model landed on {dev}, not cuda -- aborting (would run "
-                 f"at CPU speed). Check GPU allocation / CUDA_VISIBLE_DEVICES.")
+    # Report the actual device spread across parameters (works whether or not
+    # accelerate set hf_device_map). Any 'cpu' entry => partial offload =>
+    # slow; abort so it doesn't crawl unnoticed.
+    devs = {str(p.device) for p in model.parameters()}
+    print(f"parameter devices: {sorted(devs)}", flush=True)
+    if any(d.startswith("cpu") for d in devs):
+        sys.exit("Some parameters are on CPU (offloaded) -- would run at CPU "
+                 "speed. Allocate more GPU memory / more GPUs, or set "
+                 "CUDA_VISIBLE_DEVICES to the free GPUs.")
 
     windows = su_c4_eval_windows(tok, args.n_seqs, args.seq_len)
     sink_ids = torch.stack([w[:args.sink_seq_len]
