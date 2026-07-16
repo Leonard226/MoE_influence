@@ -157,13 +157,20 @@ def su_c4_eval_windows(tok, n_seqs: int, seqlen: int) -> list[torch.Tensor]:
 
 
 @torch.no_grad()
-def eval_ppl(model, windows: list[torch.Tensor]) -> float:
-    """Su et al.'s PPL: batch size 1, exp(mean of per-sequence mean NLL)."""
-    nlls = []
-    for ids in windows:
-        ids = ids.unsqueeze(0).to(model.device)
-        out = model(ids, labels=ids)
-        nlls.append(float(out.loss))
+def eval_ppl(model, windows: list[torch.Tensor], batch_size: int = 1) -> float:
+    """Su et al.'s PPL: exp(mean of per-sequence mean NLL). Batching is a
+    pure speed optimisation -- the per-sequence NLL is computed explicitly,
+    so any --batch-size gives numbers identical to their batch-1 loop."""
+    from tqdm import tqdm
+    loss_fct = torch.nn.CrossEntropyLoss(reduction="none")
+    nlls: list[float] = []
+    for i in tqdm(range(0, len(windows), batch_size), desc="ppl", leave=False):
+        ids = torch.stack(windows[i:i + batch_size]).to(model.device)
+        logits = model(ids).logits
+        shift_logits = logits[:, :-1, :].permute(0, 2, 1)
+        shift_labels = ids[:, 1:]
+        loss = loss_fct(shift_logits, shift_labels)      # [B, T-1]
+        nlls.extend(loss.float().mean(dim=1).tolist())   # per-sequence mean
     return float(np.exp(np.mean(nlls)))
 
 
@@ -187,6 +194,9 @@ def main() -> None:
     p.add_argument("--seed", type=int, default=0)
     p.add_argument("--n-seqs", type=int, default=N_SEQS)
     p.add_argument("--seq-len", type=int, default=SEQLEN)
+    p.add_argument("--batch-size", type=int, default=8,
+                   help="PPL eval batch size; numerically identical to Su's "
+                        "batch-1 loop (per-sequence NLL computed explicitly).")
     p.add_argument("--n-sink-seqs", type=int, default=8)
     args = p.parse_args()
 
@@ -207,11 +217,20 @@ def main() -> None:
             controls.append((l, e))
     runs += [[c] for c in controls]
 
+    if not torch.cuda.is_available():
+        sys.exit("No CUDA device visible -- device_map='auto' would fall "
+                 "back to CPU and each PPL pass would take hours. Run on a "
+                 "GPU node (or a torch build with CUDA).")
+
     from transformers import AutoModelForCausalLM, AutoTokenizer
     tok = AutoTokenizer.from_pretrained(cfg["id"])
+    # sdpa for the (many) PPL forwards; the sink pass requests
+    # output_attentions=True, for which transformers falls back to eager
+    # attention on that call automatically.
     model = AutoModelForCausalLM.from_pretrained(
         cfg["id"], torch_dtype=torch.bfloat16, device_map="auto",
-        attn_implementation="eager").eval()
+        attn_implementation="sdpa").eval()
+    print(f"device map: {getattr(model, 'hf_device_map', 'single device')}")
 
     windows = su_c4_eval_windows(tok, args.n_seqs, args.seq_len)
     sink_ids = torch.stack(windows[:args.n_sink_seqs])
