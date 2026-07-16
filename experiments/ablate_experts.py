@@ -77,13 +77,22 @@ MODELS = {
                         "multi_gpu": True},
 }
 
-# Single-expert FP/FN candidates from the token/cross-rank/archetype
-# analyses ('+' joint sets deliberately excluded for now).
+# Ablation targets = UNION of the two top-10 rankings (tab:topk-match-c4):
+# top-10 by act(v) [Su, layer-filtered] + top-10 by out(v) [ours, full net].
+# This gives a causal dPPL for every cell of the baseline comparison table.
+# Listed act-top-10 first (rank order), then the out-only additions; the
+# script adds random controls. Single experts only ('+' joints excluded).
+# (mixtral keeps L30E4 as a bonus FP exemplar: high act, excluded by Su's
+#  layer filter, out percentile ~3.)
 DEFAULT_TARGETS = {
-    "olmoe": "L1E9;L1E18;L2E30;L3E39;L4E14;L4E27;L9E8;L0E38;L6E4;L8E22",
-    "mixtral-8x7b": "L1E3;L17E0;L18E5;L19E1;L19E6;L30E4",
-    "phi-3.5-moe": "L0E6;L1E0;L3E3;L3E7;L5E10;L23E3;L27E9",
-    "qwen3-30b-a3b": "L0E106;L1E68;L2E92;L3E82;L3E107;L21E69;L22E92;L33E69",
+    "olmoe": ("L1E9;L4E27;L1E18;L2E30;L9E8;L10E4;L11E56;L1E11;L6E18;L8E22;"
+              "L4E14;L3E39;L0E6;L0E38;L6E4;L0E41;L0E36"),
+    "mixtral-8x7b": ("L1E3;L1E4;L9E7;L19E6;L19E1;L23E3;L12E7;L18E5;L21E3;"
+                     "L16E0;L17E0;L19E5;L19E2;L6E1;L6E6;L18E1;L30E4"),
+    "phi-3.5-moe": ("L5E10;L3E7;L10E0;L12E13;L11E2;L23E3;L20E13;L20E15;L8E0;"
+                    "L20E12;L27E9;L29E6;L3E3;L1E0;L28E12;L9E2;L0E6"),
+    "qwen3-30b-a3b": ("L2E92;L1E68;L3E82;L3E107;L3E4;L2E46;L16E74;L20E77;"
+                      "L12E24;L33E69;L21E69;L22E92;L0E106;L31E56;L24E111"),
 }
 
 SEQLEN = 2048
