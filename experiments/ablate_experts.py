@@ -176,6 +176,10 @@ def eval_ppl(model, windows: list[torch.Tensor], batch_size: int = 1) -> float:
 
 @torch.no_grad()
 def eval_sink(model, sink_ids: torch.Tensor) -> dict:
+    # output_attentions materialises [B, heads, T, T] per layer in eager
+    # mode, which is O(T^2) and blows up at T=2048. Attention-to-token-0 is
+    # fully visible in a short context, so sink_ids is pre-truncated by the
+    # caller (--sink-seq-len).
     out = model(sink_ids.to(model.device), output_attentions=True,
                 output_hidden_states=True)
     att = torch.stack([a[:, :, 1:, 0].mean() for a in out.attentions])
@@ -198,6 +202,10 @@ def main() -> None:
                    help="PPL eval batch size; numerically identical to Su's "
                         "batch-1 loop (per-sequence NLL computed explicitly).")
     p.add_argument("--n-sink-seqs", type=int, default=8)
+    p.add_argument("--sink-seq-len", type=int, default=256,
+                   help="Context length for the attention-sink metric "
+                        "(output_attentions is O(T^2) in eager mode; "
+                        "attention-to-token-0 is visible in a short window).")
     args = p.parse_args()
 
     cfg = MODELS[args.model]
@@ -233,7 +241,8 @@ def main() -> None:
     print(f"device map: {getattr(model, 'hf_device_map', 'single device')}")
 
     windows = su_c4_eval_windows(tok, args.n_seqs, args.seq_len)
-    sink_ids = torch.stack(windows[:args.n_sink_seqs])
+    sink_ids = torch.stack([w[:args.sink_seq_len]
+                            for w in windows[:args.n_sink_seqs]])
     print(f"[{args.model}] {len(windows)} windows x {args.seq_len} tok "
           f"(Su et al. protocol); {len(runs)} ablation runs "
           f"({args.random_controls} random controls)")
@@ -242,7 +251,9 @@ def main() -> None:
     results = json.loads(out_path.read_text()) if out_path.exists() else {}
 
     if "baseline" not in results:
-        ppl0 = eval_ppl(model, windows)
+        print("baseline: computing PPL...", flush=True)
+        ppl0 = eval_ppl(model, windows, args.batch_size)
+        print(f"baseline: PPL={ppl0:.3f}; computing sink metrics...", flush=True)
         sink0 = eval_sink(model, sink_ids)
         results["baseline"] = {"ppl": ppl0, **sink0}
         out_path.write_text(json.dumps(results, indent=2))
@@ -258,7 +269,7 @@ def main() -> None:
             continue
         with ZeroExpertOutput(model, cfg["experts_path"], cfg["down_attr"],
                               group):
-            ppl = eval_ppl(model, windows)
+            ppl = eval_ppl(model, windows, args.batch_size)
             sink = eval_sink(model, sink_ids)
         results[lab] = {"ppl": ppl, **sink, "control": lab in is_control}
         out_path.write_text(json.dumps(results, indent=2))
