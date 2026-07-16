@@ -75,6 +75,20 @@ MODELS = {
                         "n_layers": 94, "experts_path": "mlp.experts",
                         "down_attr": "down_proj", "num_dense": 0,
                         "multi_gpu": True},
+    # DeepSeek works with this ablation operator (down_proj output zeroing
+    # never touches the custom MoEGate). Labels are model-absolute layer
+    # indices, which equal the module-list indices, so num_dense=0 here;
+    # layer 0 is dense (no experts) -> min_layer=1 for random controls.
+    "deepseek-v2-lite": {"id": "deepseek-ai/DeepSeek-V2-Lite", "n_experts": 64,
+                         "n_layers": 27, "experts_path": "mlp.experts",
+                         "down_attr": "down_proj", "num_dense": 0,
+                         "min_layer": 1, "multi_gpu": False,
+                         "trust_remote_code": True},
+    "deepseek-v2": {"id": "deepseek-ai/DeepSeek-V2", "n_experts": 160,
+                    "n_layers": 60, "experts_path": "mlp.experts",
+                    "down_attr": "down_proj", "num_dense": 0,
+                    "min_layer": 1, "multi_gpu": True,
+                    "trust_remote_code": True},
 }
 
 # Ablation targets = UNION of the two top-10 rankings (tab:topk-match-c4):
@@ -91,8 +105,26 @@ DEFAULT_TARGETS = {
                      "L16E0;L17E0;L19E5;L19E2;L6E1;L6E6;L18E1;L30E4"),
     "phi-3.5-moe": ("L5E10;L3E7;L10E0;L12E13;L11E2;L23E3;L20E13;L20E15;L8E0;"
                     "L20E12;L27E9;L29E6;L3E3;L1E0;L28E12;L9E2;L0E6"),
+    # Qwen3-30B: singles (top-10 union) + the criteria comparison at Su's
+    # scale -- Su's published SE set vs our out-top-3 vs the all-FN hub set
+    # vs a size-matched random-3.
     "qwen3-30b-a3b": ("L2E92;L1E68;L3E82;L3E107;L3E4;L2E46;L16E74;L20E77;"
-                      "L12E24;L33E69;L21E69;L22E92;L0E106;L31E56;L24E111"),
+                      "L12E24;L33E69;L21E69;L22E92;L0E106;L31E56;L24E111;"
+                      "L1E68+L2E92+L3E82;"        # Su's SE set (README anchor)
+                      "L2E92+L3E82+L21E69;"        # our out-top-3
+                      "L21E69+L22E92+L33E69;"      # FN hubs (none SE-flagged)
+                      "L9E45+L27E103+L41E17"),     # random-3
+    # DeepSeek-V2-Lite: singles (top-10 union) + Su's paper SE pair, their
+    # prune script's exact 4-expert set, our late-BOS pair (excluded by
+    # their layer filter -> FN-via-filter test), size-matched randoms.
+    "deepseek-v2-lite": ("L3E54;L4E38;L5E63;L2E3;L2E62;L19E57;L16E14;L19E47;"
+                         "L19E33;L18E23;L25E11;L24E63;L11E31;L4E45;L4E16;"
+                         "L11E49;"
+                         "L3E54+L4E38;"                 # Su's paper SE set
+                         "L3E54+L4E38+L2E3+L5E63;"      # their script's set
+                         "L24E63+L25E11;"               # late BOS pair (FN)
+                         "L7E22+L13E51;"                # random-2
+                         "L7E22+L13E51+L9E30+L21E5"),   # random-4
 }
 
 SEQLEN = 2048
@@ -233,7 +265,7 @@ def main() -> None:
     named = {(l, e) for grp in runs for l, e in grp}
     controls: list[tuple[int, int]] = []
     while len(controls) < args.random_controls:
-        l = int(rng.integers(0, cfg["n_layers"] - nd))
+        l = int(rng.integers(cfg.get("min_layer", 0), cfg["n_layers"] - nd))
         e = int(rng.integers(0, cfg["n_experts"]))
         if (l, e) not in named and (l, e) not in controls:
             controls.append((l, e))
@@ -255,11 +287,13 @@ def main() -> None:
           flush=True)
 
     from transformers import AutoModelForCausalLM, AutoTokenizer
-    tok = AutoTokenizer.from_pretrained(cfg["id"])
+    trc = cfg.get("trust_remote_code", False)
+    tok = AutoTokenizer.from_pretrained(cfg["id"], trust_remote_code=trc)
     # sdpa for the (many) PPL forwards; the sink pass requests
     # output_attentions=True, for which transformers falls back to eager
     # attention on that call automatically.
-    load_kwargs = dict(torch_dtype=torch.bfloat16, attn_implementation="sdpa")
+    load_kwargs = dict(torch_dtype=torch.bfloat16, attn_implementation="sdpa",
+                       trust_remote_code=trc)
     if cfg["multi_gpu"]:
         # from_pretrained(device_map="auto") silently dumps these MoE model
         # classes entirely to CPU (observed for Mixtral; same issue noted in
@@ -271,7 +305,7 @@ def main() -> None:
                                  dispatch_model)
         from transformers import AutoConfig
         max_memory = {i: int(free * 0.9) for i, free in free_mem.items()}
-        hf_cfg = AutoConfig.from_pretrained(cfg["id"])
+        hf_cfg = AutoConfig.from_pretrained(cfg["id"], trust_remote_code=trc)
         with init_empty_weights():
             empty = AutoModelForCausalLM.from_config(
                 hf_cfg, torch_dtype=torch.bfloat16)
