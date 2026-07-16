@@ -83,12 +83,12 @@ MODELS = {
                          "n_layers": 27, "experts_path": "mlp.experts",
                          "down_attr": "down_proj", "num_dense": 0,
                          "min_layer": 1, "multi_gpu": False,
-                         "trust_remote_code": True},
+                         "trust_remote_code": True, "attn_impl": "eager"},
     "deepseek-v2": {"id": "deepseek-ai/DeepSeek-V2", "n_experts": 160,
                     "n_layers": 60, "experts_path": "mlp.experts",
                     "down_attr": "down_proj", "num_dense": 0,
                     "min_layer": 1, "multi_gpu": True,
-                    "trust_remote_code": True},
+                    "trust_remote_code": True, "attn_impl": "eager"},
 }
 
 # Ablation targets = UNION of the two top-10 rankings (tab:topk-match-c4):
@@ -292,7 +292,8 @@ def main() -> None:
     # sdpa for the (many) PPL forwards; the sink pass requests
     # output_attentions=True, for which transformers falls back to eager
     # attention on that call automatically.
-    load_kwargs = dict(torch_dtype=torch.bfloat16, attn_implementation="sdpa",
+    load_kwargs = dict(torch_dtype=torch.bfloat16,
+                       attn_implementation=cfg.get("attn_impl", "sdpa"),
                        trust_remote_code=trc)
     if cfg["multi_gpu"]:
         # from_pretrained(device_map="auto") silently dumps these MoE model
