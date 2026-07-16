@@ -1,21 +1,22 @@
-"""Step A: token-level characterization of Influential / Super / Sensitive experts.
+"""Step A: token-level characterization of top-act vs top-out experts.
 
-For every expert in the union of
-    I = top-K by out(v),  S = Su-exact Super Experts,  N = top-K by in(v)
-inspect the top-100 highest-routing-weight token events stored in the DAG
-(top_weight / top_prompt / top_pos / top_token buffers) and summarise:
+Set definitions match the settled baseline protocol (overlap_topk.py):
+    A = top-K by act(v), ranked over Su et al.'s layer-filtered population
+        (model-absolute layer < round(include_layers * L))
+    O = top-K by out(v), ranked over the FULL network (no filter)
+For every expert in A ∪ O, inspect the top-100 highest-routing-weight token
+events stored in the DAG (top_weight / top_prompt / top_pos / top_token
+buffers) and summarise:
 
   - pos0% / pos<=3%: fraction of events at sink positions (start of prompt)
   - median position
   - token-class mix: special / whitespace / punct / numeric / content
   - the most frequent decoded tokens
 
-Su et al.'s attention-sink mechanism predicts Super-Expert events concentrate
-on early positions and special/punctuation tokens; "routing hub" experts
-(high out, moderate act) should instead fire on content tokens spread across
-positions. This gives the first ground-truth-free evidence for the FP/FN
-hypothesis using data we already have -- no model weights needed (only the
-tokenizer, a tiny download).
+Su et al.'s attention-sink mechanism predicts top-act events concentrate on
+early positions (BOS / sentence starts / delimiters); "routing hub" experts
+(high out, moderate act) should instead fire on function/content tokens
+spread across positions. No model weights needed (only the tokenizer).
 
 Usage:
     python experiments/inspect_expert_tokens.py
@@ -36,7 +37,7 @@ import yaml
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-from experiments.cross_rank_analysis import NUM_DENSE, _se_mask  # noqa: E402
+from experiments.cross_rank_analysis import NUM_DENSE  # noqa: E402
 
 with open(ROOT / "config.yaml") as f:
     CFG = yaml.safe_load(f)
@@ -69,8 +70,10 @@ def main() -> None:
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--models", nargs="+", default=MODELS, choices=MODELS)
     p.add_argument("--task", default="c4")
-    p.add_argument("--top-k", type=int, default=5)
-    p.add_argument("--include-layers", type=float, default=0.75)
+    p.add_argument("--top-k", type=int, default=10)
+    p.add_argument("--include-layers", type=float, default=0.75,
+                   help="Su's layer filter, applied to the act ranking ONLY "
+                        "(out is ranked over the full network).")
     p.add_argument("--top-show", type=int, default=10,
                    help="How many most-frequent tokens to print per expert.")
     args = p.parse_args()
@@ -94,15 +97,17 @@ def main() -> None:
         fwd = (s_idx < r_idx).to(W.dtype)
         W_fwd = W * fwd
         out = W_fwd.abs().sum(dim=(2, 3)).numpy().reshape(-1)
-        in_ = W_fwd.abs().sum(dim=(0, 1)).numpy().reshape(-1)
         act_LN = dag["act"].to(torch.float64).numpy()
         act = act_LN.reshape(-1)
 
-        I_set = set(np.argsort(-out)[:args.top_k].tolist())
-        N_set = set(np.argsort(-in_)[:args.top_k].tolist())
-        S_set = set(np.flatnonzero(
-            _se_mask(m, act_LN, args.include_layers)).tolist())
-        union = sorted(I_set | S_set | N_set)
+        # Baseline protocol (overlap_topk.py): act ranked over Su's
+        # layer-filtered population; out ranked over the full network.
+        depth = np.repeat(np.arange(L), N)
+        upto = max(0, min(L, round((L + nd) * args.include_layers) - nd))
+        idx_filt = np.flatnonzero(depth < upto)
+        A_set = set(idx_filt[np.argsort(-act[idx_filt])][:args.top_k].tolist())
+        O_set = set(np.argsort(-out)[:args.top_k].tolist())
+        union = sorted(A_set | O_set)
 
         tok = AutoTokenizer.from_pretrained(dag["model"], trust_remote_code=True)
         special_ids = set(tok.all_special_ids)
@@ -124,8 +129,8 @@ def main() -> None:
         for flat in union:
             l_dag, e = flat // N, flat % N
             sets = ",".join(c for c, in_s in
-                            [("I", flat in I_set), ("S", flat in S_set),
-                             ("N", flat in N_set)] if in_s)
+                            [("A", flat in A_set), ("O", flat in O_set)]
+                            if in_s)
             w = tw[l_dag, e].numpy()
             valid = w >= 0
             n_ev = int(valid.sum())
@@ -158,25 +163,25 @@ def main() -> None:
                   f"{cls_frac['punct']:>6.1f} {cls_frac['numeric']:>4.1f} "
                   f"{cls_frac['content']:>5.1f}  {tok_str}")
 
-            cat = ("I&S" if flat in I_set and flat in S_set else
-                   "I-only" if flat in I_set else
-                   "S-only" if flat in S_set else "N-only")
+            cat = ("both" if flat in A_set and flat in O_set else
+                   "act-only" if flat in A_set else "out-only")
             agg.setdefault(cat, []).append(
-                (pos3, cls_frac["special"] + cls_frac["punct"]
+                (pos0, pos3, cls_frac["special"] + cls_frac["punct"]
                  + cls_frac["whitespace"], cls_frac["content"]))
 
     print(f"\n{'=' * 100}")
     print("Category aggregates (all models pooled; per-expert means)")
-    print("Sink-mechanism prediction: S-only high pos<=3% and non-content%; "
-          "I-only low pos<=3%, high content%.")
-    print(f"  {'category':<8s} {'n':>3s} {'pos<=3%':>8s} "
+    print("Sink-mechanism prediction: act-only high pos0%/pos<=3%; "
+          "out-only low pos<=3%, high content%.")
+    print(f"  {'category':<9s} {'n':>3s} {'pos0%':>6s} {'pos<=3%':>8s} "
           f"{'spec+punct+ws%':>15s} {'content%':>9s}")
-    for cat in ["I&S", "I-only", "S-only", "N-only"]:
+    for cat in ["both", "act-only", "out-only"]:
         if cat not in agg:
             continue
         a = np.array(agg[cat])
-        print(f"  {cat:<8s} {len(a):>3d} {a[:, 0].mean():>8.1f} "
-              f"{a[:, 1].mean():>15.1f} {a[:, 2].mean():>9.1f}")
+        print(f"  {cat:<9s} {len(a):>3d} {a[:, 0].mean():>6.1f} "
+              f"{a[:, 1].mean():>8.1f} {a[:, 2].mean():>15.1f} "
+              f"{a[:, 3].mean():>9.1f}")
 
 
 if __name__ == "__main__":
