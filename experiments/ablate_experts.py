@@ -252,14 +252,30 @@ def main() -> None:
     # attention on that call automatically.
     load_kwargs = dict(torch_dtype=torch.bfloat16, attn_implementation="sdpa")
     if cfg["multi_gpu"]:
-        # Shard across all visible GPUs. Pin explicit per-GPU budgets (90% of
-        # free memory) and DO NOT offer a 'cpu' budget, so accelerate uses the
-        # GPUs and raises a clear OOM if the model doesn't fit -- rather than
-        # silently offloading to CPU and crawling.
+        # from_pretrained(device_map="auto") silently dumps these MoE model
+        # classes entirely to CPU (observed for Mixtral; same issue noted in
+        # build_dag.py). Working recipe: plan a device map on a meta skeleton,
+        # load weights to CPU, then physically dispatch. Per-GPU budget = 90%
+        # of free memory; no 'cpu' budget so an over-large model errors
+        # clearly instead of offloading.
+        from accelerate import (infer_auto_device_map, init_empty_weights,
+                                 dispatch_model)
+        from transformers import AutoConfig
         max_memory = {i: int(free * 0.9) for i, free in free_mem.items()}
+        hf_cfg = AutoConfig.from_pretrained(cfg["id"])
+        with init_empty_weights():
+            empty = AutoModelForCausalLM.from_config(
+                hf_cfg, torch_dtype=torch.bfloat16)
+        device_map = infer_auto_device_map(
+            empty, max_memory=max_memory,
+            no_split_module_classes=empty._no_split_modules,
+            dtype=torch.bfloat16)
+        del empty
+        print(f"planned device_map spans devices "
+              f"{sorted(set(device_map.values()))}", flush=True)
         model = AutoModelForCausalLM.from_pretrained(
-            cfg["id"], device_map="auto", max_memory=max_memory,
-            **load_kwargs).eval()
+            cfg["id"], low_cpu_mem_usage=True, **load_kwargs).eval()
+        model = dispatch_model(model, device_map=device_map)
     else:
         # Single GPU: explicit .to('cuda') is deterministic; device_map='auto'
         # can silently leave weights on CPU (~100x slower).
