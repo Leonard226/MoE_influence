@@ -1,9 +1,20 @@
 """Matched top-K overlap between act(v) (Su et al.) and out(v) (ours).
 
 Fair comparison of the two importance statistics, decoupled from any
-threshold choice: rank all experts by act(v) and by out(v) over the SAME
-layer-filtered population (Su's include_layers filter applied to both),
+threshold choice: rank experts by each statistic AS ITS METHOD PRESCRIBES,
 take the top-K of each, and measure the overlap.
+
+  - act(v) is ranked over Su et al.'s layer-filtered population
+    (model-absolute layer < round(include_layers * L)); the filter is an
+    integral part of their method (without it the ranking floods with
+    late-layer massive-activation receivers).
+  - out(v) is ranked over the FULL network: it requires no depth filter
+    (sink receivers rank low automatically), though note it is also
+    structurally unable to rank late-layer experts high (out -> 0 at the
+    last layer by construction).
+
+Chance level for random size-K sets (act from V_filt, out from V_full):
+E[|A ∩ B|] = K^2 / V_full.
 
 For each model:
   - overlap@K = |topK_act ∩ topK_out| for K in K_GRID
@@ -40,15 +51,17 @@ def main() -> None:
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--task", default="c4")
     p.add_argument("--include-layers", type=float, default=0.75,
-                   help="Layer-depth cutoff applied to BOTH rankings "
-                        "(default 0.75 = Su's setting; 1.0 = full network).")
+                   help="Layer-depth cutoff applied to the act(v) ranking "
+                        "ONLY (default 0.75 = Su's setting; 1.0 = no filter). "
+                        "out(v) is always ranked over the full network.")
     p.add_argument("--k-show", type=int, default=10,
                    help="K for the side-by-side expert lists (default 10).")
     args = p.parse_args()
 
     print(f"Matched top-K overlap of act(v) vs out(v)  "
-          f"(task={args.task}, include_layers={args.include_layers})")
-    header = (f"{'model':<18s} {'V_filt':>7s}  "
+          f"(task={args.task}, include_layers={args.include_layers} "
+          f"on act only; out unfiltered)")
+    header = (f"{'model':<18s} {'V_filt':>7s} {'V_full':>7s}  "
               + "  ".join(f"{'ov@' + str(k):>6s}" for k in K_GRID)
               + f"  {'chance@10':>9s}")
     print(header)
@@ -62,24 +75,22 @@ def main() -> None:
             continue
         L, N = d["L"], d["N"]
         nd = NUM_DENSE.get(m, 0)
-        # Su's layer filter on model-absolute indices, applied to BOTH
-        # statistics so the ranked populations are identical.
+        # Su's layer filter (model-absolute indices) applies to the act
+        # ranking only -- it is part of their method. out is ranked over
+        # the full network.
         upto = max(0, min(L, round((L + nd) * args.include_layers) - nd))
-        keep = (d["depth"] < upto)
-        idx = np.flatnonzero(keep)
-        act_f, out_f = d["act"][keep], d["out"][keep]
-        V = idx.size
+        idx_filt = np.flatnonzero(d["depth"] < upto)
+        V_filt, V_full = idx_filt.size, d["out"].size
 
-        order_act = idx[np.argsort(-act_f)]
-        order_out = idx[np.argsort(-out_f)]
+        order_act = idx_filt[np.argsort(-d["act"][idx_filt])]
+        order_out = np.argsort(-d["out"])
 
         ovs = []
         for k in K_GRID:
-            kk = min(k, V)
-            ovs.append(len(set(order_act[:kk].tolist())
-                           & set(order_out[:kk].tolist())))
-        chance10 = (min(10, V) ** 2) / V
-        print(f"{m:<18s} {V:>7d}  "
+            ovs.append(len(set(order_act[:min(k, V_filt)].tolist())
+                           & set(order_out[:min(k, V_full)].tolist())))
+        chance10 = (min(10, V_filt) * min(10, V_full)) / V_full
+        print(f"{m:<18s} {V_filt:>7d} {V_full:>7d}  "
               + "  ".join(f"{o:>6d}" for o in ovs)
               + f"  {chance10:>9.3f}")
         details[m] = (order_act, order_out, d, nd, N)
