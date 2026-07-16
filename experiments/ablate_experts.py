@@ -235,6 +235,16 @@ def main() -> None:
                  "back to CPU and each PPL pass would take hours. Run on a "
                  "GPU node (or a torch build with CUDA).")
 
+    n_gpu = torch.cuda.device_count()
+    free_mem = {}
+    for i in range(n_gpu):
+        free, total = torch.cuda.mem_get_info(i)
+        free_mem[i] = free
+        print(f"GPU {i}: {free / 1e9:.1f} GB free / {total / 1e9:.1f} GB total",
+              flush=True)
+    print(f"total free GPU memory: {sum(free_mem.values()) / 1e9:.1f} GB",
+          flush=True)
+
     from transformers import AutoModelForCausalLM, AutoTokenizer
     tok = AutoTokenizer.from_pretrained(cfg["id"])
     # sdpa for the (many) PPL forwards; the sink pass requests
@@ -242,9 +252,14 @@ def main() -> None:
     # attention on that call automatically.
     load_kwargs = dict(torch_dtype=torch.bfloat16, attn_implementation="sdpa")
     if cfg["multi_gpu"]:
-        # Shard across all visible GPUs.
+        # Shard across all visible GPUs. Pin explicit per-GPU budgets (90% of
+        # free memory) and DO NOT offer a 'cpu' budget, so accelerate uses the
+        # GPUs and raises a clear OOM if the model doesn't fit -- rather than
+        # silently offloading to CPU and crawling.
+        max_memory = {i: int(free * 0.9) for i, free in free_mem.items()}
         model = AutoModelForCausalLM.from_pretrained(
-            cfg["id"], device_map="auto", **load_kwargs).eval()
+            cfg["id"], device_map="auto", max_memory=max_memory,
+            **load_kwargs).eval()
     else:
         # Single GPU: explicit .to('cuda') is deterministic; device_map='auto'
         # can silently leave weights on CPU (~100x slower).
