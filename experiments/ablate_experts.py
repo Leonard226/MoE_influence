@@ -32,10 +32,16 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import random
 import sys
 from operator import attrgetter
 from pathlib import Path
+
+# Reduce CUDA allocator fragmentation -- must be set before torch initialises
+# CUDA. NF4 loading of the 118 GB models on 4x80 GB fails by a few GiB of
+# fragmentation otherwise (reserved-but-unallocated spilling over the limit).
+os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
 
 import numpy as np
 import torch
@@ -319,7 +325,7 @@ def main() -> None:
                    help="Context length for the attention-sink metric "
                         "(output_attentions is O(T^2) in eager mode; "
                         "attention-to-token-0 is visible in a short window).")
-    p.add_argument("--nf4-mem-frac", type=float, default=0.35,
+    p.add_argument("--nf4-mem-frac", type=float, default=0.36,
                    help="NF4 models only: per-GPU memory budget as a fraction "
                         "of free memory. Loading peaks at ~2.6x this. Lower it "
                         "if loading OOMs; raise it if the model doesn't fit.")
@@ -389,7 +395,8 @@ def main() -> None:
         budget_gb = sum(max_memory.values()) / 1e9
         print(f"NF4 per-GPU budget {max_memory[0]/1e9:.1f} GB "
               f"(loading peak ~{max_memory[0]*2.6/1e9:.0f} GB/GPU); "
-              f"total {budget_gb:.0f} GB  (--nf4-mem-frac {frac})", flush=True)
+              f"total {budget_gb:.0f} GB  (--nf4-mem-frac {frac}, "
+              f"expandable_segments on)", flush=True)
         model = AutoModelForCausalLM.from_pretrained(
             cfg["id"], quantization_config=bnb, device_map="auto",
             max_memory=max_memory, **load_kwargs).eval()
