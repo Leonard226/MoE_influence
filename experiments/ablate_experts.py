@@ -103,8 +103,33 @@ DEFAULT_TARGETS = {
               "L4E14;L3E39;L0E6;L0E38;L6E4;L0E41;L0E36"),
     "mixtral-8x7b": ("L1E3;L1E4;L9E7;L19E6;L19E1;L23E3;L12E7;L18E5;L21E3;"
                      "L16E0;L17E0;L19E5;L19E2;L6E1;L6E6;L18E1;L30E4"),
+    # Phi-3.5-MoE: singles (top-10 union) + sets. Su's code cannot run Phi,
+    # so the "SE set" here is OUR application of their criterion (L3E7,
+    # L5E10). The whitespace pair L0E6+L1E0 is the key remaining FN test:
+    # newline/space experts at act pctl 17/59 -- the same archetype as
+    # Mixtral's catastrophic L1E3.
     "phi-3.5-moe": ("L5E10;L3E7;L10E0;L12E13;L11E2;L23E3;L20E13;L20E15;L8E0;"
-                    "L20E12;L27E9;L29E6;L3E3;L1E0;L28E12;L9E2;L0E6"),
+                    "L20E12;L27E9;L29E6;L3E3;L1E0;L28E12;L9E2;L0E6;"
+                    "L3E7+L5E10;"              # Su-criterion SE set (ours) [H1/anchor]
+                    "L3E7+L5E10+L10E0;"        # top-3 (act = out, degenerate) [H5]
+                    "L5E10+L3E7+L10E0+L12E13;" # act-top-4 [H5: marginal pick]
+                    "L3E7+L5E10+L10E0+L27E9;"  # out-top-4 [H3/H5: marginal pick]
+                    "L0E6+L1E0;"               # whitespace pair, sub-threshold [H2]
+                    "L5E10+L8E0+L9E2;"         # apostrophe set [H4 redundancy]
+                    "L14E4+L26E11;"            # random-2
+                    "L14E4+L26E11+L7E9"),      # random-3
+    # Mixtral-8x22B: singles (top-10 union) + sets. Su reports no 8x22B SEs;
+    # our Su-criterion reproduction gives {L0E2, L1E7}. L0E2 and L29E3 are
+    # both newline experts (whitespace archetype).
+    "mixtral-8x22b": ("L1E7;L0E2;L36E7;L37E7;L29E3;L3E2;L0E4;L28E7;L41E2;"
+                      "L38E6;L22E7;L22E6;L9E1;L3E0;L28E3;"
+                      "L0E2+L1E7;"             # Su-criterion SE set (ours) [H1/anchor]
+                      "L0E2+L29E3;"            # newline pair [archetype]
+                      "L0E2+L1E7+L29E3;"       # out-top-3 [H3]
+                      "L1E7+L0E2+L36E7;"       # act-top-3 [H5: marginal pick]
+                      "L22E6+L22E7;"           # function-word pair, act pctl ~30 [H2]
+                      "L13E5+L44E2;"           # random-2
+                      "L13E5+L44E2+L31E6"),    # random-3
     # Qwen3-30B: singles (top-10 union) + the criteria comparison at Su's
     # scale -- Su's published SE set vs our out-top-3 vs the all-FN hub set
     # vs a size-matched random-3.
@@ -202,6 +227,18 @@ def su_c4_eval_windows(tok, n_seqs: int, seqlen: int) -> list[torch.Tensor]:
     return windows
 
 
+def su_wikitext2_eval_windows(tok, seqlen: int) -> list[torch.Tensor]:
+    """Su et al.'s get_wikitext2(eval_mode=True) + chunking: tokenize
+    '\n\n'.join(wikitext-2-raw-v1 test), split into contiguous seqlen
+    chunks, truncate the tail. Deterministic."""
+    import datasets
+    testdata = datasets.load_dataset("wikitext", "wikitext-2-raw-v1",
+                                     split="test")
+    enc = tok("\n\n".join(testdata["text"]), return_tensors="pt").input_ids[0]
+    n = enc.numel() // seqlen
+    return [enc[i * seqlen:(i + 1) * seqlen] for i in range(n)]
+
+
 @torch.no_grad()
 def eval_ppl(model, windows: list[torch.Tensor], batch_size: int = 1) -> float:
     """Su et al.'s PPL: exp(mean of per-sequence mean NLL). Batching is a
@@ -240,6 +277,10 @@ def main() -> None:
     p.add_argument("--experts", default=None,
                    help="Ablation spec 'L4E27;L4E14;...' (default = curated "
                         "candidates, see DEFAULT_TARGETS).")
+    p.add_argument("--dataset", choices=["c4", "wikitext2"], default="c4",
+                   help="Eval corpus. c4 = 256 random 2048-token validation "
+                        "windows; wikitext2 = contiguous test-set chunks "
+                        "(both exactly as in Su et al.'s data_utils).")
     p.add_argument("--random-controls", type=int, default=5)
     p.add_argument("--seed", type=int, default=0)
     p.add_argument("--n-seqs", type=int, default=N_SEQS)
@@ -335,14 +376,17 @@ def main() -> None:
                  "speed. Allocate more GPU memory / more GPUs, or set "
                  "CUDA_VISIBLE_DEVICES to the free GPUs.")
 
-    windows = su_c4_eval_windows(tok, args.n_seqs, args.seq_len)
+    if args.dataset == "c4":
+        windows = su_c4_eval_windows(tok, args.n_seqs, args.seq_len)
+    else:
+        windows = su_wikitext2_eval_windows(tok, args.seq_len)
     sink_ids = torch.stack([w[:args.sink_seq_len]
                             for w in windows[:args.n_sink_seqs]])
-    print(f"[{args.model}] {len(windows)} windows x {args.seq_len} tok "
-          f"(Su et al. protocol); {len(runs)} ablation runs "
+    print(f"[{args.model}/{args.dataset}] {len(windows)} windows x "
+          f"{args.seq_len} tok (Su et al. protocol); {len(runs)} ablation runs "
           f"({args.random_controls} random controls)")
 
-    out_path = CIRCUITS / f"ablation_{args.model}_c4.json"
+    out_path = CIRCUITS / f"ablation_{args.model}_{args.dataset}.json"
     results = json.loads(out_path.read_text()) if out_path.exists() else {}
 
     if "baseline" not in results:
