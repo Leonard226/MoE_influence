@@ -65,22 +65,38 @@ N_SEQS = 256
 # FN-candidate set + a size-matched random set. Labels are model-absolute
 # decoder-layer indices (LxEy = decoder layer x, expert y).
 DEFAULT_TARGETS = {
-    # Qwen3-235B: SEs {L3E120, L2E39} are early -> ablatable. FN test = the
-    # late high-out set {L69E69, L70E113, L90E101}.
+    # Qwen3-235B. Singles = full union of top-10 act + top-10 out (18):
+    #   both:     L3E120, L2E39
+    #   out-only: L69E69, L70E113, L90E101, L50E113, L2E83, L49E69, L90E10, L90E14
+    #   act-only: L3E22, L3E29, L3E0, L35E109, L3E55, L64E91, L3E39, L8E64
+    # Sets test the hypotheses:
+    #   SE set {L3E120,L2E39} (Su's criterion) -> predict catastrophic (H: SE causal)
+    #   out-top-3 -> our influence set (H3)
+    #   late high-out set -> high-out experts Su MISSES (H2 FN: L70/L90 excluded
+    #     by the 0.75 layer filter, L69 by magnitude; L90E101 is act pctl 99.4,
+    #     a filter-only FN) -> predict damage >> random
     "qwen3-235b-a22b": ("L3E120;L2E39;L69E69;L70E113;L90E101;L50E113;L2E83;"
                         "L49E69;L90E10;L90E14;"
+                        "L3E22;L3E29;L3E0;L35E109;L3E55;L64E91;L3E39;L8E64;"
                         "L3E120+L2E39;"               # Su-criterion SE set (ours)
                         "L3E120+L2E39+L69E69;"        # out-top-3
-                        "L69E69+L70E113+L90E101;"     # late high-out set (FN)
+                        "L69E69+L70E113+L90E101;"     # high-out, Su misses (FN)
                         "L11E64+L57E30+L83E19"),      # random-3
-    # DeepSeek-V2: SE set is the mid-network BOS chain {L18E96, L21E94,
-    # L20E48}. FN test = the early-BOS out-only chain {L1E119, L2E111, L3E17}
-    # whose activation magnitudes are near-zero (act pctl 0.6-1.5).
-    "deepseek-v2": ("L18E96;L21E94;L20E48;L1E119;L2E111;L3E17;L5E34;L3E64;"
-                    "L3E81;L4E13;"
-                    "L18E96+L21E94;"                  # Su-criterion SE set (ours)
-                    "L18E96+L21E94+L20E48;"           # SE top-3
-                    "L1E119+L2E111+L3E17;"            # early-BOS chain (out-only)
+    # DeepSeek-V2. Singles = full union of top-10 act + top-10 out (18):
+    #   both:     L18E96, L21E94
+    #   act-only: L20E48, L43E57, L30E64, L22E121, L16E102, L27E114, L21E69, L10E29
+    #   out-only: L1E119, L2E111, L5E34, L3E17, L3E64, L4E13, L5E88, L3E81
+    # Sets:
+    #   SE set {L18E96,L20E48,L21E94} (Su's 3 reproduced SEs, mid-net BOS chain)
+    #   out-top-3 {L1E119,L18E96,L2E111}
+    #   early-BOS chain {L1E119,L2E111,L3E17}: high-out, act pctl 0.7-72, the
+    #     sharpest FN test (near-zero-act experts Su cannot see)
+    "deepseek-v2": ("L18E96;L21E94;L20E48;L43E57;L30E64;L22E121;L16E102;"
+                    "L27E114;L21E69;L10E29;L1E119;L2E111;L5E34;L3E17;L3E64;"
+                    "L4E13;L5E88;L3E81;"
+                    "L18E96+L20E48+L21E94;"           # Su-criterion SE set (ours, 3)
+                    "L1E119+L18E96+L2E111;"           # out-top-3
+                    "L1E119+L2E111+L3E17;"            # early-BOS chain (FN)
                     "L14E7+L37E88+L52E140"),          # random-3
 }
 
