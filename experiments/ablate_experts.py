@@ -374,7 +374,15 @@ def main() -> None:
             bnb_4bit_use_double_quant=True,
             llm_int8_skip_modules=skip)  # name says int8; applies to 4-bit too
         load_kwargs.pop("torch_dtype", None)
-        max_memory = {i: int(free * 0.9) for i, free in free_mem.items()}
+        # bitsandbytes' NF4 loader transiently holds ~2.5x the per-GPU budget
+        # while quantizing (build_dag.py notes this). So cap each GPU's budget
+        # at ~free/2.6 -- high enough that 4 GPUs still exceed the ~118 GB
+        # model, low enough that the 2.6x loading peak fits under `free`.
+        max_memory = {i: int(free / 2.6) for i, free in free_mem.items()}
+        budget_gb = sum(max_memory.values()) / 1e9
+        print(f"NF4 per-GPU budget {max_memory[0]/1e9:.1f} GB "
+              f"(loading peak ~{max_memory[0]*2.6/1e9:.0f} GB/GPU); "
+              f"total {budget_gb:.0f} GB", flush=True)
         model = AutoModelForCausalLM.from_pretrained(
             cfg["id"], quantization_config=bnb, device_map="auto",
             max_memory=max_memory, **load_kwargs).eval()
