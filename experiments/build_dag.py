@@ -159,27 +159,9 @@ MODELS = {
         "multi_gpu": True,
         "max_memory": {0: "15GiB", 1: "25GiB", 2: "25GiB", 3: "25GiB"},  # 90 GiB for 60GB model
     },
-    "qwen3-235b-a22b": {
-        # Same modeling class as Qwen3-30B-A3B; only config differs (94 layers, 4096 hidden).
-        # 470GB bf16 doesn't fit 4x80GB single-node. int8 (~235GB) hit a loading-peak OOM
-        # because bnb's loader holds fp16 on-device before quantizing. NF4 (4-bit double-quant)
-        # halves the footprint to ~118GB so the loading peak fits per GPU. Router gate and
-        # lm_head are kept in bf16 so the score-decomposition reads clean weights.
-        "id": "Qwen/Qwen3-235B-A22B",
-        "cls": Qwen3MoeForCausalLM,
-        "n_experts": 128,
-        "top_k": 8,
-        "d_e": 4096,
-        "moe_layers": list(range(94)),
-        "gate_path": "mlp.gate",
-        "experts_path": "mlp.experts",
-        "down_proj_attr": "down_proj",
-        "quantization": "nf4",
-        "bnb_skip_modules": ["gate", "lm_head"],
-        # Even distribution: accelerate's NF4 loading peaks at ~2.5× max_memory per GPU.
-        # 30 GiB × 2.5 = 75 GiB peak, fits 80 GiB. Total 120 GiB > 118 GiB NF4 model.
-        "max_memory": {0: "30GiB", 1: "30GiB", 2: "30GiB", 3: "30GiB"},
-    },
+    # NOTE: Qwen3-235B-A22B and DeepSeek-V2 exceed single-node memory in bf16
+    # and are built by experiments/build_dag_multinode.py (pipeline-parallel
+    # across 2 nodes), not here.
     "phi-3.5-moe": {
         "id": "microsoft/Phi-3.5-MoE-instruct",
         "cls": PhiMoEForCausalLM,
@@ -319,39 +301,6 @@ if args.random_init:
         print(f"  building model on {device} (fp32 init -> bf16 cast, "
               f"seed={args.seed}) ...", flush=True)
         model = MODEL["cls"](cfg).to(torch.bfloat16).to(device).eval()
-elif MODEL.get("quantization") in ("int8", "nf4"):
-    # Bitsandbytes quantization. HF handles device_map automatically; we skip the
-    # manual init_empty_weights / dispatch_model dance. Router gate and lm_head are
-    # in the skip list so the score-decomposition reads them in their native dtype.
-    try:
-        import bitsandbytes  # noqa: F401
-        from transformers import BitsAndBytesConfig
-    except ImportError:
-        raise RuntimeError("quantization requires bitsandbytes: pip install bitsandbytes")
-    quant = MODEL["quantization"]
-    skip_modules = MODEL.get("bnb_skip_modules", ["lm_head"])
-    print(f"  loading with {quant} quantization (skip_modules={skip_modules})", flush=True)
-    if quant == "int8":
-        bnb_config = BitsAndBytesConfig(
-            load_in_8bit=True,
-            llm_int8_skip_modules=skip_modules,
-        )
-    else:  # nf4
-        bnb_config = BitsAndBytesConfig(
-            load_in_4bit=True,
-            bnb_4bit_quant_type="nf4",
-            bnb_4bit_compute_dtype=torch.bfloat16,
-            bnb_4bit_use_double_quant=True,
-            llm_int8_skip_modules=skip_modules,  # name says int8 but applies to 4-bit too
-        )
-    load_kwargs.pop("torch_dtype", None)   # bnb manages dtype internally
-    load_kwargs["quantization_config"] = bnb_config
-    load_kwargs["device_map"] = "auto"
-    if "max_memory" in MODEL:
-        load_kwargs["max_memory"] = MODEL["max_memory"]
-    model = MODEL["cls"].from_pretrained(MODEL_ID, **load_kwargs).eval()
-    print(f"  hf_device_map = {getattr(model, 'hf_device_map', '<not present>')}", flush=True)
-    print(f"  first-param device = {next(model.parameters()).device}", flush=True)
 elif MODEL.get("multi_gpu", False):
     try:
         import accelerate
