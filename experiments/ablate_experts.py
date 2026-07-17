@@ -71,10 +71,16 @@ MODELS = {
                       "n_layers": 48, "experts_path": "mlp.experts",
                       "down_attr": "down_proj", "num_dense": 0,
                       "multi_gpu": False},
+    # Qwen3-235B (~470 GB bf16) and DeepSeek-V2 (~472 GB) don't fit on one
+    # 4x80 GB node in bf16. Load NF4-quantized (~118 GB), keeping gate +
+    # lm_head in bf16 (as build_dag.py does) so routing decisions are clean.
+    # Ablation dPPL is measured within the same quantized model, so it stays
+    # a valid causal signal; only absolute PPL shifts vs the bf16 models.
     "qwen3-235b-a22b": {"id": "Qwen/Qwen3-235B-A22B", "n_experts": 128,
                         "n_layers": 94, "experts_path": "mlp.experts",
                         "down_attr": "down_proj", "num_dense": 0,
-                        "multi_gpu": True},
+                        "multi_gpu": True, "quantization": "nf4",
+                        "bnb_skip_modules": ["gate", "lm_head"]},
     # DeepSeek works with this ablation operator (down_proj output zeroing
     # never touches the custom MoEGate). Labels are model-absolute layer
     # indices, which equal the module-list indices, so num_dense=0 here;
@@ -88,7 +94,9 @@ MODELS = {
                     "n_layers": 60, "experts_path": "mlp.experts",
                     "down_attr": "down_proj", "num_dense": 0,
                     "min_layer": 1, "multi_gpu": True,
-                    "trust_remote_code": True, "attn_impl": "eager"},
+                    "trust_remote_code": True, "attn_impl": "eager",
+                    "quantization": "nf4",
+                    "bnb_skip_modules": ["gate", "lm_head"]},
 }
 
 # Ablation targets = UNION of the two top-10 rankings (tab:topk-match-c4):
@@ -150,6 +158,24 @@ DEFAULT_TARGETS = {
                          "L24E63+L25E11;"               # late BOS pair (FN)
                          "L7E22+L13E51;"                # random-2
                          "L7E22+L13E51+L9E30+L21E5"),   # random-4
+    # Qwen3-235B (NF4): singles (top-10 union) + our Su-criterion SE set
+    # {L3E120, L2E39} + out-top-3 + FN hub/late set + random. Both SEs are
+    # early -> ablatable. Layer labels are model-absolute (num_dense 0).
+    "qwen3-235b-a22b": ("L3E120;L2E39;L69E69;L70E113;L90E101;L50E113;L2E83;"
+                        "L49E69;L90E10;L90E14;"
+                        "L3E120+L2E39;"               # Su-criterion SE set (ours)
+                        "L3E120+L2E39+L69E69;"        # out-top-3
+                        "L69E69+L70E113+L90E101;"     # late high-out set (FN)
+                        "L11E64+L57E30+L83E19"),      # random-3
+    # DeepSeek-V2 (NF4): singles (top-10 union) + the BOS-chain SE set + our
+    # out-top-3 + a mid/late set + random. Layer labels model-absolute
+    # (num_dense 0, but layer 0 dense -> min_layer 1 for controls).
+    "deepseek-v2": ("L18E96;L21E94;L20E48;L1E119;L2E111;L3E17;L5E34;L3E64;"
+                    "L3E81;L4E13;"
+                    "L18E96+L21E94;"                  # Su-criterion SE set (ours)
+                    "L18E96+L21E94+L20E48;"           # SE top-3
+                    "L1E119+L2E111+L3E17;"            # early-BOS chain (out-only)
+                    "L14E7+L37E88+L52E140"),          # random-3
 }
 
 SEQLEN = 2048
@@ -336,7 +362,23 @@ def main() -> None:
     load_kwargs = dict(torch_dtype=torch.bfloat16,
                        attn_implementation=cfg.get("attn_impl", "sdpa"),
                        trust_remote_code=trc)
-    if cfg["multi_gpu"]:
+    if cfg.get("quantization") == "nf4":
+        # NF4 4-bit (bitsandbytes). bnb manages device placement via
+        # device_map="auto" reliably (unlike the bf16 dispatch path below).
+        # Router gate + lm_head kept in bf16 so routing/logits are clean.
+        from transformers import BitsAndBytesConfig
+        skip = cfg.get("bnb_skip_modules", ["lm_head"])
+        bnb = BitsAndBytesConfig(
+            load_in_4bit=True, bnb_4bit_quant_type="nf4",
+            bnb_4bit_compute_dtype=torch.bfloat16,
+            bnb_4bit_use_double_quant=True,
+            llm_int8_skip_modules=skip)  # name says int8; applies to 4-bit too
+        load_kwargs.pop("torch_dtype", None)
+        max_memory = {i: int(free * 0.9) for i, free in free_mem.items()}
+        model = AutoModelForCausalLM.from_pretrained(
+            cfg["id"], quantization_config=bnb, device_map="auto",
+            max_memory=max_memory, **load_kwargs).eval()
+    elif cfg["multi_gpu"]:
         # from_pretrained(device_map="auto") silently dumps these MoE model
         # classes entirely to CPU (observed for Mixtral; same issue noted in
         # build_dag.py). Working recipe: plan a device map on a meta skeleton,
@@ -368,7 +410,8 @@ def main() -> None:
             cfg["id"], **load_kwargs).to("cuda").eval()
     # Report the actual device spread across parameters (works whether or not
     # accelerate set hf_device_map). Any 'cpu' entry => partial offload =>
-    # slow; abort so it doesn't crawl unnoticed.
+    # slow; abort so it doesn't crawl unnoticed. (bnb keeps a few meta/quant
+    # bookkeeping params off-device, so ignore 'meta' and only fail on cpu.)
     devs = {str(p.device) for p in model.parameters()}
     print(f"parameter devices: {sorted(devs)}", flush=True)
     if any(d.startswith("cpu") for d in devs):
