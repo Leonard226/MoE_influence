@@ -319,6 +319,10 @@ def main() -> None:
                    help="Context length for the attention-sink metric "
                         "(output_attentions is O(T^2) in eager mode; "
                         "attention-to-token-0 is visible in a short window).")
+    p.add_argument("--nf4-mem-frac", type=float, default=0.35,
+                   help="NF4 models only: per-GPU memory budget as a fraction "
+                        "of free memory. Loading peaks at ~2.6x this. Lower it "
+                        "if loading OOMs; raise it if the model doesn't fit.")
     args = p.parse_args()
 
     cfg = MODELS[args.model]
@@ -374,15 +378,18 @@ def main() -> None:
             bnb_4bit_use_double_quant=True,
             llm_int8_skip_modules=skip)  # name says int8; applies to 4-bit too
         load_kwargs.pop("torch_dtype", None)
-        # bitsandbytes' NF4 loader transiently holds ~2.5x the per-GPU budget
-        # while quantizing (build_dag.py notes this). So cap each GPU's budget
-        # at ~free/2.6 -- high enough that 4 GPUs still exceed the ~118 GB
-        # model, low enough that the 2.6x loading peak fits under `free`.
-        max_memory = {i: int(free / 2.6) for i, free in free_mem.items()}
+        # bitsandbytes' NF4 loader transiently holds ~2.6x the per-GPU budget
+        # while quantizing (build_dag.py notes this). Per-GPU budget =
+        # --nf4-mem-frac * free: it must be high enough that all GPUs together
+        # exceed the ~118 GB model, yet low enough that the ~2.6x loading peak
+        # stays under `free`. On 4x84 GB this window is narrow (~0.36); lower
+        # the fraction if the peak OOMs, raise it if the model doesn't fit.
+        frac = args.nf4_mem_frac
+        max_memory = {i: int(free * frac) for i, free in free_mem.items()}
         budget_gb = sum(max_memory.values()) / 1e9
         print(f"NF4 per-GPU budget {max_memory[0]/1e9:.1f} GB "
               f"(loading peak ~{max_memory[0]*2.6/1e9:.0f} GB/GPU); "
-              f"total {budget_gb:.0f} GB", flush=True)
+              f"total {budget_gb:.0f} GB  (--nf4-mem-frac {frac})", flush=True)
         model = AutoModelForCausalLM.from_pretrained(
             cfg["id"], quantization_config=bnb, device_map="auto",
             max_memory=max_memory, **load_kwargs).eval()
