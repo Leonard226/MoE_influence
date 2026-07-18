@@ -10,6 +10,10 @@
 # Usage: MODEL=qwen3-235b-a22b sbatch experiments/launch_ablate_multinode.sh
 set -euo pipefail
 MODEL="${MODEL:-qwen3-235b-a22b}"
+# PPL batch size. Eager attention is O(seq^2 * heads) per layer at seq=2048;
+# DeepSeek-V2 (~128 heads, hidden 5120) OOMs at 4, so default it to 1.
+# Batch size does NOT change PPL (per-sequence NLL), only memory/speed.
+if [ "$MODEL" = "deepseek-v2" ]; then BATCH="${BATCH:-1}"; else BATCH="${BATCH:-4}"; fi
 
 ENV_BIN=/scratch/sleonard/miniconda3/envs/megatron/bin
 export PATH="${ENV_BIN}:${PATH}"
@@ -41,4 +45,5 @@ srun --export=ALL ${ENV_BIN}/torchrun \
     --rdzv_backend=c10d \
     --rdzv_endpoint=$MASTER_ADDR:$MASTER_PORT \
     "$SCRIPT_PATH" \
-    --model "$MODEL"
+    --model "$MODEL" \
+    --batch-size "$BATCH"
