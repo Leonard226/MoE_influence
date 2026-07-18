@@ -8,8 +8,12 @@
 
 # Multi-node expert ablation for qwen3-235b-a22b / deepseek-v2.
 # Usage: MODEL=qwen3-235b-a22b sbatch experiments/launch_ablate_multinode.sh
+# Append custom ablations to the existing JSON (restart-safe; cached keys are
+# skipped, no random controls added):
+#   MODEL=deepseek-v2 EXPERTS="LaEb+LcEd;LeEf" sbatch experiments/launch_ablate_multinode.sh
 set -euo pipefail
 MODEL="${MODEL:-qwen3-235b-a22b}"
+EXPERTS="${EXPERTS:-}"
 # PPL batch size. Eager attention is O(seq^2 * heads) per layer at seq=2048;
 # DeepSeek-V2 (~128 heads, hidden 5120) OOMs at 4, so default it to 1.
 # Batch size does NOT change PPL (per-sequence NLL), only memory/speed.
@@ -38,6 +42,13 @@ if [ ! -f "$SCRIPT_PATH" ]; then
     exit 1
 fi
 
+# When EXPERTS is set, append exactly those ablations (no random controls);
+# otherwise run the model's built-in default target list.
+EXTRA_ARGS=()
+if [ -n "$EXPERTS" ]; then
+    EXTRA_ARGS+=(--experts "$EXPERTS" --random-controls 0)
+fi
+
 srun --export=ALL ${ENV_BIN}/torchrun \
     --nnodes=2 \
     --nproc_per_node=4 \
@@ -46,4 +57,5 @@ srun --export=ALL ${ENV_BIN}/torchrun \
     --rdzv_endpoint=$MASTER_ADDR:$MASTER_PORT \
     "$SCRIPT_PATH" \
     --model "$MODEL" \
-    --batch-size "$BATCH"
+    --batch-size "$BATCH" \
+    "${EXTRA_ARGS[@]}"
