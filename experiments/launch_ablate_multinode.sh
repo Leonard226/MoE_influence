@@ -18,7 +18,10 @@ export HF_HOME="${HF_HOME:-$HOME/.hugging_face}"
 
 nodes=( $(scontrol show hostnames "$SLURM_JOB_NODELIST") )
 export MASTER_ADDR="${nodes[0]}"
-export MASTER_PORT=29500
+# Derive a unique port per job so a stale TIME_WAIT socket from a previous run
+# can never collide with this one's c10d rendezvous (fixed 29500 caused a
+# RendezvousConnectionError when reused right after another multinode job).
+export MASTER_PORT=$(( 20000 + SLURM_JOB_ID % 10000 ))
 echo "MASTER_ADDR=$MASTER_ADDR  MASTER_PORT=$MASTER_PORT  nodes=${nodes[*]}  MODEL=$MODEL"
 
 export NCCL_IB_DISABLE=0
