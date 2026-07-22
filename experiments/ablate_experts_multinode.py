@@ -12,15 +12,26 @@ Differences from the single-node script:
   - lm_head is kept on the last rank (build_dag_multinode nulls it).
   - Ablation hooks (down_proj -> zeros) are registered on whichever rank owns
     the target expert's decoder layer.
-  - PPL only (Su's metric). The attention-sink / max|h0| extras are omitted:
-    they need cross-rank attention gathering and the sink mechanism is already
-    established on the six single-node models.
+  - Attention-sink / max|h0| / max|h|_all ARE collected here too (unlike
+    earlier versions of this script): the customized decoder layers always
+    populate layer_outputs[-1][11] with the real post-softmax attention
+    weights [B, H, T, T], captured unconditionally inside self_attn.forward
+    before any output_attentions gating -- no extra kwargs needed. Each rank
+    contributes its owned layers' local sum/count (att_sink) and local max
+    (max_h0: position 0 only; max_h_all: max_{l,b,t,d} |X^(l)_{b,t,d}|, any
+    position); pipeline_forward_sink + eval_sink_pipeline combine them with a
+    SUM/SUM/MAX/MAX reduce onto rank 0. Computed on a separate SHORT context
+    (--sink-seq-len, default 256): materializing full eager-attention
+    matrices at the main --seq-len 2048 is the same O(T^2) blowup that
+    caused the single-node CUDA OOM earlier in this project.
 
 Ablation operator and PPL protocol are byte-for-byte the single-node ones:
 zero the expert's down_proj output; 256 random 2048-token c4-validation
 windows; PPL = exp(mean per-sequence mean NLL). Results are written by rank 0
 to {result_path}/circuits/ablation_{model}_c4.json in the SAME format as the
-single-node runs (restart-safe; cached runs skipped).
+single-node runs (restart-safe; cached runs skipped) -- att_sink/max_h0/
+max_h_all keys
+included.
 
 Launch (2 nodes x 4 GPUs), e.g. via a SLURM script mirroring
 launch_multinode.sh but pointing at this file:
@@ -93,11 +104,13 @@ DEFAULT_TARGETS = {
     #     sharpest FN test (near-zero-act experts Su cannot see)
     "deepseek-v2": ("L18E96;L21E94;L20E48;L43E57;L30E64;L22E121;L16E102;"
                     "L27E114;L21E69;L10E29;L1E119;L2E111;L5E34;L3E17;L3E64;"
-                    "L4E13;L5E88;L3E81;"
+                    "L4E13;L5E88;L3E81;L45E24;"       # L45E24: top-1 by in(v)
                     "L18E96+L20E48+L21E94;"           # Su-criterion SE set (ours, 3)
                     "L1E119+L18E96+L2E111;"           # out-top-3
                     "L1E119+L2E111+L3E17;"            # early-BOS chain (FN)
-                    "L14E7+L37E88+L52E140"),          # random-3
+                    "L14E7+L37E88+L52E140;"           # random-3
+                    "L18E96+L20E48+L21E94+L1E119;"    # SE set + BOS hub
+                    "L18E96+L20E48+L21E94+L1E119+L2E111"),  # SE set + 2 BOS
 }
 
 
@@ -263,6 +276,108 @@ def pipeline_forward_ppl(model, cfg, model_cfg, owned, rank, world_size,
     return loss.mean(dim=1).tolist()  # per-sequence mean NLL
 
 
+@torch.no_grad()
+def pipeline_forward_sink(model, cfg, model_cfg, owned, rank, world_size,
+                          local_rank, input_ids):
+    """Single short-context forward pass, returning THIS RANK's local
+    contribution to the attention-sink / max-activation statistics:
+        (local_att_sum, local_att_count, local_max_h0, local_max_h_all)
+    max_h0 is the peak |activation| at position 0 only (Su et al.'s sink
+    position); max_h_all is the peak anywhere -- max_{l,b,t,d} |X^(l)_{b,t,d}|
+    -- generalising max_h0 to all token positions, not just the BOS/sink
+    slot. Unlike PPL (only the last rank has a loss), every rank owns layers
+    that contribute here, so every rank returns real numbers -- the caller
+    combines them with a SUM/SUM/MAX/MAX reduce onto rank 0.
+
+    The customized decoder layers (customized_models/modeling_*) always
+    populate layer_outputs[-1][11] with the real post-softmax attention
+    weights [B, H, T, T] regardless of any output_attentions/use_cache
+    kwarg -- the hook is captured unconditionally inside self_attn.forward,
+    before any such gating (verified in both the Qwen3 and DeepSeek custom
+    model files). The multinode loader forces _attn_implementation="eager",
+    which is required for Qwen3's attention_interface to actually populate
+    this hook (SDPA does not expose attention weights).
+
+    Kept as a SEPARATE short-context (--sink-seq-len, default 256) pass
+    from the main --seq-len 2048 PPL pass: materializing full [B,H,T,T]
+    eager-attention matrices at T=2048 is the same O(T^2) blowup that
+    caused the single-node CUDA OOM earlier in this project.
+    """
+    inner = model.model
+    bsz, n_tok = input_ids.shape
+    gpu = f"cuda:{local_rank}"
+    layer_kwargs_fn = model_cfg["layer_kwargs_fn"]
+    causal_mask_fn = model_cfg["causal_mask_fn"]
+    needs_pos_emb = model_cfg["needs_position_embeddings"]
+
+    local_max_h0 = 0.0
+    local_max_h_all = 0.0
+
+    if rank == 0:
+        hidden = inner.embed_tokens(input_ids)
+        # Include the embedding output itself (HF's hidden_states[0]) in the
+        # max, matching the single-node eval_sink's convention of scanning
+        # all L+1 residual-stream states, not just post-layer ones.
+        local_max_h0 = max(local_max_h0, float(hidden[:, 0, :].abs().max()))
+        local_max_h_all = max(local_max_h_all, float(hidden.abs().max()))
+    else:
+        hidden = torch.empty((bsz, n_tok, cfg.hidden_size),
+                             dtype=torch.bfloat16, device=gpu)
+        dist.recv(hidden, src=rank - 1)
+
+    position_ids = torch.arange(n_tok, device=gpu).unsqueeze(0).expand(bsz, -1)
+    cache_position = torch.arange(n_tok, device=gpu)
+    causal_mask = causal_mask_fn(inner, None, hidden, cache_position)
+    position_embeddings = (inner.rotary_emb(hidden, position_ids)
+                           if needs_pos_emb else None)
+    kwargs = layer_kwargs_fn(causal_mask, position_ids, position_embeddings)
+
+    local_att_sum = 0.0
+    local_att_count = 0
+    for i in owned:
+        layer_outputs = inner.layers[i](hidden, **kwargs)
+        hidden = layer_outputs[0]
+        attn_w = layer_outputs[-1][11]           # [B, H, T, T], post-softmax
+        local_att_sum += float(attn_w[:, :, 1:, 0].mean())
+        local_att_count += 1
+        local_max_h0 = max(local_max_h0, float(hidden[:, 0, :].abs().max()))
+        local_max_h_all = max(local_max_h_all, float(hidden.abs().max()))
+
+    if rank < world_size - 1:
+        dist.send(hidden.contiguous().to(torch.bfloat16), dst=rank + 1)
+    # Last rank: no norm/lm_head needed -- sink stats only need the
+    # per-layer hidden states and attention weights already captured above.
+
+    return local_att_sum, local_att_count, local_max_h0, local_max_h_all
+
+
+@torch.no_grad()
+def eval_sink_pipeline(model, cfg, model_cfg, owned, rank, world_size,
+                       local_rank, sink_ids):
+    """Run the sink forward pass and reduce every rank's local contribution
+    onto rank 0: att_sink = (sum of per-layer means) / (total layer count);
+    max_h0/max_h_all = max over all layers/ranks. Returns the dict on rank 0,
+    None elsewhere (mirrors sync_ppl's rank-0-only convention)."""
+    gpu = f"cuda:{local_rank}"
+    att_sum, att_count, max_h0, max_h_all = pipeline_forward_sink(
+        model, cfg, model_cfg, owned, rank, world_size, local_rank,
+        sink_ids.to(gpu))
+    att_sum_t = torch.tensor([att_sum], dtype=torch.float64, device=gpu)
+    att_count_t = torch.tensor([att_count], dtype=torch.float64, device=gpu)
+    max_h0_t = torch.tensor([max_h0], dtype=torch.float64, device=gpu)
+    max_h_all_t = torch.tensor([max_h_all], dtype=torch.float64, device=gpu)
+    if dist.is_initialized():
+        dist.reduce(att_sum_t, dst=0, op=dist.ReduceOp.SUM)
+        dist.reduce(att_count_t, dst=0, op=dist.ReduceOp.SUM)
+        dist.reduce(max_h0_t, dst=0, op=dist.ReduceOp.MAX)
+        dist.reduce(max_h_all_t, dst=0, op=dist.ReduceOp.MAX)
+    if rank == 0:
+        return {"att_sink": float(att_sum_t.item() / att_count_t.item()),
+                "max_h0": float(max_h0_t.item()),
+                "max_h_all": float(max_h_all_t.item())}
+    return None
+
+
 def register_ablation_hooks(model, model_cfg, owned, group, local_rank):
     """Register down_proj-output-zeroing hooks for the members of `group`
     whose decoder layer this rank owns. Returns the handles to remove later."""
@@ -334,6 +449,11 @@ def main():
     p.add_argument("--n-seqs", type=int, default=N_SEQS)
     p.add_argument("--seq-len", type=int, default=SEQLEN)
     p.add_argument("--batch-size", type=int, default=4)
+    p.add_argument("--n-sink-seqs", type=int, default=8)
+    p.add_argument("--sink-seq-len", type=int, default=256,
+                   help="Context length for the attention-sink metric (kept "
+                        "short: eager attention is O(T^2), same reasoning as "
+                        "the single-node script).")
     args = p.parse_args()
 
     rank, world_size, local_rank = init_dist()
@@ -386,6 +506,13 @@ def main():
         dist.broadcast(windows, src=0)
     rprint(rank, f"  {windows.shape[0]} windows x {windows.shape[1]} tok")
 
+    # sink_ids: no extra broadcast needed -- windows is already identical on
+    # every rank, and n_sink_seqs/sink_seq_len are the same CLI args on every
+    # rank (torchrun launches identical argv everywhere).
+    sink_ids = windows[:args.n_sink_seqs, :args.sink_seq_len].contiguous()
+    rprint(rank, f"  sink eval: {sink_ids.shape[0]} windows x "
+                 f"{sink_ids.shape[1]} tok")
+
     out_path = CIRCUITS / f"ablation_{args.model}_c4.json"
     results = {}
     if rank == 0 and out_path.exists():
@@ -412,10 +539,14 @@ def main():
         ppl = eval_ppl_pipeline(model, cfg, model_cfg, owned, rank,
                                 world_size, local_rank, windows, args.batch_size)
         ppl = sync_ppl(ppl if ppl is not None else 0.0)
+        sink = eval_sink_pipeline(model, cfg, model_cfg, owned, rank,
+                                  world_size, local_rank, sink_ids)
         if rank == 0:
-            results["baseline"] = {"ppl": ppl}
+            results["baseline"] = {"ppl": ppl, **sink}
             out_path.write_text(json.dumps(results, indent=2))
-        rprint(rank, f"baseline: ppl={ppl:.4f}")
+            print(f"baseline: ppl={ppl:.4f} att_sink={sink['att_sink']:.4f} "
+                  f"max_h0={sink['max_h0']:.4g} max_h_all={sink['max_h_all']:.4g}",
+                  flush=True)
     base = results.get("baseline", {}).get("ppl", float("nan")) if rank == 0 else 0.0
 
     # ---- Ablations ----
@@ -429,15 +560,19 @@ def main():
             dist.barrier()
         ppl = eval_ppl_pipeline(model, cfg, model_cfg, owned, rank,
                                 world_size, local_rank, windows, args.batch_size)
+        ppl = sync_ppl(ppl if ppl is not None else 0.0)
+        sink = eval_sink_pipeline(model, cfg, model_cfg, owned, rank,
+                                  world_size, local_rank, sink_ids)
         for h in handles:
             h.remove()
-        ppl = sync_ppl(ppl if ppl is not None else 0.0)
         if rank == 0:
-            results[lab] = {"ppl": ppl, "control": lab in is_control}
+            results[lab] = {"ppl": ppl, **sink, "control": lab in is_control}
             out_path.write_text(json.dumps(results, indent=2))
             ratio = ppl / base if base else float("nan")
             print(f"{lab}{' [ctrl]' if lab in is_control else ''}: "
-                  f"ppl={ppl:.4f} (x{ratio:.4f})", flush=True)
+                  f"ppl={ppl:.4f} (x{ratio:.4f})  att_sink={sink['att_sink']:.4f} "
+                  f"max_h0={sink['max_h0']:.4g} max_h_all={sink['max_h_all']:.4g}",
+                  flush=True)
 
     rprint(rank, f"\nSaved: {out_path}")
     if dist.is_initialized():

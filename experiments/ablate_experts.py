@@ -97,7 +97,15 @@ MODELS = {
 #  layer filter, out percentile ~3.)
 DEFAULT_TARGETS = {
     "olmoe": ("L1E9;L4E27;L1E18;L2E30;L9E8;L10E4;L11E56;L1E11;L6E18;L8E22;"
-              "L4E14;L3E39;L0E6;L0E38;L6E4;L0E41;L0E36"),
+              "L4E14;L3E39;L0E6;L0E38;L6E4;L0E41;L0E36;"
+              "L0E38+L4E14+L6E4;"                  # determiner chain (joint)
+              "L1E18+L2E30+L3E39+L9E8;"            # sentence-start pool (joint)
+              "L1E18+L2E30;"                       # sentence-start pair
+              "L5E12+L12E33+L7E50;"                # random-3 (redundancy control)
+              "L5E12+L12E33+L7E50+L14E9;"          # random-4 (redundancy control)
+              "L1E9+L1E18+L2E30+L4E27;"            # full SE set (joint)
+              "L2E30+L1E9+L4E14;"                  # 2 SE + determiner
+              "L1E9+L1E18+L2E30+L4E27+L4E14"),     # full SE set + determiner
     "mixtral-8x7b": ("L1E3;L1E4;L9E7;L19E6;L19E1;L23E3;L12E7;L18E5;L21E3;"
                      "L16E0;L17E0;L19E5;L19E2;L6E1;L6E6;L18E1;L30E4"),
     # Phi-3.5-MoE: singles (top-10 union) + sets. Su's code cannot run Phi,
@@ -114,12 +122,14 @@ DEFAULT_TARGETS = {
                     "L0E6+L1E0;"               # whitespace pair, sub-threshold [H2]
                     "L5E10+L8E0+L9E2;"         # apostrophe set [H4 redundancy]
                     "L14E4+L26E11;"            # random-2
-                    "L14E4+L26E11+L7E9"),      # random-3
+                    "L14E4+L26E11+L7E9;"       # random-3
+                    "L3E7+L5E10+L14E4;"        # SE pair + random control 1 (red-row validation)
+                    "L3E7+L5E10+L26E11"),      # SE pair + random control 2 (red-row validation)
     # Mixtral-8x22B: singles (top-10 union) + sets. Su reports no 8x22B SEs;
     # our Su-criterion reproduction gives {L0E2, L1E7}. L0E2 and L29E3 are
     # both newline experts (whitespace archetype).
     "mixtral-8x22b": ("L1E7;L0E2;L36E7;L37E7;L29E3;L3E2;L0E4;L28E7;L41E2;"
-                      "L38E6;L22E7;L22E6;L9E1;L3E0;L28E3;"
+                      "L38E6;L22E7;L22E6;L9E1;L3E0;L28E3;L30E7;"
                       "L0E2+L1E7;"             # Su-criterion SE set (ours) [H1/anchor]
                       "L0E2+L29E3;"            # newline pair [archetype]
                       "L0E2+L1E7+L29E3;"       # out-top-3 [H3]
@@ -135,7 +145,8 @@ DEFAULT_TARGETS = {
                       "L1E68+L2E92+L3E82;"        # Su's SE set (README anchor)
                       "L2E92+L3E82+L21E69;"        # our out-top-3
                       "L21E69+L22E92+L33E69;"      # FN hubs (none SE-flagged)
-                      "L9E45+L27E103+L41E17"),     # random-3
+                      "L9E45+L27E103+L41E17;"      # random-3
+                      "L2E92+L1E68+L3E82+L21E69"), # SE set + high-out hub
     # DeepSeek-V2-Lite: singles (top-10 union) + Su's paper SE pair, their
     # prune script's exact 4-expert set, our late-BOS pair (excluded by
     # their layer filter -> FN-via-filter test), size-matched randoms.
@@ -146,7 +157,11 @@ DEFAULT_TARGETS = {
                          "L3E54+L4E38+L2E3+L5E63;"      # their script's set
                          "L24E63+L25E11;"               # late BOS pair (FN)
                          "L7E22+L13E51;"                # random-2
-                         "L7E22+L13E51+L9E30+L21E5"),   # random-4
+                         "L7E22+L13E51+L9E30+L21E5;"    # random-4
+                         "L3E54+L4E38+L5E63;"                 # full SE set (joint)
+                         "L25E11+L24E63+L4E38;"               # 2 high-out + 1 SE
+                         "L3E54+L4E38+L5E63+L19E57;"          # SE set + high-out
+                         "L25E11+L24E63+L4E38+L3E54"),        # 2 high-out + 2 SE
 }
 
 SEQLEN = 2048
@@ -263,8 +278,12 @@ def eval_sink(model, sink_ids: torch.Tensor) -> dict:
     out = model(sink_ids.to(model.device), output_attentions=True,
                 output_hidden_states=True)
     att = torch.stack([a[:, :, 1:, 0].mean() for a in out.attentions])
+    # max_h0: peak |activation| at position 0 only (Su et al.'s sink position).
+    # max_h_all: peak |activation| anywhere -- max_{l,b,t,d} |X^(l)_{b,t,d}| --
+    # generalises max_h0 to all token positions, not just the BOS/sink slot.
     h0 = max(float(h[:, 0, :].abs().max()) for h in out.hidden_states)
-    return {"att_sink": float(att.mean()), "max_h0": h0}
+    h_all = max(float(h.abs().max()) for h in out.hidden_states)
+    return {"att_sink": float(att.mean()), "max_h0": h0, "max_h_all": h_all}
 
 
 def main() -> None:
