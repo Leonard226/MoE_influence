@@ -21,15 +21,12 @@ HUB="${HF_HOME}/hub"
 PROJECT_ROOT="${SLURM_SUBMIT_DIR:-/scratch/sleonard/MoE_circuits}"
 cd "$PROJECT_ROOT"
 
-# --- clear stale ablation/super-weight/routing-shift JSONs before the sweep ---
-# (ablate_experts.py's max_h_all field was added after these models were first
-# ablated; label-only cache checks would otherwise silently keep old, incomplete
-# sink dicts forever)
-for m in olmoe mixtral-8x7b qwen3-30b-a3b phi-3.5-moe mixtral-8x22b deepseek-v2-lite; do
-    rm -f "results/circuits/ablation_${m}_c4.json"
-    rm -f "results/circuits/super_weights_${m}_c4.json"
-    rm -f "results/circuits/routing_shift_${m}_c4.json"
-done
+# NOTE: no JSON-clearing step here (deliberately). All three scripts below
+# are restart-safe -- they load the existing per-model JSON, skip any label
+# already present, and only compute + append new ones. Extend DEFAULT_TARGETS
+# in ablate_experts.py / find_super_weights.py to add new ablation sets;
+# rerunning this script (or a single model's commands) will only compute the
+# new additions, never touch or delete what's already cached.
 
 run_model() {
     local repo_id="$1"

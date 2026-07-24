@@ -63,6 +63,24 @@ weights" as the count of leading iterations with explained_frac > 0.5; that
 thresholding is NOT applied here, all `max_iters` candidates are always
 recorded so the choice of threshold can be revisited without rerunning.
 
+Peak-activation pre-filter (mirrors Yu et al.'s own two-stage design --
+see their Figure 3: a cheap per-layer max-activation scan first, expensive
+refinement only on the layer(s) that already spike): the 10-iteration
+refine_from_cache loop is a real matmul per iteration, not a free lookup,
+so unconditionally running it on every one of L*N experts scales far worse
+than their L-layer scan. peak_activation_original is already a free
+byproduct of the single capture pass (just Y.abs().max(), no iteration), so
+every expert's peak is computed first; only experts whose peak exceeds
+`--peak-threshold-mult` times that MODEL's own median peak get the
+expensive refinement -- everything else is recorded with "refined": false
+and a peak but no candidates. ablate_experts.py's DEFAULT_TARGETS experts
+(the original curated SE / influential-only comparison set) always bypass
+this filter regardless of peak, since some of them (e.g. DeepSeek-V2's
+low-activation BOS chain) are deliberately low-activation by construction
+and are exactly the comparison this whole investigation is about. The
+filter is skipped entirely (every requested expert is refined) whenever
+`--experts` is passed explicitly.
+
 Calibration: c4 windows (same source as the ablation scripts), a modest
 batch (default 32 x 2048) -- Yu et al. note their method needs just ONE
 prompt, since super activations are stated to persist regardless of input.
@@ -76,6 +94,7 @@ from __future__ import annotations
 import argparse
 import json
 import random
+import statistics
 import sys
 from operator import attrgetter
 from pathlib import Path
@@ -86,6 +105,8 @@ import yaml
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
+
+from experiments.ablate_experts import DEFAULT_TARGETS  # noqa: E402 (read-only reuse)
 
 with open(ROOT / "config.yaml") as f:
     CFG = yaml.safe_load(f)
@@ -147,6 +168,24 @@ def su_c4_eval_windows(tok, n_seqs: int, seqlen: int) -> list[torch.Tensor]:
 def down_module(model, experts_path: str, down_attr: str, layer: int, expert: int):
     return getattr(attrgetter(experts_path)(model.model.layers[layer])[expert],
                    down_attr)
+
+
+def flatten_expert_spec(spec: str | None) -> set[tuple[int, int]]:
+    """Parse an ablate_experts.py-style spec ('L1E3+L18E5;L0E2+L29E3;...')
+    into a FLAT set of every individual (layer, expert) pair mentioned
+    anywhere, ignoring the '+'-grouping (which encodes joint ablation SETS,
+    not meaningful for a per-expert super-weight search). num_dense is 0 for
+    every model in both this file's MODELS and ablate_experts.py's, so no
+    layer-index offset is needed here."""
+    if not spec:
+        return set()
+    out = set()
+    for run in spec.split(";"):
+        for lab in run.strip().split("+"):
+            lab = lab.strip().upper()
+            l_str, e_str = lab.lstrip("L").split("E")
+            out.add((int(l_str), int(e_str)))
+    return out
 
 
 def capture_all_routed(model, experts_path: str, down_attr: str,
@@ -236,6 +275,7 @@ def refine_from_cache(X: torch.Tensor, Y0: torch.Tensor, weight: torch.Tensor,
     return {
         "n_tokens_seen": n_tokens_seen, "n_tokens_routed": n_routed,
         "peak_activation_original": float(Y0.abs().max()),
+        "refined": True,
         "candidates": candidates,
     }
 
@@ -258,6 +298,15 @@ def main() -> None:
     p.add_argument("--n-seqs", type=int, default=32)
     p.add_argument("--seq-len", type=int, default=2048)
     p.add_argument("--batch-size", type=int, default=4)
+    p.add_argument("--peak-threshold-mult", type=float, default=10.0,
+                   help="Peak-activation pre-filter (default 10x): only "
+                        "experts whose peak_activation_original exceeds this "
+                        "many times the model's own median peak get the "
+                        "expensive iterative refinement; the rest are "
+                        "recorded with 'refined': false and no candidates. "
+                        "ablate_experts.py's DEFAULT_TARGETS experts always "
+                        "bypass this filter. Ignored entirely if --experts "
+                        "is passed (every requested expert is then refined).")
     args = p.parse_args()
 
     cfg = MODELS[args.model]
@@ -331,15 +380,59 @@ def main() -> None:
             model, cfg["experts_path"], cfg["down_attr"], cfg["moe_layers"],
             cfg["n_experts"], windows, args.batch_size, only=pending)
 
-        for (layer, expert), (X, Y0) in routed.items():
+        # peak_activation_original is a free byproduct of the single capture
+        # pass (just Y.abs().max(), no iteration) -- compute it for EVERY
+        # routed expert first, then decide who gets the expensive refinement.
+        peaks = {key: float(Y0.abs().max()) for key, (_, Y0) in routed.items()}
+
+        if only is not None:
+            # --experts was passed explicitly: refine everything requested,
+            # no filter (mirrors the pre-filter-free debugging use case).
+            refine_set = set(routed)
+        else:
+            median_peak = statistics.median(peaks.values()) if peaks else 0.0
+            force_refine = flatten_expert_spec(DEFAULT_TARGETS.get(args.model))
+            threshold = args.peak_threshold_mult * median_peak
+            refine_set = {key for key, p in peaks.items() if p > threshold}
+            refine_set |= (force_refine & routed.keys())
+            print(f"[{args.model}] median peak={median_peak:.4g}, threshold="
+                  f"{threshold:.4g} ({args.peak_threshold_mult}x) -> "
+                  f"refining {len(refine_set)}/{len(routed)} routed experts "
+                  f"({len(force_refine & routed.keys())} force-included from "
+                  f"DEFAULT_TARGETS)", flush=True)
+
+        # Rewriting the whole (growing) JSON after every single expert was
+        # fine for the ~26-entry curated runs, but the filter above can still
+        # leave thousands of cheap "screened" entries to write per model
+        # (e.g. Qwen3-30B-A3B) -- that O(n^2) I/O pattern would dominate
+        # wall-clock time exactly where the compute savings above were meant
+        # to help. Flush every WRITE_EVERY experts instead, plus always once
+        # at the end; restart-safety only degrades to "redo up to
+        # WRITE_EVERY experts on a crash", not "redo everything".
+        WRITE_EVERY = 200
+        for i, ((layer, expert), (X, Y0)) in enumerate(routed.items(), 1):
             lab = f"L{layer}E{expert}"
-            down = down_module(model, cfg["experts_path"], cfg["down_attr"], layer, expert)
-            rec = refine_from_cache(X, Y0, down.weight, down.weight.device,
-                                    n_tokens_seen, args.max_iters)
+            key = (layer, expert)
+            if key in refine_set:
+                down = down_module(model, cfg["experts_path"], cfg["down_attr"], layer, expert)
+                rec = refine_from_cache(X, Y0, down.weight, down.weight.device,
+                                        n_tokens_seen, args.max_iters)
+                print(f"{lab}: n_routed={rec['n_tokens_routed']} "
+                      f"peak_orig={rec['peak_activation_original']:.4g} (refined)",
+                      flush=True)
+            else:
+                rec = {
+                    "n_tokens_seen": n_tokens_seen, "n_tokens_routed": X.shape[0],
+                    "peak_activation_original": peaks[key],
+                    "refined": False,
+                }
+                print(f"{lab}: n_routed={rec['n_tokens_routed']} "
+                      f"peak_orig={rec['peak_activation_original']:.4g} "
+                      f"(screened out, below peak threshold)", flush=True)
             results[lab] = rec
-            out_path.write_text(json.dumps(results, indent=2))
-            print(f"{lab}: n_routed={rec['n_tokens_routed']} "
-                  f"peak_orig={rec['peak_activation_original']:.4g}", flush=True)
+            if i % WRITE_EVERY == 0:
+                out_path.write_text(json.dumps(results, indent=2))
+        out_path.write_text(json.dumps(results, indent=2))  # final flush
 
         skipped = len(pending) - len(routed)
         if skipped:

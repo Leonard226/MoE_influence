@@ -105,16 +105,21 @@ DEFAULT_TARGETS = {
               "L5E12+L12E33+L7E50+L14E9;"          # random-4 (redundancy control)
               "L1E9+L1E18+L2E30+L4E27;"            # full SE set (joint)
               "L2E30+L1E9+L4E14;"                  # 2 SE + determiner
-              "L1E9+L1E18+L2E30+L4E27+L4E14"),     # full SE set + determiner
+              "L1E9+L1E18+L2E30+L4E27+L4E14;"      # full SE set + determiner
+              "L1E9+L2E30+L3E39+L4E14+L9E8"),      # SE pair + sentence-start pool + determiner
     "mixtral-8x7b": ("L1E3;L1E4;L9E7;L19E6;L19E1;L23E3;L12E7;L18E5;L21E3;"
-                     "L16E0;L17E0;L19E5;L19E2;L6E1;L6E6;L18E1;L30E4"),
+                     "L16E0;L17E0;L19E5;L19E2;L6E1;L6E6;L18E1;L30E4;"
+                     "L1E3+L18E5+L18E1;"                          # L1E3 + its layer-18 receivers
+                     "L1E3+L19E1+L19E6+L19E5+L19E2;"              # L1E3 + all layer-19 receivers
+                     "L1E3+L18E5+L18E1+L19E1+L19E6+L19E5+L19E2"), # L1E3 + all layer-18/19 receivers
     # Phi-3.5-MoE: singles (top-10 union) + sets. Su's code cannot run Phi,
     # so the "SE set" here is OUR application of their criterion (L3E7,
     # L5E10). The whitespace pair L0E6+L1E0 is the key remaining FN test:
     # newline/space experts at act pctl 17/59 -- the same archetype as
     # Mixtral's catastrophic L1E3.
     "phi-3.5-moe": ("L5E10;L3E7;L10E0;L12E13;L11E2;L23E3;L20E13;L20E15;L8E0;"
-                    "L20E12;L27E9;L29E6;L3E3;L1E0;L28E12;L9E2;L0E6;"
+                    "L20E12;L27E9;L29E6;L3E3;L1E0;L28E12;L9E2;L0E6;L9E14;"
+                    "L27E9+L29E6;"             # both singles negligible alone; joint check
                     "L3E7+L5E10;"              # Su-criterion SE set (ours) [H1/anchor]
                     "L3E7+L5E10+L10E0;"        # top-3 (act = out, degenerate) [H5]
                     "L5E10+L3E7+L10E0+L12E13;" # act-top-4 [H5: marginal pick]
@@ -132,6 +137,9 @@ DEFAULT_TARGETS = {
                       "L38E6;L22E7;L22E6;L9E1;L3E0;L28E3;L30E7;"
                       "L0E2+L1E7;"             # Su-criterion SE set (ours) [H1/anchor]
                       "L0E2+L29E3;"            # newline pair [archetype]
+                      "L1E7+L29E3;"            # entanglement check: does L29E3 add
+                                                # anything on top of L1E7 alone? (L0E2
+                                                # pairing already done -- see L0E2+L29E3)
                       "L0E2+L1E7+L29E3;"       # out-top-3 [H3]
                       "L1E7+L0E2+L36E7;"       # act-top-3 [H5: marginal pick]
                       "L22E6+L22E7;"           # function-word pair, act pctl ~30 [H2]
@@ -146,7 +154,8 @@ DEFAULT_TARGETS = {
                       "L2E92+L3E82+L21E69;"        # our out-top-3
                       "L21E69+L22E92+L33E69;"      # FN hubs (none SE-flagged)
                       "L9E45+L27E103+L41E17;"      # random-3
-                      "L2E92+L1E68+L3E82+L21E69"), # SE set + high-out hub
+                      "L2E92+L1E68+L3E82+L21E69;"  # SE set + high-out hub
+                      "L21E69+L22E92+L33E69+L2E92"), # FN hubs + SE member (heatmap layers 21/22/33)
     # DeepSeek-V2-Lite: singles (top-10 union) + Su's paper SE pair, their
     # prune script's exact 4-expert set, our late-BOS pair (excluded by
     # their layer filter -> FN-via-filter test), size-matched randoms.
