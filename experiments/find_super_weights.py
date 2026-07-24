@@ -1,37 +1,49 @@
-"""Iterative super-weight detection for target MoE experts.
+"""Iterative super-weight detection, searched globally across every expert.
 
-Background: Yu et al.'s "super weights" are single scalars in an expert's
-down_proj that create the massive/"super" activations Su et al. use to
-define Super Experts. Their detection method is activation-guided: for a
-token where down_proj's OUTPUT has an extreme outlier at channel j, and the
-INPUT has an extreme outlier at channel k, the product X[k]*W[j,k] dominates
-Y[j] = sum_k X[k]*W[j,k], so the super weight is simply W[j,k] -- a direct
-lookup, no optimisation needed. They then zero that weight and repeat to
-find additional ones (Phi-3-mini has six this way).
+Background: Yu et al.'s "super weights" are single scalars in a down_proj
+that create the massive/"super" activations Su et al. use to define Super
+Experts. Their method: for a token where down_proj's OUTPUT has an extreme
+outlier at channel j, and the INPUT has an extreme outlier at channel k, the
+product X[k]*W[j,k] dominates Y[j] = sum_k X[k]*W[j,k], so the super weight
+is simply W[j,k] -- a direct lookup. They apply this PER LAYER (one down_proj
+per layer in a dense model): scan every layer's down_proj input/output for
+the layer with the most extreme activation spike, read off its channel
+indices, zero that weight, and repeat until the spikes are suppressed.
 
-This script implements that FULL iterative method (not a same-channel
-proxy): at each iteration, find the current peak-activation token among all
-tokens routed to the expert, its dominant input channel k_it and output
-channel j_it (independently re-derived each iteration -- NOT constrained to
-share the previous iteration's input channel), record W[j_it, k_it] as a
-candidate, zero it, and repeat. Successive candidates can therefore live in
-completely different (input, output) channel pairs, unlike a same-column
-proxy -- this is what actually answers "how many super weights does this
-expert hold."
+MoE models have one down_proj PER EXPERT per layer rather than one per
+layer, so the faithful generalisation is to apply their exact per-unit
+procedure to every EXPERT instead of every layer -- not a different
+detection criterion, just the natural unit substitution. This script
+therefore searches EVERY expert in EVERY MoE layer, not a curated shortlist:
+restricting to Super Experts and out(v)-influential experts a priori would
+beg the question of whether super weights exist elsewhere too (e.g. in some
+other, so-far-uncharacterised kind of expert).
 
-Efficiency note (exact, not an approximation): zeroing an entry of THIS
-down_proj's own weight matrix cannot change THIS layer's down_proj INPUT --
-that input is fixed by every computation upstream of this layer (routing
-for this layer, and everything that produces its input, already happened
-before down_proj runs). So X for every routed token is invariant across
-iterations, and we only need ONE full-model forward pass (to cache X and Y
-for every token routed to the expert); every refinement iteration afterward
-is a cheap local matmul (X @ W_work.T) against a progressively-zeroed
-in-memory copy of the weight matrix, not a fresh GPU forward pass. This
-recovers ground truth, not a shortcut: for a fixed set of input tokens,
-recomputing down_proj's own output with an edited version of its own
-weights is mathematically identical to re-running the whole model and
-reading the same layer back out.
+This is a genuine iterative method (not a same-channel proxy): at each
+iteration, find the current peak-activation token among all tokens routed
+to the expert, its dominant input channel k_it and output channel j_it
+(independently re-derived each iteration -- NOT constrained to share the
+previous iteration's input channel), record W[j_it, k_it] as a candidate,
+zero it, and repeat. Successive candidates can therefore live in completely
+different (input, output) channel pairs, unlike a same-column proxy.
+
+Efficiency (exact, not an approximation, and what makes a global sweep
+tractable): zeroing an entry of an expert's OWN down_proj weight matrix
+cannot change that expert's own down_proj INPUT -- that input is fixed by
+everything upstream (routing for this layer, and everything producing its
+input, already happened before down_proj runs). So X for every routed token
+is invariant across iterations, and a SINGLE full-model forward pass -- with
+a pre/forward hook on every expert's down_proj in every MoE layer at once --
+suffices to cache X and Y for every token routed to every expert, model-
+wide. Hooks are read-only and add no compute, so hooking every expert
+instead of a handful does not add GPU work; the only cost that scales with
+the number of experts is the (cheap) local refinement afterward: each
+iteration is a matmul against a progressively-zeroed in-memory copy of that
+expert's weight matrix, not a fresh forward pass. This recovers ground
+truth, not a shortcut: for a fixed set of input tokens, recomputing
+down_proj's own output with an edited copy of its own weights is
+mathematically identical to re-running the whole model and reading the same
+layer back out.
 
 Scope: this finds super weights WITHIN one expert's down_proj (does its own
 peak output collapse as weights are removed). It does NOT track whether
@@ -45,12 +57,11 @@ well the single-dominant-term approximation explains the actual output at
 that iteration. Near 1.0 = a clean super-weight-driven spike; low = this
 expert's current peak is not well-explained by any single weight -- the
 loop naturally runs out of real candidates once explained_frac collapses,
-which is itself evidence the expert has no (more) super weights.
-
-Targets = the reproduced Super Expert sets + the influential-only ("blue")
-experts identified as causally inert singles in tab:ablation-c4 -- the
-direct falsification test: do influential-only experts lack a clean super
-weight, unlike genuine Super Experts?
+which is itself evidence the expert has no (more) super weights. A
+downstream consumer (e.g. a results table) defines "number of super
+weights" as the count of leading iterations with explained_frac > 0.5; that
+thresholding is NOT applied here, all `max_iters` candidates are always
+recorded so the choice of threshold can be revisited without rerunning.
 
 Calibration: c4 windows (same source as the ablation scripts), a modest
 batch (default 32 x 2048) -- Yu et al. note their method needs just ONE
@@ -81,37 +92,32 @@ with open(ROOT / "config.yaml") as f:
 CIRCUITS = Path(CFG["result_path"]) / "circuits"
 
 # Single-node models only (mirrors ablate_experts.py's MODELS; multi-node
-# DeepSeek-V2/Qwen3-235B deferred -- the iterative-loop successor would need
-# this anyway, so no point building a one-off multi-node static pass now).
+# DeepSeek-V2/Qwen3-235B deferred). n_experts/moe_layers match
+# measure_routing_shift.py's registry (cross-checked against build_dag.py).
 MODELS = {
     "olmoe": {"id": "allenai/OLMoE-1B-7B-0924", "experts_path": "mlp.experts",
-              "down_attr": "down_proj", "multi_gpu": False},
+              "down_attr": "down_proj", "multi_gpu": False,
+              "n_experts": 64, "moe_layers": list(range(16))},
     "mixtral-8x7b": {"id": "mistralai/Mixtral-8x7B-v0.1",
                      "experts_path": "block_sparse_moe.experts",
-                     "down_attr": "w2", "multi_gpu": True},
+                     "down_attr": "w2", "multi_gpu": True,
+                     "n_experts": 8, "moe_layers": list(range(32))},
     "mixtral-8x22b": {"id": "mistralai/Mixtral-8x22B-v0.1",
                       "experts_path": "block_sparse_moe.experts",
-                      "down_attr": "w2", "multi_gpu": True},
+                      "down_attr": "w2", "multi_gpu": True,
+                      "n_experts": 8, "moe_layers": list(range(56))},
     "phi-3.5-moe": {"id": "microsoft/Phi-3.5-MoE-instruct",
                     "experts_path": "block_sparse_moe.experts",
-                    "down_attr": "w2", "multi_gpu": True},
+                    "down_attr": "w2", "multi_gpu": True,
+                    "n_experts": 16, "moe_layers": list(range(32))},
     "qwen3-30b-a3b": {"id": "Qwen/Qwen3-30B-A3B", "experts_path": "mlp.experts",
-                      "down_attr": "down_proj", "multi_gpu": False},
+                      "down_attr": "down_proj", "multi_gpu": False,
+                      "n_experts": 128, "moe_layers": list(range(48))},
     "deepseek-v2-lite": {"id": "deepseek-ai/DeepSeek-V2-Lite",
                          "experts_path": "mlp.experts", "down_attr": "down_proj",
                          "multi_gpu": False, "trust_remote_code": True,
-                         "attn_impl": "eager"},
-}
-
-# SE sets (reproduced, Su-exact criterion) + influential-only comparison
-# experts (causally inert singles from tab:ablation-c4) per model.
-DEFAULT_TARGETS = {
-    "mixtral-8x7b": "L1E3;L17E0",
-    "mixtral-8x22b": "L0E2;L1E7;L29E3;L36E7",
-    "phi-3.5-moe": "L3E7;L5E10;L10E0",     # L10E0 is the red-row expert
-    "olmoe": "L1E9;L1E18;L2E30;L4E27;L4E14",
-    "deepseek-v2-lite": "L3E54;L4E38;L5E63;L25E11;L24E63",
-    "qwen3-30b-a3b": "L1E68;L2E92;L3E82;L3E107;L21E69;L22E92;L33E69",
+                         "attn_impl": "eager",
+                         "n_experts": 64, "moe_layers": list(range(1, 27))},
 }
 
 
@@ -138,56 +144,75 @@ def su_c4_eval_windows(tok, n_seqs: int, seqlen: int) -> list[torch.Tensor]:
     return windows
 
 
-def find_super_weights_iterative(model, experts_path: str, down_attr: str,
-                                 layer: int, expert: int,
-                                 windows: list[torch.Tensor], batch_size: int,
-                                 max_iters: int) -> dict | None:
-    """ONE full-model forward pass caches (X, Y) for every token routed to
-    this expert; every subsequent iteration is a local matmul against a
-    progressively-zeroed in-memory weight copy (see module docstring for why
-    this is exact, not an approximation). Each iteration independently
-    re-derives the peak token and its (input_channel, output_channel) --
-    candidates are NOT constrained to share an input channel across
-    iterations."""
-    down = getattr(attrgetter(experts_path)(model.model.layers[layer])[expert],
+def down_module(model, experts_path: str, down_attr: str, layer: int, expert: int):
+    return getattr(attrgetter(experts_path)(model.model.layers[layer])[expert],
                    down_attr)
 
-    captured = {}
-    chunks_x, chunks_y = [], []
 
-    def pre_hook(_m, inp):
-        captured["x"] = inp[0].detach()
+def capture_all_routed(model, experts_path: str, down_attr: str,
+                       moe_layers: list[int], n_experts: int,
+                       windows: list[torch.Tensor], batch_size: int,
+                       only: set[tuple[int, int]] | None = None
+                       ) -> tuple[dict[tuple[int, int], tuple[torch.Tensor, torch.Tensor]], int]:
+    """ONE full-model forward pass, with a pre/forward hook on EVERY expert's
+    down_proj in EVERY MoE layer at once (or just `only`, if given, for fast
+    debugging on a subset) -- caches (X, Y) for every token routed to every
+    expert, model-wide, in a single pass. Returns {(layer, expert): (X, Y)}
+    (X, Y concatenated over all routed tokens, on CPU) plus n_tokens_seen.
+    Experts that received zero tokens in this calibration set are absent
+    from the returned dict."""
+    targets = only if only is not None else {
+        (l, e) for l in moe_layers for e in range(n_experts)}
 
-    def fwd_hook(_m, _inp, out):
-        x, y = captured.pop("x"), out.detach()
-        if x.numel() == 0:
-            return
-        chunks_x.append(x.float().cpu())
-        chunks_y.append(y.float().cpu())
+    captured_in: dict[tuple[int, int], torch.Tensor] = {}
+    chunks_x: dict[tuple[int, int], list[torch.Tensor]] = {}
+    chunks_y: dict[tuple[int, int], list[torch.Tensor]] = {}
+    handles = []
 
-    h1 = down.register_forward_pre_hook(pre_hook)
-    h2 = down.register_forward_hook(fwd_hook)
+    def make_hooks(key):
+        def pre_hook(_m, inp):
+            captured_in[key] = inp[0].detach()
+
+        def fwd_hook(_m, _inp, out):
+            x = captured_in.pop(key)
+            y = out.detach()
+            if x.numel() == 0:
+                return
+            chunks_x.setdefault(key, []).append(x.float().cpu())
+            chunks_y.setdefault(key, []).append(y.float().cpu())
+        return pre_hook, fwd_hook
+
+    for (l, e) in targets:
+        down = down_module(model, experts_path, down_attr, l, e)
+        pre_hook, fwd_hook = make_hooks((l, e))
+        handles.append(down.register_forward_pre_hook(pre_hook))
+        handles.append(down.register_forward_hook(fwd_hook))
+
     n_tokens_seen = 0
     with torch.no_grad():
         for i in range(0, len(windows), batch_size):
             batch = torch.stack(windows[i:i + batch_size]).to(model.device)
             model(batch)
             n_tokens_seen += batch.numel()
-    h1.remove()
-    h2.remove()
+    for h in handles:
+        h.remove()
 
-    if not chunks_x:
-        return None  # no tokens ever routed to this expert in the calibration set
+    routed = {key: (torch.cat(chunks_x[key], dim=0), torch.cat(chunks_y[key], dim=0))
+              for key in chunks_x}
+    return routed, n_tokens_seen
 
-    # Use the device the expert's own weight already lives on -- for
-    # multi-GPU dispatched models (Mixtral, Phi) this can differ from
-    # model.device (the embedding's device), and the local recompute below
-    # needs X and W_work co-located with each other.
-    dev = down.weight.device
-    X = torch.cat(chunks_x, dim=0).to(dev)           # [N_routed, D_in], INVARIANT across iterations
-    Y0 = torch.cat(chunks_y, dim=0)                  # [N_routed, D_out], original (unperturbed) output
+
+def refine_from_cache(X: torch.Tensor, Y0: torch.Tensor, weight: torch.Tensor,
+                      dev: torch.device, n_tokens_seen: int,
+                      max_iters: int) -> dict:
+    """Local, no-further-forward-pass iterative refinement from already-
+    cached (X, Y0) for one expert (see module docstring for exactness
+    argument). Each iteration independently re-derives the peak token and
+    its (input_channel, output_channel) -- candidates are NOT constrained to
+    share an input channel across iterations."""
+    X = X.to(dev)
     n_routed = X.shape[0]
-    W_work = down.weight.detach().float().clone().to(dev)  # [D_out, D_in], progressively zeroed
+    W_work = weight.detach().float().clone().to(dev)  # [D_out, D_in], progressively zeroed
 
     candidates = []
     for it in range(max_iters):
@@ -220,8 +245,9 @@ def main() -> None:
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--model", required=True, choices=list(MODELS))
     p.add_argument("--experts", default=None,
-                   help="Comma-separated 'LxEy' labels (default = curated "
-                        "SE + influential-only targets, see DEFAULT_TARGETS).")
+                   help="Comma- or semicolon-separated 'LxEy' labels to "
+                        "restrict the search to (for fast debugging). "
+                        "Default: every expert in every MoE layer.")
     p.add_argument("--max-iters", type=int, default=10,
                    help="Max zero-and-repeat iterations per expert (default "
                         "10; Yu et al. observed at most 6 super weights in "
@@ -235,14 +261,13 @@ def main() -> None:
     args = p.parse_args()
 
     cfg = MODELS[args.model]
-    spec = args.experts or DEFAULT_TARGETS.get(args.model)
-    if spec is None:
-        p.error(f"no default targets for {args.model}; pass --experts")
-    targets = []
-    for lab in (spec.split(",") if "," in spec else spec.split(";")):
-        lab = lab.strip().upper()
-        l_str, e_str = lab.lstrip("L").split("E")
-        targets.append((int(l_str), int(e_str), lab))
+    only = None
+    if args.experts:
+        only = set()
+        for lab in (args.experts.split(",") if "," in args.experts else args.experts.split(";")):
+            lab = lab.strip().upper()
+            l_str, e_str = lab.lstrip("L").split("E")
+            only.add((int(l_str), int(e_str)))
 
     if not torch.cuda.is_available():
         sys.exit("No CUDA device visible.")
@@ -286,31 +311,41 @@ def main() -> None:
         sys.exit("Some parameters are on CPU (offloaded) -- aborting.")
 
     windows = su_c4_eval_windows(tok, args.n_seqs, args.seq_len)
-    print(f"[{args.model}] calibration: {len(windows)} windows x "
-          f"{args.seq_len} tok; {len(targets)} target experts", flush=True)
+    print(f"[{args.model}] calibration: {len(windows)} windows x {args.seq_len} tok",
+          flush=True)
 
     out_path = CIRCUITS / f"super_weights_{args.model}_c4.json"
     results = json.loads(out_path.read_text()) if out_path.exists() else {}
 
-    for layer, expert, lab in targets:
-        if lab in results:
-            print(f"{lab}: cached, skipping")
-            continue
-        rec = find_super_weights_iterative(
-            model, cfg["experts_path"], cfg["down_attr"], layer, expert,
-            windows, args.batch_size, args.max_iters)
-        if rec is None:
-            print(f"{lab}: no tokens routed in calibration set, skipping")
-            continue
-        results[lab] = rec
-        out_path.write_text(json.dumps(results, indent=2))
-        print(f"{lab}: n_routed={rec['n_tokens_routed']} "
-              f"peak_orig={rec['peak_activation_original']:.4g}", flush=True)
-        for c in rec["candidates"]:
-            print(f"       iter{c['iter']}: in_ch={c['input_channel']} "
-                  f"out_ch={c['output_channel']} w={c['weight_value']:.4g} "
-                  f"peak={c['peak_activation']:.4g} "
-                  f"explained={c['explained_frac']:.3f}", flush=True)
+    # Skip (layer, expert) pairs already cached under their "LxEy" label --
+    # restart-safe, and lets a global sweep extend an existing curated-
+    # targets run without recomputing anything.
+    full_grid = {(l, e) for l in cfg["moe_layers"] for e in range(cfg["n_experts"])}
+    already = {(l, e) for (l, e) in full_grid if f"L{l}E{e}" in results}
+    pending = (only if only is not None else full_grid) - already
+    print(f"[{args.model}] {len(already)} cached, {len(pending)} pending "
+          f"(of {len(full_grid)} total experts)", flush=True)
+
+    if pending:
+        routed, n_tokens_seen = capture_all_routed(
+            model, cfg["experts_path"], cfg["down_attr"], cfg["moe_layers"],
+            cfg["n_experts"], windows, args.batch_size, only=pending)
+
+        for (layer, expert), (X, Y0) in routed.items():
+            lab = f"L{layer}E{expert}"
+            down = down_module(model, cfg["experts_path"], cfg["down_attr"], layer, expert)
+            rec = refine_from_cache(X, Y0, down.weight, down.weight.device,
+                                    n_tokens_seen, args.max_iters)
+            results[lab] = rec
+            out_path.write_text(json.dumps(results, indent=2))
+            print(f"{lab}: n_routed={rec['n_tokens_routed']} "
+                  f"peak_orig={rec['peak_activation_original']:.4g}", flush=True)
+
+        skipped = len(pending) - len(routed)
+        if skipped:
+            print(f"{skipped} of {len(pending)} pending experts got zero "
+                  f"routed tokens in this calibration set (not written)",
+                  flush=True)
 
     print(f"\nSaved: {out_path}")
 

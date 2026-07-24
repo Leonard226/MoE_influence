@@ -4,7 +4,6 @@
 #SBATCH --cpus-per-task=4
 #SBATCH --job-name="sn-sweep"
 #SBATCH --output=log_single_node_sweep.out
-#SBATCH --time=48:00:00
 
 # Full single-node sweep: for each of the 6 single-node models, download
 # weights -> ablate_experts.py (PPL/attn-sink/activation) -> find_super_weights.py
