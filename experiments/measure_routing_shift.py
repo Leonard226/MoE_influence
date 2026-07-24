@@ -183,19 +183,30 @@ def capture_router_probs(model, gate_path: str, layers: list[int],
     """Hook every listed layer's gate module; return {layer: probs} where
     probs is [n_tokens, N_experts] softmax over the FULL expert set (not
     the sparse top-K-renormalised weights) -- the well-defined, strictly-
-    positive distribution needed for KL and for ranking all N experts."""
+    positive distribution needed for KL and for ranking all N experts.
+
+    Recomputed from the gate's own (weight, bias) applied to its INPUT via a
+    pre-hook, rather than read off its output: a plain nn.Linear gate's
+    forward() is literally F.linear(x, weight, bias), so this reproduces it
+    exactly. DeepSeek's custom MoEGate module returns (topk_idx, topk_weight,
+    aux_loss) -- no raw logits tensor -- but its forward computes internally
+    `logits = F.linear(hidden_states, self.weight); scores = logits.softmax(-1)`
+    before any topk/group-masking, so the same recompute is exact there too."""
     probs_by_layer: dict[int, list[torch.Tensor]] = {l: [] for l in layers}
     handles = []
 
     def make_hook(l):
-        def hook(_m, _inp, out):
+        def hook(m, inp):
+            x = inp[0].detach().float()
+            bias = m.bias.float() if getattr(m, "bias", None) is not None else None
+            logits = torch.nn.functional.linear(x, m.weight.float(), bias)
             probs_by_layer[l].append(
-                torch.softmax(out.detach().float(), dim=-1).reshape(-1, out.shape[-1]))
+                torch.softmax(logits, dim=-1).reshape(-1, logits.shape[-1]))
         return hook
 
     for l in layers:
         gate = attrgetter(gate_path)(model.model.layers[l])
-        handles.append(gate.register_forward_hook(make_hook(l)))
+        handles.append(gate.register_forward_pre_hook(make_hook(l)))
 
     for i in range(0, len(windows), batch_size):
         batch = torch.stack(windows[i:i + batch_size]).to(model.device)
