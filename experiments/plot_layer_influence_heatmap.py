@@ -44,6 +44,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import torch
 import yaml
+from mpl_toolkits.axes_grid1 import make_axes_locatable
 
 ROOT = Path(__file__).resolve().parent.parent
 with open(ROOT / "config.yaml") as f:
@@ -104,7 +105,12 @@ def layer_heatmap(model: str, dataset: str, out_dir: Path) -> None:
     ax.grid(which="minor", color="lightgray", linestyle="-", linewidth=0.5)
     ax.tick_params(which="minor", bottom=False, left=False)
 
-    fig.colorbar(im, ax=ax, label="accumulated raw out(v)")
+    # make_axes_locatable ties the colorbar's height to the main axes' actual
+    # displayed height (plain fig.colorbar(im, ax=ax) does not, and ends up
+    # visibly taller/shorter than the matrix once aspect="equal" is applied).
+    divider = make_axes_locatable(ax)
+    cax = divider.append_axes("right", size=0.3, pad=0.15)
+    fig.colorbar(im, cax=cax, label="accumulated raw out(v)")
     fig.tight_layout()
 
     out_path = out_dir / f"layer_influence_heatmap_{model}_{dataset}.pdf"
