@@ -1,3 +1,5 @@
+from pathlib import Path
+
 import igraph as ig
 import numpy as np
 import matplotlib.pyplot as plt
@@ -271,7 +273,8 @@ def thresholding_routing_graph(dag: dict, target: str, threshold: float) -> ig.G
 def show_enhanced_layered_graph(g, quantile: float, target: str, model: str, dataset: str, n_prompts: int,
                                  layer_labels: list | None = None,
                                  color_vmin: float | None = None,
-                                 color_vmax: float | None = None) -> None:
+                                 color_vmax: float | None = None,
+                                 save_path: str | Path | None = None) -> None:
     """Layered DAG visualization. Reads N_LAYERS / N_EXPERTS from the graph's
     `layer` vertex attribute (set by thresholding_routing_graph / dag_to_igraph).
 
@@ -285,6 +288,9 @@ def show_enhanced_layered_graph(g, quantile: float, target: str, model: str, dat
         edge magnitude looks the same shade across different models. For P_flip
         pass (0.0, 1.0). If None, defaults to the per-graph min/max magnitude
         (legacy behavior; makes cross-graph comparison harder).
+    save_path: if given, the figure is also written here (format inferred from
+        the extension, e.g. .pdf) before being shown. Parent directories are
+        created if needed. If None (default), the figure is only displayed.
     """
     edge_list = g.get_edgelist()
     if not edge_list:
@@ -538,6 +544,11 @@ def show_enhanced_layered_graph(g, quantile: float, target: str, model: str, dat
         ax.set_xlabel("Experts e")
         ax.set_ylabel("Layers l")
     plt.tight_layout()
+    if save_path is not None:
+        save_path = Path(save_path)
+        save_path.parent.mkdir(parents=True, exist_ok=True)
+        plt.savefig(save_path, bbox_inches="tight")
+        print(f"Saved: {save_path}")
     plt.show()
 
 

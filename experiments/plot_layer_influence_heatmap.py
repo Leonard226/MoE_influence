@@ -11,15 +11,25 @@ receiver expert in the receiving layer --
 
 No normalization -- these are the raw accumulated W_softmax values. Entries
 where l <= c are not causally valid edges (E = {(c,j)->(l,n): c<l}) and are
-masked (rendered as light gray, distinct from genuinely-small-but-valid
+masked (rendered as plain white, distinct from genuinely-small-but-valid
 values) rather than left at whatever the tensor happened to initialise them
 to.
 
+Also prints, per model, the top-5 SINGLE-expert out(v) values (W[c,j,:,:]
+summed over every receiver) -- a cross-check against tab:topk-match-c4 /
+tab:top-ins-c4's reported out(v) numbers. A heatmap cell only captures the
+slice of one sender's influence landing in ONE receiving layer (and also
+pools in every other sender of that layer), so it is expected and NOT a bug
+for every individual cell to be well below a single expert's total out(v)
+if that total is spread across many receiving layers.
+
 One heatmap per model, each with its OWN color scale (raw out(v) magnitudes
 span ~100x across models per tab:top-ins-c4, so a shared scale would wash
-out all but the largest model). y-axis = sending layer, x-axis = receiving
-layer, both starting at 0; origin='lower' so valid (l>c) entries form the
-familiar upper-triangle-above-the-diagonal shape.
+out all but the largest model); Blues colormap, light = low, dark = high.
+y-axis = sending layer, x-axis = receiving layer, every layer index labeled,
+both starting at 0; origin='lower' so valid (l>c) entries form the familiar
+upper-triangle-above-the-diagonal shape. Light gray minor-tick gridlines
+delineate cells against a white background.
 
 Usage:
     python experiments/plot_layer_influence_heatmap.py
@@ -54,20 +64,46 @@ def layer_heatmap(model: str, dataset: str, out_dir: Path) -> None:
 
     d = torch.load(dag_path, map_location="cpu")
     W = d["W_softmax"]  # [c, j, l, n]
-    L = W.shape[2]
+    L, N = W.shape[2], W.shape[1]
     H = W.sum(dim=(1, 3)).numpy()  # [c, l], raw accumulated out(v)
+
+    # Cross-check: out(v) for a SINGLE expert is W[c,j,:,:].sum() -- the same
+    # quantity reported in tab:topk-match-c4/tab:top-ins-c4. A heatmap cell
+    # H[c,l] only captures the slice of that landing in ONE receiving layer,
+    # and also pools in the other N-1 senders of layer c, so no single cell
+    # has to reach a sender's full out(v) even when the aggregation is
+    # correct. Printing the top single-expert out(v) values lets that be
+    # checked directly against the paper's tables rather than assumed.
+    per_expert_out = W.sum(dim=(2, 3))  # [c, j]
+    flat = per_expert_out.flatten()
+    topk = torch.topk(flat, min(5, flat.numel()))
+    print(f"{model}: top-5 single-expert out(v) (for cross-check against the paper's tables):")
+    for val, idx in zip(topk.values.tolist(), topk.indices.tolist()):
+        c, j = idx // N, idx % N
+        print(f"    L{c}E{j}: out(v)={val:.4g}")
 
     mask = np.tril(np.ones((L, L), dtype=bool), k=0)  # l <= c: non-causal
     H_masked = np.ma.masked_array(H, mask=mask)
 
-    cmap = plt.get_cmap("viridis").copy()
-    cmap.set_bad("lightgray")
+    cmap = plt.get_cmap("Blues").copy()  # light blue = low, dark blue = high
+    cmap.set_bad("white")
 
-    fig, ax = plt.subplots(figsize=(6, 5))
+    fig, ax = plt.subplots(figsize=(max(6, L * 0.35), max(5, L * 0.35)))
+    ax.set_facecolor("white")
     im = ax.imshow(H_masked, cmap=cmap, origin="lower", aspect="equal")
     ax.set_xlabel("receiving layer")
     ax.set_ylabel("sending layer")
-    ax.set_title(f"{model}: accumulated out(v) by (sending, receiving) layer")
+    ax.set_title(model)
+
+    ax.set_xticks(range(L))
+    ax.set_xticklabels(range(L), fontsize=6, rotation=90)
+    ax.set_yticks(range(L))
+    ax.set_yticklabels(range(L), fontsize=6)
+    ax.set_xticks(np.arange(-0.5, L, 1), minor=True)
+    ax.set_yticks(np.arange(-0.5, L, 1), minor=True)
+    ax.grid(which="minor", color="lightgray", linestyle="-", linewidth=0.5)
+    ax.tick_params(which="minor", bottom=False, left=False)
+
     fig.colorbar(im, ax=ax, label="accumulated raw out(v)")
     fig.tight_layout()
 
