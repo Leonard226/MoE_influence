@@ -15,7 +15,10 @@ set -euo pipefail
 ENV_BIN=/scratch/sleonard/miniconda3/envs/megatron/bin
 export PATH="${ENV_BIN}:${PATH}"
 export LD_LIBRARY_PATH="/scratch/sleonard/miniconda3/envs/megatron/lib:${LD_LIBRARY_PATH:-}"
-export HF_HOME=/scratch/sleonard/.huggingface
+# Matches the HF_HOME already exported in .bashrc ("/scratch/sleonard/.hugging_face",
+# WITH the underscore) -- fall back to that exact value only if somehow unset,
+# so this script and any interactive shell always agree on one cache location.
+export HF_HOME="${HF_HOME:-/scratch/sleonard/.hugging_face}"
 HUB="${HF_HOME}/hub"
 
 PROJECT_ROOT="${SLURM_SUBMIT_DIR:-/scratch/sleonard/MoE_circuits}"

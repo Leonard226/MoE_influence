@@ -32,18 +32,27 @@ tractable): zeroing an entry of an expert's OWN down_proj weight matrix
 cannot change that expert's own down_proj INPUT -- that input is fixed by
 everything upstream (routing for this layer, and everything producing its
 input, already happened before down_proj runs). So X for every routed token
-is invariant across iterations, and a SINGLE full-model forward pass -- with
-a pre/forward hook on every expert's down_proj in every MoE layer at once --
-suffices to cache X and Y for every token routed to every expert, model-
-wide. Hooks are read-only and add no compute, so hooking every expert
-instead of a handful does not add GPU work; the only cost that scales with
-the number of experts is the (cheap) local refinement afterward: each
-iteration is a matmul against a progressively-zeroed in-memory copy of that
-expert's weight matrix, not a fresh forward pass. This recovers ground
-truth, not a shortcut: for a fixed set of input tokens, recomputing
-down_proj's own output with an edited copy of its own weights is
-mathematically identical to re-running the whole model and reading the same
-layer back out.
+is invariant across iterations, and capturing X and Y ONCE per expert (no
+re-forward-pass needed for the iterative refinement itself) suffices. Hooks
+are read-only and add no compute, so hooking every expert instead of a
+handful does not add GPU work; the only cost that scales with the number of
+experts is the (cheap) local refinement afterward: each iteration is a
+matmul against a progressively-zeroed in-memory copy of that expert's weight
+matrix, not a fresh forward pass. This recovers ground truth, not a
+shortcut: for a fixed set of input tokens, recomputing down_proj's own
+output with an edited copy of its own weights is mathematically identical to
+re-running the whole model and reading the same layer back out.
+
+Capture is batched by LAYER (see --layers-per-batch), not done in a single
+model-wide forward pass: caching every routed token's activations for every
+hooked expert lives in CPU memory for the duration of the pass, and for
+models with few but WIDE experts (e.g. Mixtral-8x22B: intermediate_size
+~16k) hooking all layers at once can exceed system RAM even though the
+total expert COUNT is modest (confirmed: this OOM-killed on Mixtral-8x22B
+under the original all-at-once version). Batching trades a few extra
+(still cheap) forward passes for bounded peak memory -- the exactness
+argument above is per-expert and unaffected by how many passes it takes to
+fill the cache.
 
 Scope: this finds super weights WITHIN one expert's down_proj (does its own
 peak output collapse as weights are removed). It does NOT track whether
@@ -307,6 +316,22 @@ def main() -> None:
                         "ablate_experts.py's DEFAULT_TARGETS experts always "
                         "bypass this filter. Ignored entirely if --experts "
                         "is passed (every requested expert is then refined).")
+    p.add_argument("--layers-per-batch", type=int, default=2,
+                   help="Capture this many MoE layers' worth of experts per "
+                        "forward pass instead of hooking the whole model at "
+                        "once (default 2, conservative). capture_all_routed "
+                        "caches every routed token's activations for every "
+                        "hooked expert in CPU memory -- fine for models with "
+                        "many small experts (Qwen, OLMoE), but for models "
+                        "with FEW, WIDE experts (e.g. Mixtral-8x22B: "
+                        "intermediate_size ~16k) hooking all layers at once "
+                        "can exceed system RAM (confirmed: OOM-killed on "
+                        "Mixtral-8x22B with the unbatched version). Costs "
+                        "ceil(n_layers / layers_per_batch) forward passes "
+                        "instead of 1 -- still cheap relative to model size, "
+                        "just no longer free. Increase for narrow-expert "
+                        "models to reduce forward-pass count if memory "
+                        "allows.")
     args = p.parse_args()
 
     cfg = MODELS[args.model]
@@ -376,9 +401,29 @@ def main() -> None:
           f"(of {len(full_grid)} total experts)", flush=True)
 
     if pending:
-        routed, n_tokens_seen = capture_all_routed(
-            model, cfg["experts_path"], cfg["down_attr"], cfg["moe_layers"],
-            cfg["n_experts"], windows, args.batch_size, only=pending)
+        # Capture in layer-batches, not one model-wide pass (see
+        # --layers-per-batch help text / module docstring): bounds peak CPU
+        # memory regardless of how wide this model's experts are, at the
+        # cost of a few extra (still cheap) forward passes.
+        pending_layers = sorted({l for (l, _e) in pending})
+        layer_batches = [pending_layers[i:i + args.layers_per_batch]
+                         for i in range(0, len(pending_layers), args.layers_per_batch)]
+        print(f"[{args.model}] capturing {len(pending_layers)} layers in "
+              f"{len(layer_batches)} batch(es) of up to {args.layers_per_batch} "
+              f"layers each", flush=True)
+
+        routed: dict[tuple[int, int], tuple[torch.Tensor, torch.Tensor]] = {}
+        n_tokens_seen = 0
+        for bi, layer_batch in enumerate(layer_batches, 1):
+            batch_targets = {(l, e) for (l, e) in pending if l in layer_batch}
+            batch_routed, batch_n_seen = capture_all_routed(
+                model, cfg["experts_path"], cfg["down_attr"], cfg["moe_layers"],
+                cfg["n_experts"], windows, args.batch_size, only=batch_targets)
+            routed.update(batch_routed)
+            n_tokens_seen = batch_n_seen  # same every batch (same windows)
+            print(f"[{args.model}] capture batch {bi}/{len(layer_batches)} "
+                  f"(layers {layer_batch}): {len(batch_routed)}/"
+                  f"{len(batch_targets)} experts routed", flush=True)
 
         # peak_activation_original is a free byproduct of the single capture
         # pass (just Y.abs().max(), no iteration) -- compute it for EVERY
