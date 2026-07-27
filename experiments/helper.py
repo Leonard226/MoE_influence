@@ -215,6 +215,37 @@ def sparsify_edges(W, edge_q: float = 0.9999, edge_floor_frac: float = 0.1):
     return W_filtered, info
 
 
+def subsample_edges(W_filtered, max_edges: int, seed: int = 0):
+    """If sparsify_edges left more than max_edges surviving entries, keep a
+    uniform random sample of exactly max_edges of them (fixed seed,
+    reproducible) and zero the rest. Legibility-only: the quantile threshold
+    itself already decided which edges qualify, this just controls how many
+    of the (already equally-qualifying) survivors get drawn.
+
+    Args:
+        W_filtered: output of sparsify_edges (same shape, non-surviving
+            entries already zeroed).
+        max_edges: cap on the number of nonzero entries to keep.
+        seed: RNG seed for the sample, for reproducible figures.
+
+    Returns:
+        W_sampled: same shape as W_filtered.
+        info: dict with n_edges_before_sample / n_edges_sampled.
+    """
+    import torch
+    nz = torch.nonzero(W_filtered, as_tuple=False)
+    n = nz.shape[0]
+    if n <= max_edges:
+        return W_filtered, {"n_edges_before_sample": n, "n_edges_sampled": n}
+
+    g = torch.Generator().manual_seed(seed)
+    keep = nz[torch.randperm(n, generator=g)[:max_edges]]
+    W_sampled = torch.zeros_like(W_filtered)
+    W_sampled[keep[:, 0], keep[:, 1], keep[:, 2], keep[:, 3]] = \
+        W_filtered[keep[:, 0], keep[:, 1], keep[:, 2], keep[:, 3]]
+    return W_sampled, {"n_edges_before_sample": n, "n_edges_sampled": max_edges}
+
+
 def get_thresholds(dag: dict, target: str, quantiles: list) -> list:
     import torch
 

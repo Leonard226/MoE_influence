@@ -113,7 +113,7 @@ def layer_heatmap(model: str, dataset: str, out_dir: Path) -> None:
     fig.colorbar(im, cax=cax, label="accumulated raw out(v)")
     fig.tight_layout()
 
-    out_path = out_dir / f"layer_influence_heatmap_{model}_{dataset}.pdf"
+    out_path = out_dir / f"{model}_layer_influence_heatmap_{dataset}.pdf"
     fig.savefig(out_path)
     plt.close(fig)
     print(f"{model}: saved {out_path} (L={L})")
