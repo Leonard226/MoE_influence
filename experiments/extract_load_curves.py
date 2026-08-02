@@ -49,7 +49,7 @@ def main() -> None:
     print("-" * 80)
 
     for model in MODELS:
-        dag_path = Path(result_path) / f"dag_{model}_{TASK}.pt"
+        dag_path = Path(result_path) / "dags" / TASK / f"dag_{model}_{TASK}.pt"
         dag = torch.load(dag_path, weights_only=False)
 
         n_tok = dag["n_tokens_selected"].cpu().numpy().astype(np.float64)  # [L, N]

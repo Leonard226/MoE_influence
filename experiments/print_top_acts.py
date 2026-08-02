@@ -79,7 +79,7 @@ def main() -> None:
     top_id_records: dict[str, list[dict]] = {}
     thresholds: dict[str, dict] = {}
     for m in MODELS:
-        path = RESULTS / f"dag_{m}_{args.task}.pt"
+        path = RESULTS / "dags" / args.task / f"dag_{m}_{args.task}.pt"
         if not path.exists():
             print(f"{m:<18s}  MISSING ({path})")
             continue

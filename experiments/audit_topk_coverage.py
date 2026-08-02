@@ -124,7 +124,7 @@ def main() -> None:
     summary: dict = {}
     for model in MODELS:
         for task in TASKS:
-            dag_path = Path(result_path) / f"dag_{model}_{task}.pt"
+            dag_path = Path(result_path) / "dags" / task / f"dag_{model}_{task}.pt"
             try:
                 dag = torch.load(dag_path, weights_only=False)
             except Exception as e:

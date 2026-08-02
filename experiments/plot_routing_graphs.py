@@ -20,7 +20,7 @@ suppresses the gold/red highlighting inside the drawing routine -- every node
 renders uniformly (white fill, black border). The colour axis is pinned to
 [0, 1] so the same |w| renders the same shade in every model.
 
-Reads:  {result_path}/dag_{model}_{task}.pt
+Reads:  {result_path}/dags/{task}/dag_{model}_{task}.pt
 Writes: {result_path}/dag_visualizations/{model}_W_softmax_EDGE-first_{task}_q{EDGE_Q}.pdf
 
 Usage:
@@ -63,7 +63,7 @@ LARGE_MODELS = {"deepseek-v2", "qwen3-30b-a3b", "qwen3-235b-a22b"}
 
 def plot_one(model: str, task: str, out_dir: Path, edge_q: float,
              max_edges: int) -> None:
-    dag_path = RESULTS / f"dag_{model}_{task}.pt"
+    dag_path = RESULTS / "dags" / task / f"dag_{model}_{task}.pt"
     if not dag_path.exists():
         print(f"{model}: MISSING {dag_path}, skipping")
         return

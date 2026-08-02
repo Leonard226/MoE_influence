@@ -62,7 +62,7 @@ NUM_DENSE = {
 
 
 def _load(model: str, task: str):
-    path = RESULTS / f"dag_{model}_{task}.pt"
+    path = RESULTS / "dags" / task / f"dag_{model}_{task}.pt"
     if not path.exists():
         return None
     dag = torch.load(path, weights_only=False, map_location="cpu")

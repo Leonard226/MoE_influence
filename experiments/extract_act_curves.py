@@ -51,7 +51,7 @@ def main() -> None:
           f"{'lognorm_max':>12s}  {'lognorm_min':>12s}")
     print("-" * 88)
     for model in MODELS:
-        dag_path = Path(result_path) / f"dag_{model}_{TASK}.pt"
+        dag_path = Path(result_path) / "dags" / TASK / f"dag_{model}_{TASK}.pt"
         dag = torch.load(dag_path, weights_only=False)
         act = dag["act"].cpu().numpy().reshape(-1).astype(np.float64)
 

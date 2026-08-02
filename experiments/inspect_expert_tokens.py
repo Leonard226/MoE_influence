@@ -84,7 +84,7 @@ def main() -> None:
     agg: dict[str, list[tuple[float, float, float]]] = {}
 
     for m in args.models:
-        path = RESULTS / f"dag_{m}_{args.task}.pt"
+        path = RESULTS / "dags" / args.task / f"dag_{m}_{args.task}.pt"
         if not path.exists():
             print(f"\n[{m}] MISSING ({path})")
             continue

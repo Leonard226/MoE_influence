@@ -349,180 +349,6 @@ def load_partitioned_model(model_cfg, rank, world_size, local_rank):
     return model, cfg, owned
 
 
-def load_partitioned_model_random_init(model_cfg, rank, world_size, local_rank, seed):
-    """Multi-node random-init counterpart to load_partitioned_model.
-
-    Builds the model skeleton on meta, then materialises only this rank's owned
-    parameters on its GPU as empty bf16 tensors and applies the architecture's
-    `_init_weights` to fill them. No safetensors download, no checkpoint load.
-
-    The seed is set per rank; the same seed across ranks produces different
-    random values for each rank's owned params, which is fine -- determinism is
-    enforced at the (model, seed) tuple level.
-    """
-    from accelerate import init_empty_weights
-    from accelerate.utils import set_module_tensor_to_device
-
-    cls = model_cfg["cls"]
-    model_id = model_cfg["id"]
-    cfg = cls.config_class.from_pretrained(model_id, trust_remote_code=True)
-    cfg._attn_implementation = "eager"
-    cfg.torch_dtype = torch.bfloat16
-
-    n_layers = cfg.num_hidden_layers
-    start, end = partition_layers(n_layers, world_size, rank)
-    owned = list(range(start, end))
-
-    rprint(rank, f"[rank {rank}] owns decoder layers {start}..{end-1} ({end-start} layers) "
-                 f"[random-init seed={seed}]")
-
-    with init_empty_weights():
-        model = cls(cfg)
-
-    gpu = f"cuda:{local_rank}"
-
-    def is_owned(param_name: str) -> bool:
-        if param_name.startswith("model.embed_tokens"):
-            return rank == 0
-        if param_name.startswith("model.norm"):
-            return rank == world_size - 1
-        if param_name.startswith("model.rotary_emb"):
-            return True
-        if param_name.startswith("lm_head"):
-            return False
-        if param_name.startswith("model.layers."):
-            layer_idx = int(param_name.split(".")[2])
-            return layer_idx in owned
-        return False
-
-    # Seed RNG before any per-param tensor allocation so init is reproducible
-    # per (rank, seed). cuda RNG covers .normal_() / .uniform_() on GPU tensors.
-    torch.manual_seed(seed)
-    torch.cuda.manual_seed_all(seed)
-
-    # Walk leaf modules; for each module with at least one owned direct param,
-    # materialise its direct params on GPU as empty bf16 and then apply
-    # `model._init_weights(module)`. Non-owned modules stay on meta.
-    n_materialized = 0
-    for module_name, module in model.named_modules():
-        direct_params = list(module.named_parameters(recurse=False))
-        if not direct_params:
-            continue
-        # In a well-formed transformer the params of any leaf module belong to
-        # the same logical block (one layer's submodule, the embedding, or the
-        # final norm) -- so they are all owned by the same rank or none are.
-        # We check the first direct param to decide.
-        first_pname, _ = direct_params[0]
-        first_full = f"{module_name}.{first_pname}" if module_name else first_pname
-        if not is_owned(first_full):
-            continue
-
-        # Materialise every direct param of this module on this rank's GPU.
-        for pname, param in direct_params:
-            full_name = f"{module_name}.{pname}" if module_name else pname
-            empty = torch.empty(param.shape, dtype=torch.bfloat16, device=gpu)
-            set_module_tensor_to_device(model, full_name, gpu, value=empty,
-                                        dtype=torch.bfloat16)
-            n_materialized += 1
-
-        # Custom modules (DeepSeek's MoEGate, etc.) define `reset_parameters`
-        # in their __init__ but it runs as a no-op under init_empty_weights().
-        # Call it now on the materialised tensors so the architecture's own
-        # init scheme fires. For modules without reset_parameters this is a
-        # no-op. For modules whose `_init_weights` overrides (nn.Linear,
-        # nn.Embedding, nn.LayerNorm) the subsequent `_init_weights(module)`
-        # call still applies the HF-intended scheme.
-        if hasattr(module, "reset_parameters"):
-            try:
-                module.reset_parameters()
-            except Exception as e:
-                rprint(rank, f"  [warn] reset_parameters failed on {module_name}: "
-                             f"{type(e).__name__}: {str(e)[:120]}")
-
-        # Apply architecture-default init on the now-materialised tensors.
-        # Overrides reset_parameters for the standard modules HF's
-        # `_init_weights` handles; leaves custom modules' reset_parameters in
-        # place.
-        model._init_weights(module)
-
-    # Workaround for custom *RMSNorm / *LayerNorm classes that set weight to ones
-    # inside __init__ (no reset_parameters method) -- under init_empty_weights()
-    # that __init__ is a no-op on meta tensors, so after materialisation the
-    # weight is left as undefined empty memory (often zero), which zeroes the
-    # residual stream at the first normalisation and forces uniform-logit
-    # routing. Restore the designed identity init explicitly here.
-    n_norm_fixed = 0
-    for nm_name, nm in model.named_modules():
-        cls_name = type(nm).__name__
-        if "RMSNorm" not in cls_name and "LayerNorm" not in cls_name:
-            continue
-        w = getattr(nm, "weight", None)
-        if w is not None and w.device.type != "meta":
-            w.data.fill_(1.0)
-            n_norm_fixed += 1
-        b = getattr(nm, "bias", None)
-        if b is not None and b.device.type != "meta":
-            b.data.zero_()
-    rprint(rank, f"[rank {rank}] materialised {n_materialized} params with random init "
-                 f"(+{n_norm_fixed} norm weights reset to identity)")
-
-    # ----- TEMPORARY DEBUG: verify init actually stuck -----
-    if rank == 0:
-        rprint(rank, f"  [debug] entered weight-probe; owned={owned[:3]}{'...' if len(owned) > 3 else ''}  "
-                     f"(len={len(owned)})")
-        # Find the first OWNED MoE layer (skips dense layers like DeepSeek's layer 0).
-        sample_layer = None
-        for L in owned:
-            try:
-                if hasattr(model.model.layers[L].mlp, "gate"):
-                    sample_layer = L
-                    break
-            except Exception:
-                continue
-        if sample_layer is None:
-            rprint(rank, f"  [debug] no MoE layer found in owned; skipping weight probe")
-        else:
-            try:
-                mlp = model.model.layers[sample_layer].mlp
-                gw = mlp.gate.weight
-                rprint(rank, f"  [debug] layers[{sample_layer}].mlp.gate.weight: "
-                             f"device={gw.device}, "
-                             f"[0,:4]={gw[0,:4].tolist() if gw.device.type != 'meta' else 'META'}")
-                if hasattr(mlp, "experts") and len(mlp.experts) > 0 and mlp.experts[0] is not None:
-                    expert = mlp.experts[0]
-                    for sub_name in ("gate_proj", "w1", "up_proj", "w3", "down_proj", "w2"):
-                        sub = getattr(expert, sub_name, None)
-                        if sub is not None and hasattr(sub, "weight"):
-                            ew = sub.weight
-                            rprint(rank, f"  [debug] layers[{sample_layer}].mlp.experts[0].{sub_name}.weight: "
-                                         f"device={ew.device}, "
-                                         f"[0,:4]={ew[0,:4].tolist() if ew.device.type != 'meta' else 'META'}")
-                            break
-            except Exception as e:
-                rprint(rank, f"  [debug] sample-weight probe failed: {type(e).__name__}: {e}")
-    # ------------------------------------------------------
-
-    # Replace non-owned decoder layers with None so our custom forward skips them.
-    inner = model.model
-    new_layers = torch.nn.ModuleList()
-    for i in range(n_layers):
-        if i in owned:
-            new_layers.append(inner.layers[i])
-        else:
-            new_layers.append(None)
-    inner.layers = new_layers
-
-    if rank != 0:
-        inner.embed_tokens = None
-    if rank != world_size - 1:
-        inner.norm = None
-    model.lm_head = None
-
-    model.eval()
-    torch.cuda.empty_cache()
-    return model, cfg, owned
-
-
 # ---------------------------------------------------------------------------
 # Hook extraction from a single decoder layer's output.
 # ---------------------------------------------------------------------------
@@ -791,15 +617,6 @@ def main():
     parser.add_argument("--dataset", choices=list(DATASETS), default="c4")
     parser.add_argument("--n_prompts", type=int, default=500)
     parser.add_argument("--B", type=int, default=4)
-    parser.add_argument("--random-init", action="store_true",
-                        help="Skip the safetensors load and materialize this rank's "
-                             "owned parameters with the architecture's _init_weights "
-                             "instead. Output filename gets a _rand_s{seed} suffix.")
-    parser.add_argument("--seed", type=int, default=0,
-                        help="Random-init RNG seed (per rank; the same seed across "
-                             "ranks gives different random values per rank's owned "
-                             "params, which is fine -- determinism is per (model, "
-                             "seed) tuple). Ignored when --random-init not set.")
     args = parser.parse_args()
 
     rank, world_size, local_rank = init_dist()
@@ -825,12 +642,7 @@ def main():
     # ---- Load model (per-rank slice) ----
     rprint(rank, f"Loading {MODEL_ID} ...")
     t0 = time.time()
-    if args.random_init:
-        model, cfg, owned = load_partitioned_model_random_init(
-            MODEL, rank, world_size, local_rank, args.seed
-        )
-    else:
-        model, cfg, owned = load_partitioned_model(MODEL, rank, world_size, local_rank)
+    model, cfg, owned = load_partitioned_model(MODEL, rank, world_size, local_rank)
     if dist.is_initialized():
         dist.barrier()
     rprint(rank, f"  loaded in {time.time() - t0:.1f}s")
@@ -1137,12 +949,9 @@ def main():
         W_softmax_signed = (wsm_signed_accum / denom).masked_fill(zero_mask, 0.0)
         del W_softmax_E_sq
 
-        if args.random_init:
-            out_path = os.path.join(
-                output_dir, f"dag_{args.model}_{args.dataset}_rand_s{args.seed}.pt"
-            )
-        else:
-            out_path = os.path.join(output_dir, f"dag_{args.model}_{args.dataset}.pt")
+        dag_dir = os.path.join(output_dir, "dags", args.dataset)
+        os.makedirs(dag_dir, exist_ok=True)
+        out_path = os.path.join(dag_dir, f"dag_{args.model}_{args.dataset}.pt")
         torch.save({
             "APS":               APS.cpu(),
             "ANS":               ANS.cpu(),
@@ -1161,8 +970,6 @@ def main():
             "model":             MODEL_ID,
             "moe_layers":        MOE_LAYERS,
             "dataset":           args.dataset,
-            "random_init":       bool(args.random_init),
-            "seed":              int(args.seed) if args.random_init else None,
         }, out_path)
         print(f"Saved {out_path}")
 

@@ -59,7 +59,7 @@ NUM_DENSE = {
 def _load_features(model: str, task: str):
     """Return dict with flat np.float64 arrays: out, in, load, act, depth (+L, N).
     load(v) = n_tok(v) / mean_{n'} n_tok(l, n')  (per-layer mean-normalised)."""
-    path = RESULTS / f"dag_{model}_{task}.pt"
+    path = RESULTS / "dags" / task / f"dag_{model}_{task}.pt"
     if not path.exists():
         return None
     dag = torch.load(path, weights_only=False, map_location="cpu")

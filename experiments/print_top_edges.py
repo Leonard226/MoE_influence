@@ -56,7 +56,7 @@ def main() -> None:
     args = p.parse_args()
 
     for m in MODELS:
-        path = RESULTS / f"dag_{m}_{args.task}.pt"
+        path = RESULTS / "dags" / args.task / f"dag_{m}_{args.task}.pt"
         if not path.exists():
             print(f"\n[{m}]  MISSING ({path})")
             continue

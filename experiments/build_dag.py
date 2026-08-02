@@ -49,7 +49,7 @@ Also computed per sender expert / per vertex:
 Usage:
     python experiments/build_dag.py --model {olmoe,deepseek-v2-lite,...} --dataset {c4,...} --n_prompts 500
 
-Output: {result_path}/dag_{model}_{dataset}.pt
+Output: {result_path}/dags/{dataset}/dag_{model}_{dataset}.pt
 """
 import argparse
 import importlib
@@ -199,14 +199,6 @@ parser.add_argument("--model", choices=list(MODELS), default="olmoe", help="Whic
 parser.add_argument("--dataset", choices=list(DATASETS), default="c4", help="Which dataset to build the DAG on (default: c4).")
 parser.add_argument("--n_prompts", type=int, default=500, help="Number of prompts to use; capped to min(this, len(loaded_prompts)).")
 parser.add_argument("--B", type=int, default=32, help="Batch size (lower if you OOM; default 32).")
-parser.add_argument("--random-init", action="store_true",
-                    help="Build the model with architecture-default init (Kaiming/scaled-normal/...) "
-                         "instead of loading pretrained weights. Used for the null-baseline experiment. "
-                         "Tokenizer is still loaded from MODEL_ID (we still tokenise real text).")
-parser.add_argument("--seed", type=int, default=0,
-                    help="Random seed for --random-init weight initialisation. Recorded in the output "
-                         "filename as dag_<model>_<dataset>_rand_s{seed}.pt. Ignored when --random-init "
-                         "is not set.")
 args = parser.parse_args()
 
 device = "cuda:0"
@@ -241,67 +233,7 @@ print(f"  CUDA_VISIBLE_DEVICES = {os.environ.get('CUDA_VISIBLE_DEVICES', '<unset
 t0 = time.time()
 load_kwargs = dict(attn_implementation="eager", torch_dtype=torch.bfloat16)
 
-if args.random_init:
-    # ------------------------------------------------------------------
-    # Null-baseline path: build the model with the architecture's default
-    # init scheme (no pretrained weights loaded). For multi_gpu=True models
-    # we still shard across GPUs via accelerate's dispatch_model; for
-    # single-GPU models we just instantiate on the target device.
-    # ------------------------------------------------------------------
-    print(f"  random-init mode: seed={args.seed}", flush=True)
-    cfg = MODEL["cls"].config_class.from_pretrained(MODEL_ID, trust_remote_code=True)
-    cfg.torch_dtype = torch.bfloat16
-    # Force eager attention so the customized model receives real attn weights;
-    # sdpa/flash returns None there, which the customized forward stores into a
-    # pre-allocated CUDA tensor and crashes (matches the load_kwargs the trained
-    # path passes to from_pretrained).
-    cfg._attn_implementation = "eager"
-
-    # Seed RNG before any tensor allocation so the init is deterministic.
-    torch.manual_seed(args.seed)
-    if torch.cuda.is_available():
-        torch.cuda.manual_seed_all(args.seed)
-
-    if MODEL.get("multi_gpu", False):
-        try:
-            from accelerate import dispatch_model, init_empty_weights, infer_auto_device_map
-        except ImportError:
-            raise RuntimeError("--random-init for multi_gpu models requires accelerate")
-
-        # Step 1: plan device map on a meta-device skeleton.
-        print("  planning device map on meta skeleton ...", flush=True)
-        with init_empty_weights():
-            empty_model = MODEL["cls"](cfg)
-        no_split = empty_model._no_split_modules
-        max_mem = MODEL.get("max_memory", {0: "75GiB"})
-        computed_map = infer_auto_device_map(
-            empty_model, max_memory=max_mem,
-            no_split_module_classes=no_split, dtype=torch.bfloat16,
-        )
-        print(f"  computed device_map: {computed_map}", flush=True)
-        del empty_model
-
-        # Step 2: build the model on CPU in fp32 (architecture-default), then
-        # cast to bf16. We do NOT set torch.set_default_dtype(torch.bfloat16)
-        # before construction because that would silently put the rotary
-        # embedding precomputation (inv_freq = 1 / theta^(...) ) in bf16,
-        # whose dynamic range can produce subnormals/NaNs. fp32 + cast is the
-        # same pattern HF's from_pretrained(torch_dtype=bf16) uses.
-        # PreTrainedModel.__init__ calls _init_weights under the RNG we seeded
-        # above, so no second apply pass is needed.
-        print(f"  materializing model on CPU (fp32 init -> bf16 cast, "
-              f"seed={args.seed}) ...", flush=True)
-        model = MODEL["cls"](cfg).to(torch.bfloat16).eval()
-
-        print("  dispatching to GPUs ...", flush=True)
-        model = dispatch_model(model, device_map=computed_map)
-        print(f"  hf_device_map = {getattr(model, 'hf_device_map', '<not present>')}", flush=True)
-    else:
-        # Single-GPU random-init.
-        print(f"  building model on {device} (fp32 init -> bf16 cast, "
-              f"seed={args.seed}) ...", flush=True)
-        model = MODEL["cls"](cfg).to(torch.bfloat16).to(device).eval()
-elif MODEL.get("multi_gpu", False):
+if MODEL.get("multi_gpu", False):
     try:
         import accelerate
         from accelerate import infer_auto_device_map, init_empty_weights, dispatch_model
@@ -615,12 +547,9 @@ del W_softmax_E_sq
 for _h in _down_proj_hooks:
     _h.remove()
 
-if args.random_init:
-    out_path = os.path.join(
-        output_dir, f"dag_{args.model}_{args.dataset}_rand_s{args.seed}.pt"
-    )
-else:
-    out_path = os.path.join(output_dir, f"dag_{args.model}_{args.dataset}.pt")
+dag_dir = os.path.join(output_dir, "dags", args.dataset)
+os.makedirs(dag_dir, exist_ok=True)
+out_path = os.path.join(dag_dir, f"dag_{args.model}_{args.dataset}.pt")
 torch.save({
     "APS":               APS.cpu(),                       # [c, j, l, n]
     "ANS":               ANS.cpu(),                       # [c, j, l, n]
@@ -639,7 +568,5 @@ torch.save({
     "model":             MODEL_ID,
     "moe_layers":        MOE_LAYERS,
     "dataset":           args.dataset,
-    "random_init":       bool(args.random_init),
-    "seed":              int(args.seed) if args.random_init else None,
 }, out_path)
 print(f"Saved {out_path}")

@@ -2,7 +2,7 @@
 
 build_dag.py saves the full pairwise edge tensor W_softmax[c,j,l,n] (sender
 layer c, sender expert j, receiver layer l, receiver expert n) to
-dag_{model}_{dataset}.pt. This script collapses it down to a depth-only view:
+dags/{dataset}/dag_{model}_{dataset}.pt. This script collapses it down to a depth-only view:
 for each (sending layer, receiving layer) pair, sum the raw out(v)-style
 edge weight over every sender expert in the sending layer and every
 receiver expert in the receiving layer --
@@ -58,7 +58,7 @@ ALL_MODELS = [
 
 
 def layer_heatmap(model: str, dataset: str, out_dir: Path) -> None:
-    dag_path = RESULTS / f"dag_{model}_{dataset}.pt"
+    dag_path = RESULTS / "dags" / dataset / f"dag_{model}_{dataset}.pt"
     if not dag_path.exists():
         print(f"{model}: MISSING {dag_path}, skipping")
         return
