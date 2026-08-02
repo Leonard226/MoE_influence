@@ -4,31 +4,92 @@
 #SBATCH --gres=gpu:4
 #SBATCH --cpus-per-task=4
 #SBATCH --job-name="build-dags-mn"
-#SBATCH --output=logs/build_multinode.log
+#SBATCH --output=logs/build_dag_multinode_%j.log
 #
-# Build DAGs for the multinode-only models (qwen3-235b-a22b, deepseek-v2)
-# on all 8 datasets at n_prompts=500. Counterpart to build_dags.sh, which
-# covers the 6 single-node models. Submit overnight:
-#   sbatch experiments/launch_multinode.sh
+# Build DAGs for the multinode-only models (qwen3-235b-a22b, deepseek-v2).
+# Counterpart to build_dags.sh, which covers the 6 single-node models.
 #
-# IMPORTANT: each model's HuggingFace cache ($HF_HOME/hub/models--...) is
-# DELETED after all 8 datasets for that model are built. This frees disk
-# space before the next model downloads -- required because the full set
-# of model weights won't fit on /scratch simultaneously. Dataset caches
-# are preserved.
+# Usage:
+#   Full sweep -- both models x all 8 datasets:
+#     sbatch experiments/build_dag_multinode.sh
+#   One model, all datasets:
+#     sbatch experiments/build_dag_multinode.sh --model deepseek-v2
+#   One (model, dataset) pair, in isolation:
+#     sbatch experiments/build_dag_multinode.sh --model deepseek-v2 --dataset c4
 #
-# Set CLEANUP_MODEL_CACHE=0 (env var) to disable per-model cleanup.
+# This needs an actual multi-node SLURM allocation (srun/torchrun,
+# $SLURM_JOB_NODELIST, $SLURM_NODEID) -- unlike build_dags.sh it cannot be
+# run directly via tmux/bash, only via sbatch.
+#
+# IMPORTANT: in full-sweep mode, each model's HuggingFace cache
+# ($HF_HOME/hub/models--...) is DELETED after all its datasets are built,
+# to free disk before the next model downloads -- the full set of model
+# weights won't fit on /scratch simultaneously. Dataset caches are
+# preserved. This cleanup defaults OFF when --model restricts to a single
+# model (you're likely iterating on it and don't want to force a
+# re-download) -- pass CLEANUP_MODEL_CACHE=1 to force it on, or =0 to force
+# it off in full-sweep mode.
 #
 # Resumable: skips (model, dataset) pairs whose output .pt already exists.
 
 set -euo pipefail
+
+ALL_MODELS=(deepseek-v2 qwen3-235b-a22b)
+ALL_DATASETS=(c4 math code wikitext2 gsm8k humaneval pile-arxiv pile-github)
+
+usage() {
+  cat <<EOF
+Usage: $0 [--model MODEL] [--dataset DATASET]
+
+  --model MODEL      Restrict to this model (default: all).
+                      One of: ${ALL_MODELS[*]}
+  --dataset DATASET   Restrict to this dataset (default: all).
+                      One of: ${ALL_DATASETS[*]}
+  -h, --help          Show this help and exit.
+
+Examples:
+  $0                                       # both models x all datasets
+  $0 --model deepseek-v2                   # one model, all datasets
+  $0 --model deepseek-v2 --dataset c4      # one (model, dataset) pair
+EOF
+}
+
+ONLY_MODEL=""
+ONLY_DATASET=""
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --model)   ONLY_MODEL="${2:-}"; shift 2 ;;
+    --dataset) ONLY_DATASET="${2:-}"; shift 2 ;;
+    -h|--help) usage; exit 0 ;;
+    *) echo "ERROR: unknown argument '$1'" >&2; usage; exit 1 ;;
+  esac
+done
+
+if [[ -n "$ONLY_MODEL" ]]; then
+  found=0
+  for m in "${ALL_MODELS[@]}"; do [[ "$m" == "$ONLY_MODEL" ]] && found=1; done
+  if [[ "$found" == "0" ]]; then
+    echo "ERROR: --model '$ONLY_MODEL' is not one of: ${ALL_MODELS[*]}" >&2
+    exit 1
+  fi
+fi
+if [[ -n "$ONLY_DATASET" ]]; then
+  found=0
+  for d in "${ALL_DATASETS[@]}"; do [[ "$d" == "$ONLY_DATASET" ]] && found=1; done
+  if [[ "$found" == "0" ]]; then
+    echo "ERROR: --dataset '$ONLY_DATASET' is not one of: ${ALL_DATASETS[*]}" >&2
+    exit 1
+  fi
+fi
 
 ENV_BIN=/scratch/sleonard/miniconda3/envs/megatron/bin
 export PATH="${ENV_BIN}:${PATH}"
 export LD_LIBRARY_PATH="/scratch/sleonard/miniconda3/envs/megatron/lib:${LD_LIBRARY_PATH:-}"
 export HF_HOME="${HF_HOME:-$HOME/.hugging_face}"
 
-CLEANUP_MODEL_CACHE="${CLEANUP_MODEL_CACHE:-1}"
+# Default: cache cleanup on for a full sweep, off when restricted to one model
+# (see header comment). CLEANUP_MODEL_CACHE env var always overrides.
+CLEANUP_MODEL_CACHE="${CLEANUP_MODEL_CACHE:-$([[ -n "$ONLY_MODEL" ]] && echo 0 || echo 1)}"
 
 # Resolve master node from SLURM env.
 nodes=( $(scontrol show hostnames "$SLURM_JOB_NODELIST") )
@@ -63,17 +124,26 @@ echo "SCRIPT_PATH=$SCRIPT_PATH"
 
 RESULT_PATH=$(${ENV_BIN}/python -c "import yaml; print(yaml.safe_load(open('${PROJECT_ROOT}/config.yaml'))['result_path'])")
 
-# Models that need multinode, with their HF identifiers (for cache cleanup).
-# DeepSeek-V2 first because its weights are already in cache; running qwen first
-# would mean downloading qwen while deepseek is still on disk (peak = both).
-# After deepseek finishes and its cache is deleted, qwen downloads onto the
-# freed space.
-MODELS=(deepseek-v2 qwen3-235b-a22b)
+# HF identifiers (for cache cleanup). ALL_MODELS is ordered deepseek-v2 first
+# because its weights are already in cache; running qwen first would mean
+# downloading qwen while deepseek is still on disk (peak = both). After
+# deepseek finishes and its cache is deleted, qwen downloads onto the freed
+# space. MODELS/DATASETS: the full lists by default, or a single entry when
+# restricted via --model/--dataset.
 declare -A HF_ID=(
   [deepseek-v2]="deepseek-ai/DeepSeek-V2"
   [qwen3-235b-a22b]="Qwen/Qwen3-235B-A22B"
 )
-DATASETS=(c4 math code wikitext2 gsm8k humaneval pile-arxiv pile-github)
+if [[ -n "$ONLY_MODEL" ]]; then
+  MODELS=("$ONLY_MODEL")
+else
+  MODELS=("${ALL_MODELS[@]}")
+fi
+if [[ -n "$ONLY_DATASET" ]]; then
+  DATASETS=("$ONLY_DATASET")
+else
+  DATASETS=("${ALL_DATASETS[@]}")
+fi
 
 cleanup_model_cache() {
   local m="$1"

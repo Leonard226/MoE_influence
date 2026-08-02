@@ -34,7 +34,7 @@ max_h_all keys
 included.
 
 Launch (2 nodes x 4 GPUs), e.g. via a SLURM script mirroring
-launch_multinode.sh but pointing at this file:
+build_dag_multinode.sh but pointing at this file:
     srun ... torchrun --nnodes 2 --nproc_per_node 4 \
         --rdzv_endpoint $MASTER_ADDR:$MASTER_PORT \
         experiments/ablate_experts_multinode.py --model qwen3-235b-a22b

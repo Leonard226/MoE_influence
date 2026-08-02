@@ -4,43 +4,82 @@
 #SBATCH --cpus-per-task=4
 #SBATCH --job-name="build-dags"
 #SBATCH --output=logs/build_dags_%j.log
-# NOTE: pinned to piora1 (A100 80GB node). Other nodes (piora4, piora5)
-# have V100s and will OOM on the larger models. Job queues until piora1
-# frees up (currently held by the multinode build).
+
 #
-# Build DAGs for all 8 datasets on the 6 single-node-capable MoE models.
+# Build DAGs on the 6 single-node-capable MoE models.
 #
-# Usage (either works):
-#   sbatch experiments/build_dags.sh
-#   # or
-#   tmux new -s build_dags
-#   bash experiments/build_dags.sh 2>&1 | tee logs/build_dags.log
-#   # detach: Ctrl-b d ;  reattach: tmux attach -t build_dags
+# Usage (all forms work under both sbatch and tmux/bash):
+#   Full sweep -- all 6 models x all 8 datasets:
+#     sbatch experiments/build_dags.sh
+#     bash experiments/build_dags.sh 2>&1 | tee logs/build_dags.log
+#   One model, all datasets:
+#     sbatch experiments/build_dags.sh --model deepseek-v2-lite
+#   One (model, dataset) pair, in isolation:
+#     sbatch experiments/build_dags.sh --model deepseek-v2-lite --dataset c4
+#   (tmux) detach: Ctrl-b d ;  reattach: tmux attach -t build_dags
 #
-# IMPORTANT: each model's HuggingFace cache (~/.hugging_face/hub/models--...)
-# is DELETED after all 5 datasets for that model are built. This frees disk
-# space before the next model downloads -- required because the full set of
+# IMPORTANT: in full-sweep mode, each model's HuggingFace cache
+# (~/.hugging_face/hub/models--...) is DELETED after all its datasets are
+# built, to free disk before the next model downloads -- the full set of
 # model weights won't fit on /scratch simultaneously. Dataset caches are
-# preserved (they're small and shared across models).
-#
-# Set CLEANUP_MODEL_CACHE=0 to disable the per-model cleanup (e.g., for a
-# small-models-only test run where you want to keep weights cached).
+# preserved (small, shared across models). This cleanup defaults OFF when
+# --model restricts to a single model (you're likely iterating on it and
+# don't want to force a re-download) -- pass CLEANUP_MODEL_CACHE=1 to force
+# it on, or =0 to force it off in full-sweep mode.
 #
 # Resumable: skips (model, dataset) pairs whose output .pt already exists.
 # Memory between model swaps: each `python` invocation is its own process,
 # so GPU memory and resident RAM are reclaimed by the OS when it exits.
-#
-# PILOT NOTE: the on-disk dag_*.pt files from the previous schema (which
-# included AVG/VAR/ARV and lacked W_softmax/act) are NOT auto-deleted by
-# the skip-if-exists check. Before launching the pilot, remove the stale
-# pilot-model DAGs explicitly:
-#   rm -f $RESULT_PATH/dags/*/dag_mixtral-8x7b_*.pt
-#   rm -f $RESULT_PATH/dags/*/dag_deepseek-v2-lite_*.pt
-#
-# qwen3-235b-a22b and deepseek-v2 need multinode SLURM; handle separately
-# via experiments/launch_multinode.sh.
 
 set -euo pipefail
+
+ALL_MODELS=(olmoe phi-3.5-moe mixtral-8x7b deepseek-v2-lite qwen3-30b-a3b mixtral-8x22b)
+ALL_DATASETS=(c4 math code wikitext2 gsm8k humaneval pile-arxiv pile-github)
+
+usage() {
+  cat <<EOF
+Usage: $0 [--model MODEL] [--dataset DATASET]
+
+  --model MODEL      Restrict to this model (default: all).
+                      One of: ${ALL_MODELS[*]}
+  --dataset DATASET   Restrict to this dataset (default: all).
+                      One of: ${ALL_DATASETS[*]}
+  -h, --help          Show this help and exit.
+
+Examples:
+  $0                                          # all models x all datasets
+  $0 --model deepseek-v2-lite                 # one model, all datasets
+  $0 --model deepseek-v2-lite --dataset c4    # one (model, dataset) pair
+EOF
+}
+
+ONLY_MODEL=""
+ONLY_DATASET=""
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --model)   ONLY_MODEL="${2:-}"; shift 2 ;;
+    --dataset) ONLY_DATASET="${2:-}"; shift 2 ;;
+    -h|--help) usage; exit 0 ;;
+    *) echo "ERROR: unknown argument '$1'" >&2; usage; exit 1 ;;
+  esac
+done
+
+if [[ -n "$ONLY_MODEL" ]]; then
+  found=0
+  for m in "${ALL_MODELS[@]}"; do [[ "$m" == "$ONLY_MODEL" ]] && found=1; done
+  if [[ "$found" == "0" ]]; then
+    echo "ERROR: --model '$ONLY_MODEL' is not one of: ${ALL_MODELS[*]}" >&2
+    exit 1
+  fi
+fi
+if [[ -n "$ONLY_DATASET" ]]; then
+  found=0
+  for d in "${ALL_DATASETS[@]}"; do [[ "$d" == "$ONLY_DATASET" ]] && found=1; done
+  if [[ "$found" == "0" ]]; then
+    echo "ERROR: --dataset '$ONLY_DATASET' is not one of: ${ALL_DATASETS[*]}" >&2
+    exit 1
+  fi
+fi
 
 # Find the project root by walking up from SLURM_SUBMIT_DIR (or $PWD) until we
 # find config.yaml. Robust to both tmux ($0 works) and sbatch (where $0 points
@@ -63,7 +102,9 @@ export PATH="${ENV_BIN}:${PATH}"
 export LD_LIBRARY_PATH="/scratch/sleonard/miniconda3/envs/megatron/lib:${LD_LIBRARY_PATH:-}"
 
 export HF_HOME="${HF_HOME:-$HOME/.hugging_face}"
-CLEANUP_MODEL_CACHE="${CLEANUP_MODEL_CACHE:-1}"
+# Default: cache cleanup on for a full sweep, off when restricted to one model
+# (see header comment). CLEANUP_MODEL_CACHE env var always overrides.
+CLEANUP_MODEL_CACHE="${CLEANUP_MODEL_CACHE:-$([[ -n "$ONLY_MODEL" ]] && echo 0 || echo 1)}"
 RESULT_PATH=$(${ENV_BIN}/python -c "import yaml; print(yaml.safe_load(open('config.yaml'))['result_path'])")
 
 echo "ROOT=$ROOT"
@@ -73,24 +114,24 @@ echo "CLEANUP_MODEL_CACHE=$CLEANUP_MODEL_CACHE"
 echo
 
 # Post-pilot full single-node rebuild with the new edge-weight schema
-# (W_softmax family + Su et al. `act` feature) across all 8 datasets at 500
-# prompts. Mixtral-8x7B and DeepSeek-V2-Lite are already done from the pilot
-# and will be skipped by the [skip] check below. Multinode models
-# (qwen3-235b-a22b, deepseek-v2) run separately via launch_multinode.sh.
-DATASETS=(c4 math code wikitext2 gsm8k humaneval pile-arxiv pile-github)
+# (W_softmax family + Su et al. `act` feature) at 500 prompts. Multinode
+# models (qwen3-235b-a22b, deepseek-v2) run separately via build_dag_multinode.sh.
 N_PROMPTS=500
 
-# Smallest first so quick wins land early; the heavier (mixtral-8x22b,
-# qwen3-30b-a3b) come at the end. mixtral-8x7b + deepseek-v2-lite are kept in
-# the list as a no-op safety net — the skip-if-exists guard takes them out.
-MODELS=(
-  olmoe
-  phi-3.5-moe
-  mixtral-8x7b
-  deepseek-v2-lite
-  qwen3-30b-a3b
-  mixtral-8x22b
-)
+# DATASETS/MODELS: the full lists by default, or a single entry when
+# restricted via --dataset/--model. skip-if-exists (below) makes reruns cheap
+# either way. ALL_MODELS is ordered smallest-first so quick wins land early
+# in full-sweep mode; the heavier mixtral-8x22b/qwen3-30b-a3b come last.
+if [[ -n "$ONLY_DATASET" ]]; then
+  DATASETS=("$ONLY_DATASET")
+else
+  DATASETS=("${ALL_DATASETS[@]}")
+fi
+if [[ -n "$ONLY_MODEL" ]]; then
+  MODELS=("$ONLY_MODEL")
+else
+  MODELS=("${ALL_MODELS[@]}")
+fi
 
 # Batch size per model. mixtral-8x22b is the only "large" model in this list;
 # the rest are medium. BS=16 for large, BS=32 for medium.
@@ -189,6 +230,4 @@ done
 T_TOTAL=$(( ( $(date +%s) - T_START ) / 60 ))
 echo "============================================================"
 echo "All done at $(date). Total elapsed: ${T_TOTAL} min"
-echo "Reminder: qwen3-235b-a22b and deepseek-v2 need multinode SLURM. Run:"
-echo "  sbatch experiments/launch_multinode.sh"
 echo "============================================================"

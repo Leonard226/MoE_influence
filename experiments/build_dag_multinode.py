@@ -32,13 +32,14 @@ casts and NCCL gather precision; both stay in float32 on rank 0 so it is
 effectively bit-equal to single-node).
 
 Launch:
-    sbatch experiments/launch_multinode.sh
+    sbatch experiments/build_dag_multinode.sh
 or directly:
     srun ... torchrun --nnodes 2 --nproc_per_node 4 \
         --rdzv_endpoint piora1:29500 build_dag_multinode.py \
         --model {qwen3-235b-a22b,deepseek-v2} --dataset c4 --n_prompts 5000 --B 4
 """
 import argparse
+import functools
 import importlib
 import os
 import sys
@@ -62,16 +63,15 @@ from customized_models.modeling_qwen3_moe_customized import Qwen3MoeForCausalLM
 from customized_models.modeling_deepseek_customized import DeepseekV2ForCausalLM
 from transformers import AutoTokenizer
 
+from experiments.routing_variants import norm_denom_rmsnorm, ln_bar_rmsnorm, p_renorm_topk_softmax, p_no_renorm_softmax
+
 # ---------------------------------------------------------------------------
 # Dataset registry (same as build_dag.py).
 # ---------------------------------------------------------------------------
 DATASETS = {
-    # Existing (5,000 prompts).
     "c4":          ("dataset.c4_dataset",          "c4_dataset_helper"),
     "math":        ("dataset.math_dataset",        "open_r1_math_dataset_helper"),
     "code":        ("dataset.code_dataset",        "code_dataset_helper"),
-    # New (planned for 1,000 prompts; HumanEval caps at 164). Grouped by
-    # category: natural language, math, code, scientific notation.
     "wikitext2":   ("dataset.wikitext2_dataset",   "wikitext2_dataset_helper"),
     "gsm8k":       ("dataset.gsm8k_dataset",       "gsm8k_dataset_helper"),
     "humaneval":   ("dataset.humaneval_dataset",   "humaneval_dataset_helper"),
@@ -177,6 +177,11 @@ MODELS = {
         "layer_kwargs_fn": _layer_kwargs_deepseek,
         "causal_mask_fn": _causal_mask_deepseek,
         "needs_position_embeddings": False,
+        # norm_topk_prob=false, topk_method="group_limited_greedy" (n_group=8, topk_group=3),
+        # routed_scaling_factor=16.0.
+        "p_fn": functools.partial(p_no_renorm_softmax, group_limit=(8, 3)),
+        "routing_scale": 16.0,
+        "n_shared_experts": 2,  # fused into one wider MLP; DAG gets one shared-expert vertex per layer
     },
 }
 
@@ -352,12 +357,12 @@ def load_partitioned_model(model_cfg, rank, world_size, local_rank):
 # Hook extraction from a single decoder layer's output.
 # ---------------------------------------------------------------------------
 def call_layer(decoder_layer, hidden_states, causal_mask, position_ids,
-               position_embeddings, layer_kwargs_fn, is_moe):
+               position_embeddings, layer_kwargs_fn, is_moe, has_shared_experts=False):
     """Call a customized decoder layer and return (next_hidden, hook_tuple).
 
-    hook_tuple = (after_res1, after_norm2, selected_experts, weighted_outputs).
-    For dense layers (is_moe=False), `mlp_hooks` is empty in the my_hooks tuple,
-    so we return None for the MoE-specific hooks.
+    hook_tuple = (after_res1, after_norm2, selected_experts, weighted_outputs,
+    shared_expert_output). For dense layers (is_moe=False), `mlp_hooks` is
+    empty in the my_hooks tuple, so we return None for the MoE-specific hooks.
 
     layer_kwargs_fn: model-specific function returning the kwargs to pass to
         decoder_layer.forward() (different for Qwen3 vs DeepSeek — see top of file).
@@ -369,8 +374,9 @@ def call_layer(decoder_layer, hidden_states, causal_mask, position_ids,
         attn_hooks  : positions 6..12 (7 entries, padded with zeros for hooks
                       not used by all attention variants)
         mlp_hooks   = (router_logits, hook_selected_experts,
-                       hook_expert_weighted_outputs, hook_routing_weights)
-                      = positions 13..16
+                       hook_expert_weighted_outputs, hook_routing_weights,
+                       [hook_shared_expert_output])
+                      = positions 13..16, [17 for DeepSeek only]
     """
     kwargs = layer_kwargs_fn(causal_mask, position_ids, position_embeddings)
     layer_outputs = decoder_layer(hidden_states, **kwargs)
@@ -381,10 +387,12 @@ def call_layer(decoder_layer, hidden_states, causal_mask, position_ids,
     if is_moe:
         selected_experts = my_hooks[14]
         weighted_outputs = my_hooks[15]
+        shared_expert_output = my_hooks[17] if has_shared_experts else None
     else:
         selected_experts = None
         weighted_outputs = None
-    return next_hidden, (after_res1, after_norm2, selected_experts, weighted_outputs)
+        shared_expert_output = None
+    return next_hidden, (after_res1, after_norm2, selected_experts, weighted_outputs, shared_expert_output)
 
 
 # ---------------------------------------------------------------------------
@@ -408,6 +416,8 @@ def pipeline_forward(model, cfg, model_cfg, owned, owned_moe, rank, world_size,
         after_norm2:       [n_owned_moe, bsz, n_tok, d_e]   (float32, on cuda)
         selected_experts:  [n_owned_moe, bsz, n_tok, top_k] (long,    on cuda)
         weighted_outputs:  [n_owned_moe, bsz, n_tok, top_k, d_e] (float32, on cuda)
+        shared_expert_output: [n_owned_moe, bsz, n_tok, d_e] (float32, on cuda),
+            only present when model_cfg has "n_shared_experts".
     All ranks must call this in lock-step (no early return) to keep send/recv
     paired.
     """
@@ -418,6 +428,7 @@ def pipeline_forward(model, cfg, model_cfg, owned, owned_moe, rank, world_size,
     layer_kwargs_fn = model_cfg["layer_kwargs_fn"]
     needs_position_embeddings = model_cfg["needs_position_embeddings"]
     top_k = model_cfg["top_k"]
+    has_shared_experts = model_cfg.get("n_shared_experts") is not None
 
     # Position IDs & rotary embeddings — derive locally on every rank.
     if rank == 0:
@@ -445,16 +456,17 @@ def pipeline_forward(model, cfg, model_cfg, owned, owned_moe, rank, world_size,
     after_norm2_chunks = []
     selected_chunks = []
     weighted_chunks = []
+    shared_chunks = []
     for i in owned:
         layer = inner.layers[i]
         is_moe = i in moe_layers_set
         hidden_states, hooks = call_layer(
             layer, hidden_states, causal_mask, position_ids, position_embeddings,
-            layer_kwargs_fn, is_moe,
+            layer_kwargs_fn, is_moe, has_shared_experts,
         )
         if not is_moe:
             continue  # skip hook capture for dense layers
-        ar, an, se, wo = hooks
+        ar, an, se, wo, sh = hooks
         # Reshape: [bsz*n_tok, top_k, hidden] -> [bsz, n_tok, top_k, hidden]
         # and [bsz*n_tok, top_k] -> [bsz, n_tok, top_k].
         d_e = cfg.hidden_size
@@ -465,6 +477,8 @@ def pipeline_forward(model, cfg, model_cfg, owned, owned_moe, rank, world_size,
         after_norm2_chunks.append(an.detach().to(torch.float32))
         selected_chunks.append(se.detach().to(torch.long))
         weighted_chunks.append(wo.detach().to(torch.float32))
+        if has_shared_experts:
+            shared_chunks.append(sh.detach().to(torch.float32))  # [bsz, n_tok, d_e], no reshape needed
 
     # Send to next rank.
     if rank < world_size - 1:
@@ -481,6 +495,8 @@ def pipeline_forward(model, cfg, model_cfg, owned, owned_moe, rank, world_size,
             "selected_experts": torch.stack(selected_chunks,    dim=0),
             "weighted_outputs": torch.stack(weighted_chunks,    dim=0),
         }
+        if has_shared_experts:
+            hooks["shared_expert_output"] = torch.stack(shared_chunks, dim=0)
     else:
         # This rank owns only dense layers — empty hook tensors.
         d_e = cfg.hidden_size
@@ -490,6 +506,8 @@ def pipeline_forward(model, cfg, model_cfg, owned, owned_moe, rank, world_size,
             "selected_experts": torch.empty((0, bsz, n_tok, top_k),       dtype=torch.long,    device=gpu),
             "weighted_outputs": torch.empty((0, bsz, n_tok, top_k, d_e),  dtype=torch.float32, device=gpu),
         }
+        if has_shared_experts:
+            hooks["shared_expert_output"] = torch.empty((0, bsz, n_tok, d_e), dtype=torch.float32, device=gpu)
     return hooks
 
 
@@ -513,13 +531,14 @@ def _moe_slice(rank_, world_size, n_total_decoder_layers, moe_layers_sorted):
 
 
 def gather_hooks(hooks, rank, world_size, n_total_decoder_layers,
-                 moe_layers_sorted, bsz, n_tok, d_e, top_k, local_rank):
+                 moe_layers_sorted, bsz, n_tok, d_e, top_k, local_rank,
+                 has_shared_experts=False):
     """All ranks call this. Returns full hook tensors on rank 0 (None elsewhere).
 
     Each rank contributed hook tensors of shape [n_owned_moe, ...]. Rank 0
     assembles a global tensor of shape [n_total_moe, ...] where n_total_moe =
     len(moe_layers_sorted). Per-rank slot positions are computed via
-    _moe_slice.
+    _moe_slice. When has_shared_experts, also gathers "shared_expert_output".
     """
     n_total_moe = len(moe_layers_sorted)
     if rank == 0:
@@ -529,6 +548,8 @@ def gather_hooks(hooks, rank, world_size, n_total_decoder_layers,
             "selected_experts": torch.empty((n_total_moe, bsz, n_tok, top_k), dtype=torch.long, device=f"cuda:{local_rank}"),
             "weighted_outputs": torch.empty((n_total_moe, bsz, n_tok, top_k, d_e), dtype=torch.float32, device=f"cuda:{local_rank}"),
         }
+        if has_shared_experts:
+            out["shared_expert_output"] = torch.empty((n_total_moe, bsz, n_tok, d_e), dtype=torch.float32, device=f"cuda:{local_rank}")
         # Fill rank-0 slice.
         s0, e0 = _moe_slice(0, world_size, n_total_decoder_layers, moe_layers_sorted)
         if e0 > s0:
@@ -536,6 +557,8 @@ def gather_hooks(hooks, rank, world_size, n_total_decoder_layers,
             out["after_norm2"][s0:e0]      = hooks["after_norm2"]
             out["selected_experts"][s0:e0] = hooks["selected_experts"]
             out["weighted_outputs"][s0:e0] = hooks["weighted_outputs"]
+            if has_shared_experts:
+                out["shared_expert_output"][s0:e0] = hooks["shared_expert_output"]
         # Recv from other ranks.
         for src in range(1, world_size):
             s, e = _moe_slice(src, world_size, n_total_decoder_layers, moe_layers_sorted)
@@ -544,6 +567,8 @@ def gather_hooks(hooks, rank, world_size, n_total_decoder_layers,
                 dist.recv(out["after_norm2"][s:e],      src=src)
                 dist.recv(out["selected_experts"][s:e], src=src)
                 dist.recv(out["weighted_outputs"][s:e], src=src)
+                if has_shared_experts:
+                    dist.recv(out["shared_expert_output"][s:e], src=src)
         return out
     else:
         if hooks["after_res1"].shape[0] > 0:
@@ -551,6 +576,8 @@ def gather_hooks(hooks, rank, world_size, n_total_decoder_layers,
             dist.send(hooks["after_norm2"].contiguous(),      dst=0)
             dist.send(hooks["selected_experts"].contiguous(), dst=0)
             dist.send(hooks["weighted_outputs"].contiguous(), dst=0)
+            if has_shared_experts:
+                dist.send(hooks["shared_expert_output"].contiguous(), dst=0)
         return None
 
 
@@ -629,6 +656,7 @@ def main():
     D_E = MODEL["d_e"]
     TOP_K = MODEL["top_k"]
     EPS = 1e-5
+    N_SHARED = MODEL.get("n_shared_experts")
 
     N_PROMPTS = args.n_prompts
     BSZ = args.B
@@ -717,6 +745,12 @@ def main():
         SHAPE = (N_LAYERS, N_EXPERTS, N_LAYERS, N_EXPERTS)
         wsm_accum        = torch.zeros(SHAPE, dtype=torch.float32, device=device0)
         n_tokens_selected = torch.zeros((N_LAYERS, N_EXPERTS), dtype=torch.long, device=device0)
+        if N_SHARED is not None:
+            wsm_shared_accum = torch.zeros((N_LAYERS, N_LAYERS, N_EXPERTS), dtype=torch.float32, device=device0)
+            n_tokens_total    = torch.zeros(1, dtype=torch.float32, device=device0)
+        else:
+            wsm_shared_accum = None
+            n_tokens_total    = None
 
         # Per-sender top-K-by-routing-weight token buffer. Empty slots: weight = -1.
         TOPK_SHAPE = (N_LAYERS, N_EXPERTS, K_TOP_TOKENS)
@@ -725,7 +759,7 @@ def main():
         top_pos    = torch.zeros(TOPK_SHAPE, dtype=torch.int16, device=device0)
         top_token  = torch.zeros(TOPK_SHAPE, dtype=torch.int32, device=device0)
 
-        from experiments.helper import update_topk_per_sender
+        from experiments.wsm_core import accumulate_wsm
 
     # Cap N_PROMPTS to what the loader actually returned (e.g. HumanEval tops
     # out at 164, fewer after the min_words filter). rank 0 reads len(prompts);
@@ -793,6 +827,7 @@ def main():
         full_hooks = gather_hooks(
             hooks, rank, world_size, N_TOTAL_DECODER_LAYERS, MOE_LAYERS,
             bsz_i, n_tok_i, D_E, TOP_K, local_rank,
+            has_shared_experts=(N_SHARED is not None),
         )
 
         # --- Rank 0 does the score-decomposition accumulator update ---
@@ -804,97 +839,30 @@ def main():
             after_norm2 = full_hooks["after_norm2"].permute(1, 0, 2, 3)             # [bsz, L, n_tok, d_e]
             selected = full_hooks["selected_experts"].permute(1, 0, 2, 3)           # [bsz, L, n_tok, top_k]
             weighted_out = full_hooks["weighted_outputs"].permute(1, 0, 2, 3, 4)    # [bsz, L, n_tok, top_k, d_e]
+            shared_expert_output = (
+                full_hooks["shared_expert_output"].permute(1, 0, 2, 3)              # [bsz, L, n_tok, d_e]
+                if N_SHARED is not None else None
+            )
 
-            bsz, _, n_tok, _ = after_res1.shape
-            bt = bsz * n_tok
             device0 = f"cuda:{local_rank}"
-
-            # 1 / RMS^R_i per token per receiver layer R.
-            rms_sq = after_res1.pow(2).mean(dim=-1) + EPS                          # [bsz, L, n_tok]
-            rms_inv = torch.rsqrt(rms_sq).permute(0, 2, 1).reshape(bt, N_LAYERS)   # [bt, L]
-
-            # Original assignment scores at every receiver layer.
-            after_norm2_r = after_norm2.permute(0, 2, 1, 3).reshape(bt, N_LAYERS, D_E)  # [bt, L, d_e]
-            orig_score = torch.einsum("lnd,bld->bln", G_recv, after_norm2_r)            # [bt, L, n_experts]
-
-            # Sender-side reshapes.
-            omega = weighted_out.permute(0, 2, 1, 3, 4).reshape(bt, N_LAYERS, TOP_K, D_E)
-            sel = selected.permute(0, 2, 1, 3).reshape(bt, N_LAYERS, TOP_K)
-
-            # Routing weights actually applied in the forward pass: softmax over
-            # all experts, gather top-K, then L1-renormalize (norm_topk_prob=true).
-            all_softmax      = torch.softmax(orig_score, dim=-1)                                  # [bt, L, n_experts]
-            selected_softmax = torch.gather(all_softmax, dim=-1, index=sel)                       # [bt, L, top_k]
-            routing_weight   = selected_softmax / selected_softmax.sum(dim=-1, keepdim=True)      # [bt, L, top_k]
-            del all_softmax, selected_softmax
-
-            # Per-event auxiliary indices, used by the top-K buffer update.
             B_global = batch_idx * BSZ
-            event_bt = torch.arange(bt, device=device0).repeat_interleave(TOP_K)                  # [bt*top_k]
-            event_bsz = event_bt // n_tok
-            event_pos = (event_bt % n_tok).to(torch.int16)
-            prompt_indices = torch.arange(B_global, B_global + bsz, dtype=torch.int32, device=device0)
-            event_prompt = prompt_indices[event_bsz]
-            event_token = input_ids.flatten()[event_bt].to(torch.int32)
 
-            for S in range(N_LAYERS):
-                sel_S = sel[:, S, :]
-                n_tokens_selected[S] += torch.bincount(sel_S.flatten(), minlength=N_EXPERTS)
+            accumulate_wsm(
+                after_res1, after_norm2, selected, weighted_out,
+                G_recv, gamma_recv, EPS, N_LAYERS, N_EXPERTS, TOP_K, D_E, device0,
+                input_ids, B_global,
+                wsm_accum, n_tokens_selected,
+                top_weight, top_prompt, top_pos, top_token, K_TOP_TOKENS,
+                norm_denom_fn=MODEL.get("norm_denom_fn", norm_denom_rmsnorm),
+                ln_bar_fn=MODEL.get("ln_bar_fn", ln_bar_rmsnorm),
+                p_fn=MODEL.get("p_fn", p_renorm_topk_softmax),
+                routing_scale=MODEL.get("routing_scale", 1.0),
+                shared_expert_output=shared_expert_output,
+                wsm_shared_accum=wsm_shared_accum,
+                n_tokens_total=n_tokens_total,
+            )
 
-                update_topk_per_sender(
-                    top_weight[S], top_prompt[S], top_pos[S], top_token[S],
-                    sel_S.flatten(), routing_weight[:, S, :].flatten(),
-                    event_prompt, event_pos, event_token,
-                    N_EXPERTS, K_TOP_TOKENS, max_per_j=bt,
-                )
-
-                if S == N_LAYERS - 1:
-                    continue
-                omega_S = omega[:, S, :, :]                                         # [bt, top_k, d_e]
-
-                for R in range(S + 1, N_LAYERS):
-                    ln_bar = omega_S * gamma_recv[R].view(1, 1, D_E) * rms_inv[:, R].view(bt, 1, 1)
-                    scores = torch.einsum("ed,bkd->bke", G_recv[R], ln_bar)         # [bt, k, n_experts]
-
-                    sel_flat = sel_S.flatten()
-
-                    # ---- Softmax-mass perturbation ----
-                    # See build_dag.py for the derivation; same per-pair logic here.
-                    N = N_EXPERTS
-                    diag_idx = torch.arange(N, device=device0)
-
-                    pert_score_pair = (orig_score[:, R, :]
-                                       .view(bt, 1, 1, N)
-                                       .expand(bt, TOP_K, N, N)
-                                       .clone())                                  # [bt, K, N, N]
-                    pert_score_pair[:, :, diag_idx, diag_idx] = (
-                        pert_score_pair[:, :, diag_idx, diag_idx] - scores
-                    )
-
-                    pert_softmax_pair = torch.softmax(pert_score_pair, dim=-1)     # [bt, K, N, N]
-                    pert_topk_vals, pert_topk_idx = torch.topk(
-                        pert_softmax_pair, TOP_K, dim=-1)                          # [bt, K, N, TOP_K]
-                    pert_topk_vals = pert_topk_vals / pert_topk_vals.sum(dim=-1, keepdim=True)
-                    p_pert_full = torch.zeros_like(pert_softmax_pair)
-                    p_pert_full.scatter_(-1, pert_topk_idx, pert_topk_vals)
-                    del pert_score_pair, pert_softmax_pair, pert_topk_vals, pert_topk_idx
-
-                    p_pert_n = p_pert_full[:, :, diag_idx, diag_idx]               # [bt, K, N]
-                    del p_pert_full
-
-                    p_orig_R = torch.zeros((bt, N_EXPERTS), dtype=torch.float32, device=device0)
-                    p_orig_R.scatter_(-1, sel[:, R, :], routing_weight[:, R, :])
-                    p_orig_R = p_orig_R.unsqueeze(1).expand(bt, TOP_K, N_EXPERTS)
-
-                    delta = p_orig_R - p_pert_n                                    # [bt, K, N]
-                    wsm_accum[S, :, R, :].index_add_(0, sel_flat, delta.abs().flatten(0, 1))
-
-                    del ln_bar, scores
-                    del p_orig_R, p_pert_n, delta
-
-            del full_hooks, after_res1, after_norm2, selected, weighted_out
-            del omega, sel, rms_sq, rms_inv, after_norm2_r
-            del orig_score
+            del full_hooks, after_res1, after_norm2, selected, weighted_out, shared_expert_output
 
         # Free per-rank hooks.
         del hooks
@@ -931,10 +899,13 @@ def main():
 
         W_softmax = (wsm_accum / denom).masked_fill(zero_mask, 0.0)
 
+        if N_SHARED is not None:
+            W_softmax_shared = wsm_shared_accum / n_tokens_total.clamp(min=1).view(1, 1, 1)
+
         dag_dir = os.path.join(output_dir, "dags", args.dataset)
         os.makedirs(dag_dir, exist_ok=True)
         out_path = os.path.join(dag_dir, f"dag_{args.model}_{args.dataset}.pt")
-        torch.save({
+        save_dict = {
             "W_softmax":         W_softmax.cpu(),
             "act":               act_accum.cpu(),
             "n_tokens_selected": n_tokens_selected.cpu(),
@@ -948,7 +919,10 @@ def main():
             "model":             MODEL_ID,
             "moe_layers":        MOE_LAYERS,
             "dataset":           args.dataset,
-        }, out_path)
+        }
+        if N_SHARED is not None:
+            save_dict["W_softmax_shared"] = W_softmax_shared.cpu()
+        torch.save(save_dict, out_path)
         print(f"Saved {out_path}")
 
     if dist.is_initialized():

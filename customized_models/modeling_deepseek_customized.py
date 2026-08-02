@@ -589,9 +589,12 @@ class DeepseekV2MoE(nn.Module):
             y, hook_expert_weighted_outputs = self.moe_infer(hidden_states, topk_idx, topk_weight)
             y = y.view(*orig_shape)
         if self.config.n_shared_experts is not None:
-            y = y + self.shared_experts(identity)
+            hook_shared_expert_output = self.shared_experts(identity) #### added
+            y = y + hook_shared_expert_output
+        else:
+            hook_shared_expert_output = None #### added
 
-        mlp_hooks = (router_logits, topk_idx, hook_expert_weighted_outputs, topk_weight)
+        mlp_hooks = (router_logits, topk_idx, hook_expert_weighted_outputs, topk_weight, hook_shared_expert_output) #### modified
         # return y #### commented
         return y, mlp_hooks #### added
 
@@ -1593,6 +1596,7 @@ class DeepseekV2Model(DeepseekV2PreTrainedModel):
         hook_selected_experts = torch.empty((n_layers, batch_size * n_tokens, top_k))
         hook_expert_weighted_outputs = torch.empty((n_layers, batch_size * n_tokens, top_k, n_dim))
         hook_routing_weights = torch.empty((n_layers, batch_size * n_tokens, top_k))
+        hook_shared_expert_output = torch.empty((n_layers, batch_size, n_tokens, n_dim))
         ########
 
         for decoder_layer in self.layers:
@@ -1661,6 +1665,7 @@ class DeepseekV2Model(DeepseekV2PreTrainedModel):
                 hook_selected_experts[layer_counter] = layer_outputs[dict_pos][14]
                 hook_expert_weighted_outputs[layer_counter] = layer_outputs[dict_pos][15]
                 hook_routing_weights[layer_counter] = layer_outputs[dict_pos][16]
+                hook_shared_expert_output[layer_counter] = layer_outputs[dict_pos][17]
             layer_counter += 1
             ########
         #### added
@@ -1681,6 +1686,7 @@ class DeepseekV2Model(DeepseekV2PreTrainedModel):
         hook_selected_experts = hook_selected_experts.reshape(n_layers, batch_size, n_tokens, top_k).transpose(0,1)
         hook_expert_weighted_outputs = hook_expert_weighted_outputs.reshape(n_layers, batch_size, n_tokens, top_k, n_dim).transpose(0,1)
         hook_routing_weights = hook_routing_weights.transpose(0,1)
+        hook_shared_expert_output = hook_shared_expert_output.transpose(0,1)
         hook_dict = {"hook_layer_input" : hook_layer_input, "hook_attn_output" : hook_attn_output,
                     "hook_after_res1" : hook_after_res1, "hook_after_norm2" : hook_after_norm2,
                     "hook_mlp_output" : hook_mlp_output, "hook_layer_output" : hook_layer_output,
@@ -1689,7 +1695,8 @@ class DeepseekV2Model(DeepseekV2PreTrainedModel):
                     "hook_attn_weights" : hook_attn_weights,
                     "hook_before_matmul_wo" : hook_before_matmul_wo,"router_logits" : router_logits,
                     "hook_selected_experts" : hook_selected_experts, "hook_expert_weighted_outputs" : hook_expert_weighted_outputs,
-                    "hook_routing_weights" : hook_routing_weights,}
+                    "hook_routing_weights" : hook_routing_weights,
+                    "hook_shared_expert_output" : hook_shared_expert_output,}
         ########
         hidden_states = self.norm(hidden_states)
 

@@ -14,14 +14,14 @@ Pairwise-isolated ablation:
     perturbed network state — the edge weight is uncontaminated by the sender's
     side effects on other receivers at the same layer.
 
-where p_orig(n)/p_pert_{c→n}(n) is the renormalised top-K-softmax gating weight of
-expert n at receiver layer l in the original / pair-isolated-ablated routing scores
-(with p = 0 outside the top-K). W_softmax is dimensionless in [0, 1] and
-cross-model comparable by construction.
-
-For Phi-3.5-MoE the model actually uses `sparsemixer` rather than top-K softmax; we
-override that with the cross-model unified renorm(softmax_topK) formula here so the
-edge-weight definition is identical across all models.
+where p_orig(n)/p_pert_{c→n}(n) is expert n's routing weight at receiver layer l in
+the original / pair-isolated-ablated routing scores (with p = 0 outside the selected
+set), computed by the model's own p_fn (experiments/routing_variants.py) — renormalized
+top-K softmax by default, or a model-specific variant (no renormalization, SparseMixer,
+group-limited routing, scaled routing weight) per main.tex's "Architecture-specific
+variations". p_orig and p_pert always use the same p_fn, so a model's routing rule is
+encoded once. W_softmax is dimensionless in [0, 1] and cross-model comparable by
+construction.
 
 K is the model's top_k.
 
@@ -39,6 +39,7 @@ Usage:
 Output: {result_path}/dags/{dataset}/dag_{model}_{dataset}.pt
 """
 import argparse
+import functools
 import importlib
 import os
 import sys
@@ -61,8 +62,13 @@ from customized_models.modeling_deepseek_customized import DeepseekV2ForCausalLM
 from customized_models.modeling_mixtral_customized import MixtralForCausalLM
 from customized_models.modeling_qwen3_moe_customized import Qwen3MoeForCausalLM
 from customized_models.modeling_phimoe_customized import PhiMoEForCausalLM
-from customized_models.modeling_dbrx_customized import DbrxForCausalLM
 from transformers import AutoTokenizer
+
+from experiments.routing_variants import (
+    norm_denom_rmsnorm, norm_denom_layernorm,
+    ln_bar_rmsnorm, ln_bar_layernorm,
+    p_renorm_topk_softmax, p_no_renorm_softmax, p_sparsemixer,
+)
 
 # Dataset registry: name -> (module_path, helper_function_name).
 # All helpers must accept (dataset_len, min_words) and return a list of strings.
@@ -90,6 +96,7 @@ MODELS = {
         "gate_path": "mlp.gate",
         "experts_path": "mlp.experts",
         "down_proj_attr": "down_proj",
+        "p_fn": p_no_renorm_softmax,       # norm_topk_prob=false
     },
     "deepseek-v2-lite": {
         "id": "deepseek-ai/DeepSeek-V2-Lite",
@@ -101,6 +108,9 @@ MODELS = {
         "gate_path": "mlp.gate",
         "experts_path": "mlp.experts",
         "down_proj_attr": "down_proj",
+        # norm_topk_prob=false, topk_method="greedy" (n_group=topk_group=1: no-op), routed_scaling_factor=1.0 (no-op).
+        "p_fn": p_no_renorm_softmax,
+        "n_shared_experts": 2,  # fused into one wider MLP; DAG gets one shared-expert vertex per layer
     },
     "mixtral-8x7b": {
         "id": "mistralai/Mixtral-8x7B-v0.1",
@@ -156,6 +166,10 @@ MODELS = {
         # 84GB bf16: doesn't fit 1x80GB cleanly; shard across 4 GPUs.
         "multi_gpu": True,
         "max_memory": {0: "20GiB", 1: "30GiB", 2: "30GiB", 3: "30GiB"},  # 110 GiB for 84GB model
+        # post_attention_layernorm is nn.LayerNorm (with bias), not RMSNorm.
+        "norm_denom_fn": norm_denom_layernorm,
+        "ln_bar_fn": ln_bar_layernorm,
+        "p_fn": functools.partial(p_sparsemixer, jitter_eps=0.01),  # router_jitter_noise
     }
 }
 
@@ -290,6 +304,18 @@ n_tokens_selected = torch.zeros((N_LAYERS, N_EXPERTS), dtype=torch.long, device=
 # ICLR 2026). Updated incrementally via the forward-hook registered just below.
 act_accum = torch.zeros((N_LAYERS, N_EXPERTS), dtype=torch.float32, device=device)
 
+# wsm_shared : same softmax-mass perturbation, but for shared-expert vertices
+# (main.tex "Shared experts") — unconditional edges (l, s) -> (l', n), l' > l.
+# n_tokens_total is the single running token count shared by every edge (no
+# per-(sender) selection to condition on). None for models without shared experts.
+N_SHARED = MODEL.get("n_shared_experts")
+if N_SHARED is not None:
+    wsm_shared_accum = torch.zeros((N_LAYERS, N_LAYERS, N_EXPERTS), dtype=torch.float32, device=device)
+    n_tokens_total    = torch.zeros(1, dtype=torch.float32, device=device)
+else:
+    wsm_shared_accum = None
+    n_tokens_total    = None
+
 # ---- Register down_proj forward hooks for the Su et al. activation magnitude ----
 # Each expert's down_proj receives a 2-D input [K_e, intermediate] and returns
 # [K_e, hidden] where K_e = #tokens routed to that expert in the current batch.
@@ -328,7 +354,7 @@ top_prompt = torch.zeros(TOPK_SHAPE, dtype=torch.int32, device=device)
 top_pos    = torch.zeros(TOPK_SHAPE, dtype=torch.int16, device=device)
 top_token  = torch.zeros(TOPK_SHAPE, dtype=torch.int32, device=device)
 
-from experiments.helper import update_topk_per_sender
+from experiments.wsm_core import accumulate_wsm
 
 n_batches = (N_PROMPTS + BSZ - 1) // BSZ
 print(f"Running {n_batches} batches (batch_size={BSZ}, max_tokens={MAX_TOKENS}) ...", flush=True)
@@ -349,120 +375,27 @@ for B in range(0, N_PROMPTS, BSZ):
     after_norm2  = hook_dict["hook_after_norm2"][:, MOE_LAYERS, :, :]               # [bsz, L, n_tok, d_e]
     selected     = hook_dict["hook_selected_experts"][:, MOE_LAYERS, :, :]          # [bsz, L, n_tok, top_k]
     weighted_out = hook_dict["hook_expert_weighted_outputs"][:, MOE_LAYERS, :, :, :]   # [bsz, L, n_tok, top_k, d_e]
+    shared_expert_output = (
+        hook_dict["hook_shared_expert_output"][:, MOE_LAYERS, :, :]                # [bsz, L, n_tok, d_e]
+        if N_SHARED is not None else None
+    )
 
-    bsz, _, n_tok, _ = after_res1.shape
-    bt = bsz * n_tok
+    accumulate_wsm(
+        after_res1, after_norm2, selected, weighted_out,
+        G_recv, gamma_recv, EPS, N_LAYERS, N_EXPERTS, TOP_K, D_E, device,
+        input_ids, B,
+        wsm_accum, n_tokens_selected,
+        top_weight, top_prompt, top_pos, top_token, K_TOP_TOKENS,
+        norm_denom_fn=MODEL.get("norm_denom_fn", norm_denom_rmsnorm),
+        ln_bar_fn=MODEL.get("ln_bar_fn", ln_bar_rmsnorm),
+        p_fn=MODEL.get("p_fn", p_renorm_topk_softmax),
+        routing_scale=MODEL.get("routing_scale", 1.0),
+        shared_expert_output=shared_expert_output,
+        wsm_shared_accum=wsm_shared_accum,
+        n_tokens_total=n_tokens_total,
+    )
 
-    # 1 / RMS^R_i, per token, per receiver layer R.
-    rms_sq  = after_res1.float().pow(2).mean(dim=-1) + EPS                # [bsz, L, n_tok]
-    rms_inv = torch.rsqrt(rms_sq).permute(0, 2, 1).reshape(bt, N_LAYERS)  # [bt, L_recv]
-
-    # Original assignment scores at every receiver layer (for AARV computation).
-    after_norm2_r = (after_norm2.float().permute(0, 2, 1, 3).reshape(bt, N_LAYERS, D_E))   # [bt, L, d_e]
-    orig_score = torch.einsum("lnd,bld->bln", G_recv, after_norm2_r)       # [bt, L, N_EXPERTS]
-
-    # Sender-side reshapes: [bt, S, k, ...]
-    omega = (weighted_out.float().permute(0, 2, 1, 3, 4).reshape(bt, N_LAYERS, TOP_K, D_E))   # [bt, S, k, d_e]
-    sel = (selected.long().permute(0, 2, 1, 3).reshape(bt, N_LAYERS, TOP_K))                  # [bt, S, k]
-
-    # Routing weights actually applied in the forward pass: softmax over all
-    # experts, gather the top-K, then L1-renormalize (norm_topk_prob = true on
-    # all seven models we analyze).
-    all_softmax       = torch.softmax(orig_score, dim=-1)                                     # [bt, L, n_experts]
-    selected_softmax  = torch.gather(all_softmax, dim=-1, index=sel)                          # [bt, L, top_k]
-    routing_weight    = selected_softmax / selected_softmax.sum(dim=-1, keepdim=True)         # [bt, L, top_k]
-    del all_softmax, selected_softmax
-
-    # Per-event auxiliary indices (layer-independent), used by the top-K buffer update.
-    event_bt   = torch.arange(bt, device=device).repeat_interleave(TOP_K)                     # [bt*top_k]
-    event_bsz  = event_bt // n_tok
-    event_pos  = (event_bt % n_tok).to(torch.int16)                                           # [bt*top_k]
-    prompt_indices = torch.arange(B, B + bsz, dtype=torch.int32, device=device)               # [bsz]
-    event_prompt   = prompt_indices[event_bsz]                                                # [bt*top_k] int32
-    event_token    = input_ids.flatten()[event_bt].to(torch.int32)                            # [bt*top_k] int32
-
-    for S in range(N_LAYERS):
-        sel_S = sel[:, S, :]                                    # [bt, top_k]
-        n_tokens_selected[S] += torch.bincount(sel_S.flatten(), minlength=N_EXPERTS)
-
-        # Update top-K-by-routing-weight token buffer for sender (S, j).
-        update_topk_per_sender(
-            top_weight[S], top_prompt[S], top_pos[S], top_token[S],
-            sel_S.flatten(), routing_weight[:, S, :].flatten(),
-            event_prompt, event_pos, event_token,
-            N_EXPERTS, K_TOP_TOKENS, max_per_j=bt,
-        )
-
-        if S == N_LAYERS - 1:
-            continue
-        omega_S = omega[:, S, :, :]                             # [bt, top_k, d_e]
-
-        for R in range(S + 1, N_LAYERS):
-            # ln_bar^R(omega_S) = (omega_S ⊙ γ^R) / RMS^R_i
-            ln_bar = omega_S * gamma_recv[R].view(1, 1, D_E) * rms_inv[:, R].view(bt, 1, 1)     # [bt, k, d_e]
-            # scores[bt, k, n] = g^{R,n} · ln_bar  — per-edge sub-score
-            #   S(g^{R,n}, e^{S,j_k}_{out,i})  with j_k = sel_S[bt, k].
-            scores = torch.einsum("ed,bkd->bke", G_recv[R], ln_bar)  # [bt, k, N_EXPERTS]
-
-            sel_flat = sel_S.flatten()
-
-            # ---- Softmax-mass perturbation (per-pair isolated ablation) ----
-            # For each edge (sender k, receiver n) we ablate sender k's contribution
-            # to n ONLY (not to other receivers at the same layer). Each edge has its
-            # OWN perturbed score vector, top-K and softmax.
-            #
-            #   pert_score_pair[b, k, n, m] = orig_score[b, R, m]                  if m ≠ n
-            #                               = orig_score[b, R, n] - scores[b, k, n]  if m == n
-            #
-            # After per-pair softmax + top-K renormalisation we read off the diagonal
-            # (m == n) to obtain p_pert_{k→n}(n).
-            #
-            # Memory: pert_score_pair, pert_softmax_pair, p_pert_full each take
-            # [bt, TOP_K, N, N] float32 = ~520 MB at (bt=1000, K=8, N=128).
-            # The blob is built, consumed, and `del`'d within this iteration.
-            N = N_EXPERTS
-            diag_idx = torch.arange(N, device=device)
-
-            # Build per-pair perturbed scores.
-            pert_score_pair = (orig_score[:, R, :]
-                               .view(bt, 1, 1, N)
-                               .expand(bt, TOP_K, N, N)
-                               .clone())                                           # [bt, K, N, N]
-            # Subtract scores[b, k, n] from the diagonal in m: pert_score_pair[b, k, n, n].
-            pert_score_pair[:, :, diag_idx, diag_idx] = (
-                pert_score_pair[:, :, diag_idx, diag_idx] - scores
-            )
-
-            # Per-pair top-K (over m) and renormalised softmax.
-            pert_softmax_pair = torch.softmax(pert_score_pair, dim=-1)             # [bt, K, N, N]
-            pert_topk_vals, pert_topk_idx = torch.topk(
-                pert_softmax_pair, TOP_K, dim=-1)                                  # [bt, K, N, TOP_K]
-            pert_topk_vals = pert_topk_vals / pert_topk_vals.sum(dim=-1, keepdim=True)
-            p_pert_full = torch.zeros_like(pert_softmax_pair)
-            p_pert_full.scatter_(-1, pert_topk_idx, pert_topk_vals)                # [bt, K, N, N]
-            del pert_score_pair, pert_softmax_pair, pert_topk_vals, pert_topk_idx
-
-            # p_pert_n[b, k, n] = p_pert under the (k → n) per-pair perturbation,
-            # at receiver index n itself (the diagonal of the [N, N] slab).
-            p_pert_n = p_pert_full[:, :, diag_idx, diag_idx]                       # [bt, K, N]
-            del p_pert_full
-
-            # p_orig(n) at receiver R: renormalised top-K softmax of orig_score[R];
-            # zero outside top-K. Same for every sender k → broadcast over K.
-            p_orig_R = torch.zeros((bt, N_EXPERTS), dtype=torch.float32, device=device)
-            p_orig_R.scatter_(-1, sel[:, R, :], routing_weight[:, R, :])           # [bt, N_EXPERTS]
-            p_orig_R = p_orig_R.unsqueeze(1).expand(bt, TOP_K, N_EXPERTS)          # [bt, K, N]
-
-            # delta_{c,j,l,n} = p_orig(n) - p_pert_{c→n}(n) ∈ [-1, 1]. wsm = E[|delta|].
-            delta = p_orig_R - p_pert_n                                            # [bt, K, N]
-            wsm_accum[S, :, R, :].index_add_(0, sel_flat, delta.abs().flatten(0, 1))
-
-            del ln_bar, scores
-            del p_orig_R, p_pert_n, delta
-
-    del hook_dict, after_res1, after_norm2, selected, weighted_out
-    del omega, sel, rms_sq, rms_inv, after_norm2_r
-    del orig_score
+    del hook_dict, after_res1, after_norm2, selected, weighted_out, shared_expert_output
     torch.cuda.empty_cache()
 
     bnum = B // BSZ + 1
@@ -482,6 +415,10 @@ zero_mask  = (n_tokens_selected == 0).view(N_LAYERS, N_EXPERTS, 1, 1)
 
 W_softmax = (wsm_accum / denom).masked_fill(zero_mask, 0.0)
 
+# ---- Normalize shared-expert edges: weight[l, l', n] = accum / n_tokens_total ----
+if N_SHARED is not None:
+    W_softmax_shared = wsm_shared_accum / n_tokens_total.clamp(min=1).view(1, 1, 1)
+
 # Tear down the activation-magnitude hooks before saving.
 for _h in _down_proj_hooks:
     _h.remove()
@@ -489,7 +426,7 @@ for _h in _down_proj_hooks:
 dag_dir = os.path.join(output_dir, "dags", args.dataset)
 os.makedirs(dag_dir, exist_ok=True)
 out_path = os.path.join(dag_dir, f"dag_{args.model}_{args.dataset}.pt")
-torch.save({
+save_dict = {
     "W_softmax":         W_softmax.cpu(),                 # [c, j, l, n] — E_i[|p_orig − p_pert_{c→n}|]
     "act":               act_accum.cpu(),                 # [l, n]       — Su et al. activation magnitude
     "n_tokens_selected": n_tokens_selected.cpu(),         # [c, j]       — #tokens routed to (c, j)
@@ -503,5 +440,9 @@ torch.save({
     "model":             MODEL_ID,
     "moe_layers":        MOE_LAYERS,
     "dataset":           args.dataset,
-}, out_path)
+}
+if N_SHARED is not None:
+    # W_softmax_shared[l, l', n] — edge from layer l's shared-expert vertex to (l', n).
+    save_dict["W_softmax_shared"] = W_softmax_shared.cpu()
+torch.save(save_dict, out_path)
 print(f"Saved {out_path}")
