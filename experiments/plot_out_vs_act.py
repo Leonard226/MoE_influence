@@ -15,8 +15,8 @@ Prints per-model rank correlations:
   - rho_S(out, act | depth)  — partial Spearman controlling for layer
 
 Usage:
-    python experiments/scatter_out_vs_act.py
-    python experiments/scatter_out_vs_act.py --task math --top-k-global 5
+    python experiments/plot_out_vs_act.py
+    python experiments/plot_out_vs_act.py --task math --top-k-global 5
 """
 from __future__ import annotations
 
