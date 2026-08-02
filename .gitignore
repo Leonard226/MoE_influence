@@ -3,5 +3,7 @@ __pycache__/
 *.npz
 *.pt
 *.pyc
-entropy/
+*.csv
 .claude/
+logs/
+CLAUDE.md

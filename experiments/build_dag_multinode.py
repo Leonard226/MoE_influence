@@ -56,7 +56,7 @@ sys.path.insert(0, ROOT)
 
 with open(os.path.join(ROOT, "config.yaml")) as f:
     config = yaml.safe_load(f)
-output_dir = os.path.join(config["result_path"], "circuits")
+output_dir = config["result_path"]
 os.makedirs(output_dir, exist_ok=True)
 
 from customized_models.modeling_qwen3_moe_customized import Qwen3MoeForCausalLM

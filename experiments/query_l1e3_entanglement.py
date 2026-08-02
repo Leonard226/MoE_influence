@@ -28,7 +28,7 @@ ROOT = Path(__file__).resolve().parent.parent
 with open(ROOT / "config.yaml") as f:
     CFG = yaml.safe_load(f)
 
-DAG_PATH = Path(CFG["result_path"]) / "circuits" / "dag_mixtral-8x7b_c4.pt"
+DAG_PATH = Path(CFG["result_path"]) / "dag_mixtral-8x7b_c4.pt"
 
 SENDER_LAYER, SENDER_EXPERT = 1, 3  # L1E3
 

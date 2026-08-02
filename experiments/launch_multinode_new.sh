@@ -91,7 +91,7 @@ cleanup_model_cache() {
 
 for MODEL in "${MODELS[@]}"; do
     for DATASET in "${DATASETS[@]}"; do
-        OUTFILE="${RESULT_PATH}/circuits/dag_${MODEL}_${DATASET}.pt"
+        OUTFILE="${RESULT_PATH}/dag_${MODEL}_${DATASET}.pt"
         if [ -f "$OUTFILE" ]; then
             echo "[skip] ${MODEL}/${DATASET} already exists"
             continue
@@ -129,7 +129,7 @@ for MODEL in "${MODELS[@]}"; do
     # without re-downloading.
     all_done=1
     for D_CHECK in "${DATASETS[@]}"; do
-        if [ ! -f "${RESULT_PATH}/circuits/dag_${MODEL}_${D_CHECK}.pt" ]; then
+        if [ ! -f "${RESULT_PATH}/dag_${MODEL}_${D_CHECK}.pt" ]; then
             all_done=0
             break
         fi

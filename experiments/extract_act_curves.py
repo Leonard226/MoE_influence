@@ -12,7 +12,7 @@ For each model on c4, computes:
 Both arrays are sorted descending and saved as JSON. Plotted by
 experiments/plot_act_distribution.py locally.
 
-Writes: results/circuits/feature_ablation/act_curves_c4.json
+Writes: results/distributions/act_curves_c4.json
 """
 from __future__ import annotations
 
@@ -41,7 +41,7 @@ def main() -> None:
     with open(ROOT / "config.yaml") as f:
         cfg = yaml.safe_load(f)
     result_path = cfg["result_path"]
-    out_path = Path(result_path) / "circuits" / "feature_ablation" / "act_curves_c4.json"
+    out_path = Path(result_path) / "distributions" / "act_curves_c4.json"
     out_path.parent.mkdir(parents=True, exist_ok=True)
 
     curves: dict[str, dict] = {}
@@ -51,7 +51,7 @@ def main() -> None:
           f"{'lognorm_max':>12s}  {'lognorm_min':>12s}")
     print("-" * 88)
     for model in MODELS:
-        dag_path = Path(result_path) / "circuits" / f"dag_{model}_{TASK}.pt"
+        dag_path = Path(result_path) / f"dag_{model}_{TASK}.pt"
         dag = torch.load(dag_path, weights_only=False)
         act = dag["act"].cpu().numpy().reshape(-1).astype(np.float64)
 

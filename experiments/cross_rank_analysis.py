@@ -42,7 +42,7 @@ import yaml
 ROOT = Path(__file__).resolve().parent.parent
 with open(ROOT / "config.yaml") as f:
     CFG = yaml.safe_load(f)
-CIRCUITS = Path(CFG["result_path"]) / "circuits"
+RESULTS = Path(CFG["result_path"])
 
 MODELS = [
     "mixtral-8x7b", "mixtral-8x22b", "phi-3.5-moe",
@@ -62,7 +62,7 @@ NUM_DENSE = {
 
 
 def _load(model: str, task: str):
-    path = CIRCUITS / f"dag_{model}_{task}.pt"
+    path = RESULTS / f"dag_{model}_{task}.pt"
     if not path.exists():
         return None
     dag = torch.load(path, weights_only=False, map_location="cpu")

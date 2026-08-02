@@ -49,7 +49,7 @@ Also computed per sender expert / per vertex:
 Usage:
     python experiments/build_dag.py --model {olmoe,deepseek-v2-lite,...} --dataset {c4,...} --n_prompts 500
 
-Output: {result_path}/circuits/dag_{model}_{dataset}.pt
+Output: {result_path}/dag_{model}_{dataset}.pt
 """
 import argparse
 import importlib
@@ -66,7 +66,7 @@ sys.path.insert(0, ROOT)
 
 with open(os.path.join(ROOT, "config.yaml")) as f:
     config = yaml.safe_load(f)
-output_dir = os.path.join(config["result_path"], "circuits")
+output_dir = config["result_path"]
 os.makedirs(output_dir, exist_ok=True)
 
 from customized_models.modeling_olmoe_customized import OlmoeForCausalLM

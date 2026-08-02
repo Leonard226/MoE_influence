@@ -34,8 +34,8 @@
 # included AVG/VAR/ARV and lacked W_softmax/act) are NOT auto-deleted by
 # the skip-if-exists check. Before launching the pilot, remove the stale
 # pilot-model DAGs explicitly:
-#   rm -f $RESULT_PATH/circuits/dag_mixtral-8x7b_*.pt
-#   rm -f $RESULT_PATH/circuits/dag_deepseek-v2-lite_*.pt
+#   rm -f $RESULT_PATH/dag_mixtral-8x7b_*.pt
+#   rm -f $RESULT_PATH/dag_deepseek-v2-lite_*.pt
 #
 # qwen3-235b-a22b and deepseek-v2 need multinode SLURM; handle separately
 # via experiments/launch_multinode_new.sh.
@@ -133,7 +133,7 @@ i=0
 T_START=$(date +%s)
 
 echo "Starting at $(date)"
-echo "Will build $TOTAL (model, dataset) DAGs into $RESULT_PATH/circuits/"
+echo "Will build $TOTAL (model, dataset) DAGs into $RESULT_PATH/"
 echo "Models:   ${MODELS[*]}"
 echo "Datasets: ${NEW_DATASETS[*]}"
 echo "Prompts:  $N_PROMPTS each"
@@ -142,7 +142,7 @@ echo
 for m in "${MODELS[@]}"; do
   for d in "${NEW_DATASETS[@]}"; do
     i=$((i + 1))
-    outfile="${RESULT_PATH}/circuits/dag_${m}_${d}.pt"
+    outfile="${RESULT_PATH}/dag_${m}_${d}.pt"
     if [[ -f "$outfile" ]]; then
       echo "[$i/$TOTAL] [skip] $m/$d  (already exists)"
       continue
@@ -173,7 +173,7 @@ for m in "${MODELS[@]}"; do
   # without re-downloading.
   all_done=1
   for d_check in "${NEW_DATASETS[@]}"; do
-    if [[ ! -f "${RESULT_PATH}/circuits/dag_${m}_${d_check}.pt" ]]; then
+    if [[ ! -f "${RESULT_PATH}/dag_${m}_${d_check}.pt" ]]; then
       all_done=0
       break
     fi

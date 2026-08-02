@@ -32,13 +32,13 @@ export NCCL_DEBUG=${NCCL_DEBUG:-WARN}
 # sbatch copies the .sh to /cm/local/apps/slurm/var/spool/job{ID}/ before executing,
 # so BASH_SOURCE[0] points there — not at the original launch_multinode.sh location.
 # Use SLURM_SUBMIT_DIR (the dir where `sbatch` was invoked) as the project root.
-PROJECT_ROOT="${SLURM_SUBMIT_DIR:-/scratch/sleonard/MoE_circuits}"
+PROJECT_ROOT="${SLURM_SUBMIT_DIR:-/scratch/sleonard/MoE_influence}"
 SCRIPT_PATH="${PROJECT_ROOT}/experiments/build_dag_multinode.py"
 
 if [ ! -f "$SCRIPT_PATH" ]; then
     echo "ERROR: build_dag_multinode.py not found at $SCRIPT_PATH" >&2
     echo "       SLURM_SUBMIT_DIR=$SLURM_SUBMIT_DIR" >&2
-    echo "       Run: sbatch from /scratch/sleonard/MoE_circuits/" >&2
+    echo "       Run: sbatch from /scratch/sleonard/MoE_influence/" >&2
     exit 1
 fi
 echo "SCRIPT_PATH=$SCRIPT_PATH"

@@ -49,7 +49,7 @@ from mpl_toolkits.axes_grid1 import make_axes_locatable
 ROOT = Path(__file__).resolve().parent.parent
 with open(ROOT / "config.yaml") as f:
     CFG = yaml.safe_load(f)
-CIRCUITS = Path(CFG["result_path"]) / "circuits"
+RESULTS = Path(CFG["result_path"])
 
 ALL_MODELS = [
     "mixtral-8x7b", "mixtral-8x22b", "phi-3.5-moe", "olmoe",
@@ -58,7 +58,7 @@ ALL_MODELS = [
 
 
 def layer_heatmap(model: str, dataset: str, out_dir: Path) -> None:
-    dag_path = CIRCUITS / f"dag_{model}_{dataset}.pt"
+    dag_path = RESULTS / f"dag_{model}_{dataset}.pt"
     if not dag_path.exists():
         print(f"{model}: MISSING {dag_path}, skipping")
         return
@@ -126,11 +126,11 @@ def main() -> None:
                    help="Comma-separated model keys (default: all 8).")
     p.add_argument("--dataset", default="c4")
     p.add_argument("--out-dir", default=None,
-                   help="Default: results/circuits/layer_influence_heatmaps/")
+                   help="Default: results/layer_influence_heatmaps/")
     args = p.parse_args()
 
     models = args.models.split(",") if args.models else ALL_MODELS
-    out_dir = Path(args.out_dir) if args.out_dir else CIRCUITS / "layer_influence_heatmaps"
+    out_dir = Path(args.out_dir) if args.out_dir else RESULTS / "layer_influence_heatmaps"
     out_dir.mkdir(parents=True, exist_ok=True)
 
     for model in models:

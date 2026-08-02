@@ -28,7 +28,7 @@ Interpretation thresholds for Option A viability:
 If diversity is uniformly low or top-1 dominates, the char-fingerprint approach
 is too sparse and we should fall back to BERT-cluster classification (Option B).
 
-Writes: results/circuits/feature_ablation/topk_audit.json
+Writes: results/distributions/topk_audit.json
 """
 from __future__ import annotations
 
@@ -113,7 +113,7 @@ def main() -> None:
     with open(ROOT / "config.yaml") as f:
         cfg = yaml.safe_load(f)
     result_path = cfg["result_path"]
-    out_path = Path(result_path) / "circuits" / "feature_ablation" / "topk_audit.json"
+    out_path = Path(result_path) / "distributions" / "topk_audit.json"
     out_path.parent.mkdir(parents=True, exist_ok=True)
 
     print(f"{'model':<20s}  {'task':<12s}  {'K':>4s}  {'V_act':>6s}  "
@@ -124,7 +124,7 @@ def main() -> None:
     summary: dict = {}
     for model in MODELS:
         for task in TASKS:
-            dag_path = Path(result_path) / "circuits" / f"dag_{model}_{task}.pt"
+            dag_path = Path(result_path) / f"dag_{model}_{task}.pt"
             try:
                 dag = torch.load(dag_path, weights_only=False)
             except Exception as e:

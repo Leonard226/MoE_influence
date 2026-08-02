@@ -3,13 +3,13 @@ shift sweep -- no torch dependency, safe to run anywhere the results/
 directory is visible (this Mac or the cluster).
 
 For each model, checks three things:
-  1. ablation_{model}_c4.json has every label from ablate_experts.py's
+  1. ablation/{model}_c4.json has every label from ablate_experts.py's
      DEFAULT_TARGETS (both singles and joint sets).
-  2. routing_shift_{model}_c4.json has an entry for every non-baseline
+  2. routing_shift/{model}_c4.json has an entry for every non-baseline
      label actually present in the ablation JSON (so newly-added ablation
      targets are caught even if DEFAULT_TARGETS was edited after the last
      routing-shift run).
-  3. super_weights_{model}_c4.json's global (layer, expert) grid coverage,
+  3. super_weights/{model}_c4.json's global (layer, expert) grid coverage,
      broken down by refined / screened / legacy (pre-peak-filter) entries.
      <100% here is not automatically a problem -- experts with zero routed
      tokens in the calibration set are legitimately absent -- so this is
@@ -28,7 +28,7 @@ import re
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-CIRCUITS = ROOT / "results/circuits"
+RESULTS = ROOT / "results"
 
 # Mirrors find_super_weights.py's MODELS registry (n_experts, moe_layers)
 # without importing it (that file itself requires torch to import, since
@@ -72,9 +72,9 @@ def check_model(model: str, default_targets: dict[str, str]) -> bool:
     print(f"=== {model} ===")
     problem = False
 
-    ab_path = CIRCUITS / f"ablation_{model}_c4.json"
-    sw_path = CIRCUITS / f"super_weights_{model}_c4.json"
-    rs_path = CIRCUITS / f"routing_shift_{model}_c4.json"
+    ab_path = RESULTS / "ablation" / f"{model}_c4.json"
+    sw_path = RESULTS / "super_weights" / f"{model}_c4.json"
+    rs_path = RESULTS / "routing_shift" / f"{model}_c4.json"
 
     if not ab_path.exists():
         print("  MISSING ablation file entirely")

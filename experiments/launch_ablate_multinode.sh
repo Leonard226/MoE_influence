@@ -35,7 +35,7 @@ echo "MASTER_ADDR=$MASTER_ADDR  MASTER_PORT=$MASTER_PORT  nodes=${nodes[*]}  MOD
 export NCCL_IB_DISABLE=0
 export NCCL_DEBUG=${NCCL_DEBUG:-WARN}
 
-PROJECT_ROOT="${SLURM_SUBMIT_DIR:-/scratch/sleonard/MoE_circuits}"
+PROJECT_ROOT="${SLURM_SUBMIT_DIR:-/scratch/sleonard/MoE_influence}"
 SCRIPT_PATH="${PROJECT_ROOT}/experiments/ablate_experts_multinode.py"
 if [ ! -f "$SCRIPT_PATH" ]; then
     echo "ERROR: ablate_experts_multinode.py not found at $SCRIPT_PATH" >&2

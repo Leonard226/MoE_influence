@@ -28,7 +28,7 @@ Differences from the single-node script:
 Ablation operator and PPL protocol are byte-for-byte the single-node ones:
 zero the expert's down_proj output; 256 random 2048-token c4-validation
 windows; PPL = exp(mean per-sequence mean NLL). Results are written by rank 0
-to {result_path}/circuits/ablation_{model}_c4.json in the SAME format as the
+to {result_path}/ablation/{model}_c4.json in the SAME format as the
 single-node runs (restart-safe; cached runs skipped) -- att_sink/max_h0/
 max_h_all keys
 included.
@@ -60,7 +60,7 @@ sys.path.insert(0, ROOT)
 
 with open(os.path.join(ROOT, "config.yaml")) as f:
     _config = yaml.safe_load(f)
-CIRCUITS = Path(_config["result_path"]) / "circuits"
+RESULTS = Path(_config["result_path"])
 
 # Reuse the proven distributed primitives + model registry (customized model
 # classes, per-model layer-kwargs / causal-mask fns, moe_layers, expert paths).
@@ -513,7 +513,9 @@ def main():
     rprint(rank, f"  sink eval: {sink_ids.shape[0]} windows x "
                  f"{sink_ids.shape[1]} tok")
 
-    out_path = CIRCUITS / f"ablation_{args.model}_c4.json"
+    out_path = RESULTS / "ablation" / f"{args.model}_c4.json"
+    if rank == 0:
+        out_path.parent.mkdir(parents=True, exist_ok=True)
     results = {}
     if rank == 0 and out_path.exists():
         results = json.loads(out_path.read_text())

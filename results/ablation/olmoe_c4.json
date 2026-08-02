@@ -1,0 +1,225 @@
+{
+  "baseline": {
+    "ppl": 10.469133612819068,
+    "att_sink": 0.361328125,
+    "max_h0": 72.5,
+    "max_h_all": 72.5
+  },
+  "L1E9": {
+    "ppl": 10.492690695685427,
+    "att_sink": 0.376953125,
+    "max_h0": 72.5,
+    "max_h_all": 72.5,
+    "control": false
+  },
+  "L4E27": {
+    "ppl": 10.472743891354085,
+    "att_sink": 0.36328125,
+    "max_h0": 72.0,
+    "max_h_all": 72.0,
+    "control": false
+  },
+  "L1E18": {
+    "ppl": 10.473730654607335,
+    "att_sink": 0.357421875,
+    "max_h0": 68.0,
+    "max_h_all": 68.0,
+    "control": false
+  },
+  "L2E30": {
+    "ppl": 10.48533472649842,
+    "att_sink": 0.345703125,
+    "max_h0": 55.0,
+    "max_h_all": 65.0,
+    "control": false
+  },
+  "L9E8": {
+    "ppl": 10.52984392400573,
+    "att_sink": 0.36328125,
+    "max_h0": 65.5,
+    "max_h_all": 65.5,
+    "control": false
+  },
+  "L10E4": {
+    "ppl": 10.550982149191013,
+    "att_sink": 0.361328125,
+    "max_h0": 69.5,
+    "max_h_all": 69.5,
+    "control": false
+  },
+  "L11E56": {
+    "ppl": 10.501183721807754,
+    "att_sink": 0.361328125,
+    "max_h0": 72.5,
+    "max_h_all": 72.5,
+    "control": false
+  },
+  "L1E11": {
+    "ppl": 10.47321923910071,
+    "att_sink": 0.361328125,
+    "max_h0": 72.0,
+    "max_h_all": 72.0,
+    "control": false
+  },
+  "L6E18": {
+    "ppl": 10.505075635357636,
+    "att_sink": 0.36328125,
+    "max_h0": 72.0,
+    "max_h_all": 72.0,
+    "control": false
+  },
+  "L8E22": {
+    "ppl": 10.489006182161235,
+    "att_sink": 0.361328125,
+    "max_h0": 69.0,
+    "max_h_all": 69.0,
+    "control": false
+  },
+  "L4E14": {
+    "ppl": 10.533034791727687,
+    "att_sink": 0.357421875,
+    "max_h0": 72.5,
+    "max_h_all": 72.5,
+    "control": false
+  },
+  "L3E39": {
+    "ppl": 10.496275385458793,
+    "att_sink": 0.361328125,
+    "max_h0": 64.5,
+    "max_h_all": 65.5,
+    "control": false
+  },
+  "L0E6": {
+    "ppl": 10.471030659877682,
+    "att_sink": 0.36328125,
+    "max_h0": 72.5,
+    "max_h_all": 72.5,
+    "control": false
+  },
+  "L0E38": {
+    "ppl": 10.476358476110148,
+    "att_sink": 0.369140625,
+    "max_h0": 72.5,
+    "max_h_all": 72.5,
+    "control": false
+  },
+  "L6E4": {
+    "ppl": 10.473559289717418,
+    "att_sink": 0.361328125,
+    "max_h0": 72.5,
+    "max_h_all": 72.5,
+    "control": false
+  },
+  "L0E41": {
+    "ppl": 10.508771375951019,
+    "att_sink": 0.359375,
+    "max_h0": 72.5,
+    "max_h_all": 72.5,
+    "control": false
+  },
+  "L0E36": {
+    "ppl": 10.47284957718617,
+    "att_sink": 0.361328125,
+    "max_h0": 72.5,
+    "max_h_all": 72.5,
+    "control": false
+  },
+  "L0E38+L4E14+L6E4": {
+    "ppl": 10.50972344699793,
+    "att_sink": 0.369140625,
+    "max_h0": 72.5,
+    "max_h_all": 72.5,
+    "control": false
+  },
+  "L1E18+L2E30+L3E39+L9E8": {
+    "ppl": 10.65747765288915,
+    "att_sink": 0.2890625,
+    "max_h0": 56.0,
+    "max_h_all": 56.5,
+    "control": false
+  },
+  "L1E18+L2E30": {
+    "ppl": 10.51793993030064,
+    "att_sink": 0.31640625,
+    "max_h0": 55.5,
+    "max_h_all": 64.0,
+    "control": false
+  },
+  "L5E12+L12E33+L7E50": {
+    "ppl": 10.49489511385264,
+    "att_sink": 0.361328125,
+    "max_h0": 72.5,
+    "max_h_all": 72.5,
+    "control": false
+  },
+  "L5E12+L12E33+L7E50+L14E9": {
+    "ppl": 10.544753121333633,
+    "att_sink": 0.361328125,
+    "max_h0": 72.5,
+    "max_h_all": 72.5,
+    "control": false
+  },
+  "L1E9+L1E18+L2E30+L4E27": {
+    "ppl": 10.591574016134945,
+    "att_sink": 0.333984375,
+    "max_h0": 55.0,
+    "max_h_all": 55.0,
+    "control": false
+  },
+  "L2E30+L1E9+L4E14": {
+    "ppl": 10.526193778185831,
+    "att_sink": 0.359375,
+    "max_h0": 55.0,
+    "max_h_all": 64.0,
+    "control": false
+  },
+  "L1E9+L1E18+L2E30+L4E27+L4E14": {
+    "ppl": 10.606287655368265,
+    "att_sink": 0.333984375,
+    "max_h0": 55.0,
+    "max_h_all": 55.0,
+    "control": false
+  },
+  "L13E40": {
+    "ppl": 10.487390057573608,
+    "att_sink": 0.361328125,
+    "max_h0": 72.5,
+    "max_h_all": 72.5,
+    "control": true
+  },
+  "L8E17": {
+    "ppl": 10.472954007076815,
+    "att_sink": 0.361328125,
+    "max_h0": 72.5,
+    "max_h_all": 72.5,
+    "control": true
+  },
+  "L4E2": {
+    "ppl": 10.470582202428446,
+    "att_sink": 0.361328125,
+    "max_h0": 72.5,
+    "max_h_all": 72.5,
+    "control": true
+  },
+  "L1E1": {
+    "ppl": 10.472551996602066,
+    "att_sink": 0.361328125,
+    "max_h0": 72.5,
+    "max_h_all": 72.5,
+    "control": true
+  },
+  "L2E52": {
+    "ppl": 10.473716033958567,
+    "att_sink": 0.361328125,
+    "max_h0": 72.5,
+    "max_h_all": 72.5,
+    "control": true
+  },
+  "L1E9+L2E30+L3E39+L4E14+L9E8": {
+    "ppl": 10.591727242358763,
+    "att_sink": 0.34375,
+    "max_h0": 56.0,
+    "max_h_all": 57.25,
+    "control": false
+  }
+}

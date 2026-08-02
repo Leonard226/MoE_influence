@@ -24,7 +24,7 @@ qwen3-30b-a3b, deepseek-v2-lite. The two models that exceed single-node
 memory in bf16 (Qwen3-235B-A22B, DeepSeek-V2) are handled by a separate
 multi-node ablation script.
 
-Results merge into {result_path}/circuits/ablation_{model}_c4.json
+Results merge into {result_path}/ablation/{model}_c4.json
 (restart-safe; cached runs are skipped).
 
 Usage (cluster, 1 GPU for olmoe / 4 for mixtral-8x7b):
@@ -49,7 +49,7 @@ sys.path.insert(0, str(ROOT))
 
 with open(ROOT / "config.yaml") as f:
     CFG = yaml.safe_load(f)
-CIRCUITS = Path(CFG["result_path"]) / "circuits"
+RESULTS = Path(CFG["result_path"])
 
 # multi_gpu: model is too big for one GPU -> shard via device_map="auto".
 # Single-GPU models are loaded and moved with .to("cuda") explicitly, which
@@ -411,7 +411,8 @@ def main() -> None:
           f"{args.seq_len} tok (Su et al. protocol); {len(runs)} ablation runs "
           f"({args.random_controls} random controls)")
 
-    out_path = CIRCUITS / f"ablation_{args.model}_{args.dataset}.json"
+    out_path = RESULTS / "ablation" / f"{args.model}_{args.dataset}.json"
+    out_path.parent.mkdir(parents=True, exist_ok=True)
     results = json.loads(out_path.read_text()) if out_path.exists() else {}
 
     if "baseline" not in results:

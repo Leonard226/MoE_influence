@@ -119,7 +119,7 @@ from experiments.ablate_experts import DEFAULT_TARGETS  # noqa: E402 (read-only 
 
 with open(ROOT / "config.yaml") as f:
     CFG = yaml.safe_load(f)
-CIRCUITS = Path(CFG["result_path"]) / "circuits"
+RESULTS = Path(CFG["result_path"])
 
 # Single-node models only (mirrors ablate_experts.py's MODELS; multi-node
 # DeepSeek-V2/Qwen3-235B deferred). n_experts/moe_layers match
@@ -388,7 +388,8 @@ def main() -> None:
     print(f"[{args.model}] calibration: {len(windows)} windows x {args.seq_len} tok",
           flush=True)
 
-    out_path = CIRCUITS / f"super_weights_{args.model}_c4.json"
+    out_path = RESULTS / "super_weights" / f"{args.model}_c4.json"
+    out_path.parent.mkdir(parents=True, exist_ok=True)
     results = json.loads(out_path.read_text()) if out_path.exists() else {}
 
     # Skip (layer, expert) pairs already cached under their "LxEy" label --

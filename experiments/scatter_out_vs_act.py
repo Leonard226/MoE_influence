@@ -36,8 +36,8 @@ sys.path.insert(0, ROOT)
 
 with open(os.path.join(ROOT, "config.yaml")) as f:
     _config = yaml.safe_load(f)
-CIRCUITS_DIR = Path(_config["result_path"]) / "circuits"
-DEFAULT_OUT_DIR = CIRCUITS_DIR / "distribution_inspection"
+RESULTS = Path(_config["result_path"])
+DEFAULT_OUT_DIR = RESULTS / "distribution_inspection"
 
 MODELS = [
     "mixtral-8x7b", "mixtral-8x22b", "phi-3.5-moe",
@@ -59,7 +59,7 @@ NUM_DENSE = {
 def _load_features(model: str, task: str):
     """Return dict with flat np.float64 arrays: out, in, load, act, depth (+L, N).
     load(v) = n_tok(v) / mean_{n'} n_tok(l, n')  (per-layer mean-normalised)."""
-    path = CIRCUITS_DIR / f"dag_{model}_{task}.pt"
+    path = RESULTS / f"dag_{model}_{task}.pt"
     if not path.exists():
         return None
     dag = torch.load(path, weights_only=False, map_location="cpu")

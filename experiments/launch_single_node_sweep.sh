@@ -21,7 +21,7 @@ export LD_LIBRARY_PATH="/scratch/sleonard/miniconda3/envs/megatron/lib:${LD_LIBR
 export HF_HOME="${HF_HOME:-/scratch/sleonard/.hugging_face}"
 HUB="${HF_HOME}/hub"
 
-PROJECT_ROOT="${SLURM_SUBMIT_DIR:-/scratch/sleonard/MoE_circuits}"
+PROJECT_ROOT="${SLURM_SUBMIT_DIR:-/scratch/sleonard/MoE_influence}"
 cd "$PROJECT_ROOT"
 
 # NOTE: no JSON-clearing step here (deliberately). All three scripts below

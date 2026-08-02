@@ -1,0 +1,211 @@
+{
+  "baseline": {
+    "ppl": 6.189703388057809,
+    "att_sink": 0.6484375,
+    "max_h0": 3472.0,
+    "max_h_all": 3472.0
+  },
+  "L1E7": {
+    "ppl": 7.306292026837107,
+    "att_sink": 0.03271484375,
+    "max_h0": 264.0,
+    "max_h_all": 2176.0,
+    "control": false
+  },
+  "L0E2": {
+    "ppl": 6.415978399021086,
+    "att_sink": 0.6015625,
+    "max_h0": 3424.0,
+    "max_h_all": 3984.0,
+    "control": false
+  },
+  "L36E7": {
+    "ppl": 6.207706808234246,
+    "att_sink": 0.64453125,
+    "max_h0": 3472.0,
+    "max_h_all": 3472.0,
+    "control": false
+  },
+  "L37E7": {
+    "ppl": 6.197446216826423,
+    "att_sink": 0.6484375,
+    "max_h0": 3472.0,
+    "max_h_all": 3472.0,
+    "control": false
+  },
+  "L29E3": {
+    "ppl": 6.1981951959712065,
+    "att_sink": 0.64453125,
+    "max_h0": 3472.0,
+    "max_h_all": 3472.0,
+    "control": false
+  },
+  "L3E2": {
+    "ppl": 6.1929968260672075,
+    "att_sink": 0.6484375,
+    "max_h0": 3472.0,
+    "max_h_all": 3472.0,
+    "control": false
+  },
+  "L0E4": {
+    "ppl": 6.191906807478918,
+    "att_sink": 0.6484375,
+    "max_h0": 3472.0,
+    "max_h_all": 3472.0,
+    "control": false
+  },
+  "L28E7": {
+    "ppl": 6.191622185611502,
+    "att_sink": 0.6484375,
+    "max_h0": 3456.0,
+    "max_h_all": 3456.0,
+    "control": false
+  },
+  "L41E2": {
+    "ppl": 6.197990000744854,
+    "att_sink": 0.6484375,
+    "max_h0": 3472.0,
+    "max_h_all": 3472.0,
+    "control": false
+  },
+  "L38E6": {
+    "ppl": 6.198777756029935,
+    "att_sink": 0.6484375,
+    "max_h0": 3472.0,
+    "max_h_all": 3472.0,
+    "control": false
+  },
+  "L22E7": {
+    "ppl": 6.19929496942244,
+    "att_sink": 0.6484375,
+    "max_h0": 3472.0,
+    "max_h_all": 3472.0,
+    "control": false
+  },
+  "L22E6": {
+    "ppl": 6.204724539100542,
+    "att_sink": 0.6484375,
+    "max_h0": 3472.0,
+    "max_h_all": 3472.0,
+    "control": false
+  },
+  "L9E1": {
+    "ppl": 6.192786400425549,
+    "att_sink": 0.6484375,
+    "max_h0": 3472.0,
+    "max_h_all": 3472.0,
+    "control": false
+  },
+  "L3E0": {
+    "ppl": 6.193351059027831,
+    "att_sink": 0.6484375,
+    "max_h0": 3472.0,
+    "max_h_all": 3472.0,
+    "control": false
+  },
+  "L28E3": {
+    "ppl": 6.200973159991079,
+    "att_sink": 0.6484375,
+    "max_h0": 3472.0,
+    "max_h_all": 3472.0,
+    "control": false
+  },
+  "L30E7": {
+    "ppl": 6.1918086989442855,
+    "att_sink": 0.6484375,
+    "max_h0": 3472.0,
+    "max_h_all": 3472.0,
+    "control": false
+  },
+  "L0E2+L1E7": {
+    "ppl": 25.786541259983043,
+    "att_sink": 0.1513671875,
+    "max_h0": 280.0,
+    "max_h_all": 378.0,
+    "control": false
+  },
+  "L0E2+L29E3": {
+    "ppl": 6.418851760181777,
+    "att_sink": 0.6015625,
+    "max_h0": 3424.0,
+    "max_h_all": 3984.0,
+    "control": false
+  },
+  "L0E2+L1E7+L29E3": {
+    "ppl": 25.83559702499185,
+    "att_sink": 0.1513671875,
+    "max_h0": 280.0,
+    "max_h_all": 378.0,
+    "control": false
+  },
+  "L1E7+L0E2+L36E7": {
+    "ppl": 25.84948461701342,
+    "att_sink": 0.1513671875,
+    "max_h0": 280.0,
+    "max_h_all": 388.0,
+    "control": false
+  },
+  "L22E6+L22E7": {
+    "ppl": 6.216079477786589,
+    "att_sink": 0.6484375,
+    "max_h0": 3472.0,
+    "max_h_all": 3472.0,
+    "control": false
+  },
+  "L13E5+L44E2": {
+    "ppl": 6.202525988824069,
+    "att_sink": 0.6484375,
+    "max_h0": 3472.0,
+    "max_h_all": 3472.0,
+    "control": false
+  },
+  "L13E5+L44E2+L31E6": {
+    "ppl": 6.211215110178134,
+    "att_sink": 0.6484375,
+    "max_h0": 3472.0,
+    "max_h_all": 3472.0,
+    "control": false
+  },
+  "L47E5": {
+    "ppl": 6.196668450811654,
+    "att_sink": 0.6484375,
+    "max_h0": 3472.0,
+    "max_h_all": 3472.0,
+    "control": true
+  },
+  "L28E2": {
+    "ppl": 6.19949392224309,
+    "att_sink": 0.6484375,
+    "max_h0": 3472.0,
+    "max_h_all": 3472.0,
+    "control": true
+  },
+  "L17E0": {
+    "ppl": 6.193181073849051,
+    "att_sink": 0.6484375,
+    "max_h0": 3472.0,
+    "max_h_all": 3472.0,
+    "control": true
+  },
+  "L4E0": {
+    "ppl": 6.190760515130548,
+    "att_sink": 0.6484375,
+    "max_h0": 3472.0,
+    "max_h_all": 3472.0,
+    "control": true
+  },
+  "L9E6": {
+    "ppl": 6.195676612763507,
+    "att_sink": 0.6484375,
+    "max_h0": 3472.0,
+    "max_h_all": 3472.0,
+    "control": true
+  },
+  "L1E7+L29E3": {
+    "ppl": 7.218594935155615,
+    "att_sink": 0.03271484375,
+    "max_h0": 266.0,
+    "max_h_all": 2176.0,
+    "control": false
+  }
+}

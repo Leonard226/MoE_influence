@@ -30,7 +30,7 @@ import yaml
 ROOT = Path(__file__).resolve().parent.parent
 with open(ROOT / "config.yaml") as f:
     CFG = yaml.safe_load(f)
-CIRCUITS = Path(CFG["result_path"]) / "circuits"
+RESULTS = Path(CFG["result_path"])
 
 MODELS = [
     "mixtral-8x7b", "mixtral-8x22b", "phi-3.5-moe",
@@ -56,7 +56,7 @@ def main() -> None:
     args = p.parse_args()
 
     for m in MODELS:
-        path = CIRCUITS / f"dag_{m}_{args.task}.pt"
+        path = RESULTS / f"dag_{m}_{args.task}.pt"
         if not path.exists():
             print(f"\n[{m}]  MISSING ({path})")
             continue

@@ -10,7 +10,7 @@ For each model on c4, we compute:
 Both arrays are sorted descending and saved as JSON. Plotted by
 experiments/plot_load_distribution.py locally.
 
-Writes: results/circuits/feature_ablation/load_curves_c4.json
+Writes: results/distributions/load_curves_c4.json
 """
 from __future__ import annotations
 
@@ -39,7 +39,7 @@ def main() -> None:
     with open(ROOT / "config.yaml") as f:
         cfg = yaml.safe_load(f)
     result_path = cfg["result_path"]
-    out_path = Path(result_path) / "circuits" / "feature_ablation" / "load_curves_c4.json"
+    out_path = Path(result_path) / "distributions" / "load_curves_c4.json"
     out_path.parent.mkdir(parents=True, exist_ok=True)
 
     curves: dict[str, dict] = {}
@@ -49,7 +49,7 @@ def main() -> None:
     print("-" * 80)
 
     for model in MODELS:
-        dag_path = Path(result_path) / "circuits" / f"dag_{model}_{TASK}.pt"
+        dag_path = Path(result_path) / f"dag_{model}_{TASK}.pt"
         dag = torch.load(dag_path, weights_only=False)
 
         n_tok = dag["n_tokens_selected"].cpu().numpy().astype(np.float64)  # [L, N]

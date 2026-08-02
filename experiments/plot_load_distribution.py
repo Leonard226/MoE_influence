@@ -1,6 +1,6 @@
 """Plot the per-vertex load distribution as a 2-panel Zipf-style figure.
 
-Reads:  results/circuits/feature_ablation/load_curves_c4.json
+Reads:  results/distributions/load_curves_c4.json
 Writes: 6a154a47401c9f4881c67a3f/figures/load_distribution.pdf
 
 Two-panel design:
@@ -23,7 +23,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 ROOT = Path(__file__).resolve().parent.parent
-JSON = ROOT / "results" / "circuits" / "feature_ablation" / "load_curves_c4.json"
+JSON = ROOT / "results" / "distributions" / "load_curves_c4.json"
 FIG_DIR = ROOT / "6a154a47401c9f4881c67a3f" / "figures"
 FIG_DIR.mkdir(parents=True, exist_ok=True)
 FIG = FIG_DIR / "load_distribution.pdf"

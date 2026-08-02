@@ -20,7 +20,7 @@ Verdict logic:
   - If concentration (top-1 fraction) is close to 1/N for most layers,
     routing is balanced; if often >> 1/N, routing is unbalanced
 
-Writes: results/circuits/feature_ablation/load_distribution.json
+Writes: results/distributions/load_distribution.json
 """
 from __future__ import annotations
 
@@ -115,7 +115,7 @@ def main() -> None:
     with open(ROOT / "config.yaml") as f:
         cfg = yaml.safe_load(f)
     result_path = cfg["result_path"]
-    out_path = Path(result_path) / "circuits" / "feature_ablation" / "load_distribution.json"
+    out_path = Path(result_path) / "distributions" / "load_distribution.json"
     out_path.parent.mkdir(parents=True, exist_ok=True)
 
     summary: dict = {}
@@ -128,7 +128,7 @@ def main() -> None:
 
     for model in MODELS:
         for task in TASKS:
-            dag_path = Path(result_path) / "circuits" / f"dag_{model}_{task}.pt"
+            dag_path = Path(result_path) / f"dag_{model}_{task}.pt"
             try:
                 dag = torch.load(dag_path, weights_only=False)
             except Exception as e:

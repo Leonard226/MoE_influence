@@ -1,0 +1,113 @@
+{
+  "baseline": {
+    "ppl": 9.301696949379727
+  },
+  "L3E120": {
+    "ppl": 9.395981248584867,
+    "control": false
+  },
+  "L2E39": {
+    "ppl": 11.089428139901052,
+    "control": false
+  },
+  "L69E69": {
+    "ppl": 9.297027354511686,
+    "control": false
+  },
+  "L70E113": {
+    "ppl": 9.2988381834565,
+    "control": false
+  },
+  "L90E101": {
+    "ppl": 9.304889764300476,
+    "control": false
+  },
+  "L50E113": {
+    "ppl": 9.301846139994412,
+    "control": false
+  },
+  "L2E83": {
+    "ppl": 9.302364642105687,
+    "control": false
+  },
+  "L49E69": {
+    "ppl": 9.301853713642116,
+    "control": false
+  },
+  "L90E10": {
+    "ppl": 9.306396053859965,
+    "control": false
+  },
+  "L90E14": {
+    "ppl": 9.320734006496322,
+    "control": false
+  },
+  "L3E22": {
+    "ppl": 9.302909413118133,
+    "control": false
+  },
+  "L3E29": {
+    "ppl": 9.302034382811168,
+    "control": false
+  },
+  "L3E0": {
+    "ppl": 9.301698057687048,
+    "control": false
+  },
+  "L35E109": {
+    "ppl": 9.302550137659006,
+    "control": false
+  },
+  "L3E55": {
+    "ppl": 9.301651067629967,
+    "control": false
+  },
+  "L64E91": {
+    "ppl": 9.302743919011835,
+    "control": false
+  },
+  "L3E39": {
+    "ppl": 9.302142202307454,
+    "control": false
+  },
+  "L8E64": {
+    "ppl": 9.303633598715686,
+    "control": false
+  },
+  "L3E120+L2E39": {
+    "ppl": 64.09488968757496,
+    "control": false
+  },
+  "L3E120+L2E39+L69E69": {
+    "ppl": 64.15903684233851,
+    "control": false
+  },
+  "L69E69+L70E113+L90E101": {
+    "ppl": 9.293266013977204,
+    "control": false
+  },
+  "L11E64+L57E30+L83E19": {
+    "ppl": 9.303326029721143,
+    "control": false
+  },
+  "L79E81": {
+    "ppl": 9.302386758970128,
+    "control": true
+  },
+  "L48E34": {
+    "ppl": 9.301801573198409,
+    "control": true
+  },
+  "L28E5": {
+    "ppl": 9.302284808817056,
+    "control": true
+  },
+  "L7E2": {
+    "ppl": 9.301416480403965,
+    "control": true
+  },
+  "L16E104": {
+    "ppl": 9.303285713283648,
+    "control": true
+  }
+}

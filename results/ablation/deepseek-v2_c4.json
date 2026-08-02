@@ -1,0 +1,121 @@
+{
+  "baseline": {
+    "ppl": 6.853044993251289
+  },
+  "L18E96": {
+    "ppl": 6.858941582902152,
+    "control": false
+  },
+  "L21E94": {
+    "ppl": 6.95678592141642,
+    "control": false
+  },
+  "L20E48": {
+    "ppl": 6.856703417110192,
+    "control": false
+  },
+  "L43E57": {
+    "ppl": 6.892187194566712,
+    "control": false
+  },
+  "L30E64": {
+    "ppl": 6.868938283091906,
+    "control": false
+  },
+  "L22E121": {
+    "ppl": 6.852864418813448,
+    "control": false
+  },
+  "L16E102": {
+    "ppl": 6.86794027937303,
+    "control": false
+  },
+  "L27E114": {
+    "ppl": 6.853407161283041,
+    "control": false
+  },
+  "L21E69": {
+    "ppl": 6.853481106638775,
+    "control": false
+  },
+  "L10E29": {
+    "ppl": 6.854497416263301,
+    "control": false
+  },
+  "L1E119": {
+    "ppl": 6.853515302683761,
+    "control": false
+  },
+  "L2E111": {
+    "ppl": 6.8534639345302475,
+    "control": false
+  },
+  "L5E34": {
+    "ppl": 6.853543735373836,
+    "control": false
+  },
+  "L3E17": {
+    "ppl": 6.853272690090582,
+    "control": false
+  },
+  "L3E64": {
+    "ppl": 6.853209887713908,
+    "control": false
+  },
+  "L4E13": {
+    "ppl": 6.853977463437011,
+    "control": false
+  },
+  "L5E88": {
+    "ppl": 6.853569693317815,
+    "control": false
+  },
+  "L3E81": {
+    "ppl": 6.8532661616834325,
+    "control": false
+  },
+  "L18E96+L20E48+L21E94": {
+    "ppl": 7.52531080406317,
+    "control": false
+  },
+  "L1E119+L18E96+L2E111": {
+    "ppl": 6.85929425264485,
+    "control": false
+  },
+  "L1E119+L2E111+L3E17": {
+    "ppl": 6.853167436115296,
+    "control": false
+  },
+  "L14E7+L37E88+L52E140": {
+    "ppl": 6.854870950518924,
+    "control": false
+  },
+  "L51E101": {
+    "ppl": 6.8552147095935325,
+    "control": true
+  },
+  "L31E43": {
+    "ppl": 6.853458714510593,
+    "control": true
+  },
+  "L19E6": {
+    "ppl": 6.854109676370939,
+    "control": true
+  },
+  "L5E2": {
+    "ppl": 6.8533499776211295,
+    "control": true
+  },
+  "L11E130": {
+    "ppl": 6.853873906533711,
+    "control": true
+  },
+  "L18E96+L20E48+L21E94+L1E119": {
+    "ppl": 7.523362927849809,
+    "control": false
+  },
+  "L18E96+L20E48+L21E94+L1E119+L2E111": {
+    "ppl": 7.523930449424059,
+    "control": false
+  }
+}

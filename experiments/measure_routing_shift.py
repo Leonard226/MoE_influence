@@ -41,7 +41,7 @@ customized_models fork needed, unlike the attention-sink work).
 ablated layer (forward-influence-only, matching this project's W_softmax/
 out(v) convention throughout).
 
-Targets = every ablation already in ablation_{model}_c4.json (not a new
+Targets = every ablation already in ablation/{model}_c4.json (not a new
 curated list): this gives a routing-shift number for every entry that
 already has a ΔPPL, enabling a direct join/comparison table.
 
@@ -75,7 +75,7 @@ sys.path.insert(0, str(ROOT))
 
 with open(ROOT / "config.yaml") as f:
     CFG = yaml.safe_load(f)
-CIRCUITS = Path(CFG["result_path"]) / "circuits"
+RESULTS = Path(CFG["result_path"])
 
 # Single-node models (matches find_super_weights.py / ablate_experts.py).
 # gate_path/top_k/moe_layers/n_experts copied from build_dag.py's registry
@@ -274,7 +274,7 @@ def main() -> None:
     cfg = MODELS[args.model]
     top_k = args.top_k or cfg["top_k"]
 
-    ablation_path = CIRCUITS / f"ablation_{args.model}_c4.json"
+    ablation_path = RESULTS / "ablation" / f"{args.model}_c4.json"
     if not ablation_path.exists():
         sys.exit(f"Missing {ablation_path}; run ablate_experts.py --model "
                  f"{args.model} first (this script joins against its ΔPPL).")
@@ -328,7 +328,8 @@ def main() -> None:
           f"{args.seq_len} tok; top_k={top_k}; {len(labels)} ablations "
           f"to process", flush=True)
 
-    out_path = CIRCUITS / f"routing_shift_{args.model}_c4.json"
+    out_path = RESULTS / "routing_shift" / f"{args.model}_c4.json"
+    out_path.parent.mkdir(parents=True, exist_ok=True)
     results = json.loads(out_path.read_text()) if out_path.exists() else {}
 
     print("computing baseline routing snapshot...", flush=True)

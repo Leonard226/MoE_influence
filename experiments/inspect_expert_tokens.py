@@ -41,7 +41,7 @@ from experiments.cross_rank_analysis import NUM_DENSE  # noqa: E402
 
 with open(ROOT / "config.yaml") as f:
     CFG = yaml.safe_load(f)
-CIRCUITS = Path(CFG["result_path"]) / "circuits"
+RESULTS = Path(CFG["result_path"])
 
 MODELS = [
     "mixtral-8x7b", "mixtral-8x22b", "phi-3.5-moe",
@@ -84,7 +84,7 @@ def main() -> None:
     agg: dict[str, list[tuple[float, float, float]]] = {}
 
     for m in args.models:
-        path = CIRCUITS / f"dag_{m}_{args.task}.pt"
+        path = RESULTS / f"dag_{m}_{args.task}.pt"
         if not path.exists():
             print(f"\n[{m}] MISSING ({path})")
             continue
