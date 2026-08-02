@@ -2,20 +2,20 @@
 #SBATCH --nodelist=piora1
 #SBATCH --gres=gpu:4
 #SBATCH --cpus-per-task=4
-#SBATCH --job-name="build-new"
-#SBATCH --output=logs/build_new_dags_%j.log
+#SBATCH --job-name="build-dags"
+#SBATCH --output=logs/build_dags_%j.log
 # NOTE: pinned to piora1 (A100 80GB node). Other nodes (piora4, piora5)
 # have V100s and will OOM on the larger models. Job queues until piora1
 # frees up (currently held by the multinode build).
 #
-# Build DAGs for the 5 NEW datasets on 6 single-node-capable MoE models.
+# Build DAGs for all 8 datasets on the 6 single-node-capable MoE models.
 #
 # Usage (either works):
-#   sbatch experiments/build_new_dags.sh
+#   sbatch experiments/build_dags.sh
 #   # or
-#   tmux new -s build_new
-#   bash experiments/build_new_dags.sh 2>&1 | tee logs/build_new_dags.log
-#   # detach: Ctrl-b d ;  reattach: tmux attach -t build_new
+#   tmux new -s build_dags
+#   bash experiments/build_dags.sh 2>&1 | tee logs/build_dags.log
+#   # detach: Ctrl-b d ;  reattach: tmux attach -t build_dags
 #
 # IMPORTANT: each model's HuggingFace cache (~/.hugging_face/hub/models--...)
 # is DELETED after all 5 datasets for that model are built. This frees disk
@@ -38,7 +38,7 @@
 #   rm -f $RESULT_PATH/dags/*/dag_deepseek-v2-lite_*.pt
 #
 # qwen3-235b-a22b and deepseek-v2 need multinode SLURM; handle separately
-# via experiments/launch_multinode_new.sh.
+# via experiments/launch_multinode.sh.
 
 set -euo pipefail
 
@@ -76,8 +76,8 @@ echo
 # (W_softmax family + Su et al. `act` feature) across all 8 datasets at 500
 # prompts. Mixtral-8x7B and DeepSeek-V2-Lite are already done from the pilot
 # and will be skipped by the [skip] check below. Multinode models
-# (qwen3-235b-a22b, deepseek-v2) run separately via launch_multinode_new.sh.
-NEW_DATASETS=(c4 math code wikitext2 gsm8k humaneval pile-arxiv pile-github)
+# (qwen3-235b-a22b, deepseek-v2) run separately via launch_multinode.sh.
+DATASETS=(c4 math code wikitext2 gsm8k humaneval pile-arxiv pile-github)
 N_PROMPTS=500
 
 # Smallest first so quick wins land early; the heavier (mixtral-8x22b,
@@ -128,19 +128,19 @@ cleanup_model_cache() {
   fi
 }
 
-TOTAL=$(( ${#MODELS[@]} * ${#NEW_DATASETS[@]} ))
+TOTAL=$(( ${#MODELS[@]} * ${#DATASETS[@]} ))
 i=0
 T_START=$(date +%s)
 
 echo "Starting at $(date)"
 echo "Will build $TOTAL (model, dataset) DAGs into $RESULT_PATH/"
 echo "Models:   ${MODELS[*]}"
-echo "Datasets: ${NEW_DATASETS[*]}"
+echo "Datasets: ${DATASETS[*]}"
 echo "Prompts:  $N_PROMPTS each"
 echo
 
 for m in "${MODELS[@]}"; do
-  for d in "${NEW_DATASETS[@]}"; do
+  for d in "${DATASETS[@]}"; do
     i=$((i + 1))
     outfile="${RESULT_PATH}/dags/${d}/dag_${m}_${d}.pt"
     if [[ -f "$outfile" ]]; then
@@ -172,7 +172,7 @@ for m in "${MODELS[@]}"; do
   # If anything failed, leave the cache so the resubmit can reuse it
   # without re-downloading.
   all_done=1
-  for d_check in "${NEW_DATASETS[@]}"; do
+  for d_check in "${DATASETS[@]}"; do
     if [[ ! -f "${RESULT_PATH}/dags/${d_check}/dag_${m}_${d_check}.pt" ]]; then
       all_done=0
       break
@@ -190,5 +190,5 @@ T_TOTAL=$(( ( $(date +%s) - T_START ) / 60 ))
 echo "============================================================"
 echo "All done at $(date). Total elapsed: ${T_TOTAL} min"
 echo "Reminder: qwen3-235b-a22b and deepseek-v2 need multinode SLURM. Run:"
-echo "  sbatch experiments/launch_multinode_new.sh"
+echo "  sbatch experiments/launch_multinode.sh"
 echo "============================================================"
