@@ -16,10 +16,9 @@ For DeepSeek-V2's dense layer 0, MoE hooks are skipped (`mlp_hooks` is empty
 there); only after_res1/after_norm2 are valid for dense layers and we don't
 need them for the score decomposition anyway.
 
-Rank 0 owns the score-decomposition accumulators (APS, ANS,
-wsm/wsm_sq/wsm_signed for the softmax-mass perturbation family under Approach 2
-pairwise-isolated ablation, n_tokens_selected, top-K-by-routing-weight token
-buffer) and runs the inner loop. The router gate
+Rank 0 owns the score-decomposition accumulators (wsm for the softmax-mass
+perturbation, pairwise-isolated ablation, n_tokens_selected, top-K-by-routing-weight
+token buffer) and runs the inner loop. The router gate
 and post-attention RMSNorm weights from every MoE layer are gathered to rank 0
 once at startup.
 
@@ -716,11 +715,7 @@ def main():
         # ---- Accumulators ----
         device0 = f"cuda:{local_rank}"
         SHAPE = (N_LAYERS, N_EXPERTS, N_LAYERS, N_EXPERTS)
-        APS_accum        = torch.zeros(SHAPE, dtype=torch.float32, device=device0)
-        ANS_accum        = torch.zeros(SHAPE, dtype=torch.float32, device=device0)
         wsm_accum        = torch.zeros(SHAPE, dtype=torch.float32, device=device0)
-        wsm_sq_accum     = torch.zeros(SHAPE, dtype=torch.float32, device=device0)
-        wsm_signed_accum = torch.zeros(SHAPE, dtype=torch.float32, device=device0)
         n_tokens_selected = torch.zeros((N_LAYERS, N_EXPERTS), dtype=torch.long, device=device0)
 
         # Per-sender top-K-by-routing-weight token buffer. Empty slots: weight = -1.
@@ -861,13 +856,9 @@ def main():
                     ln_bar = omega_S * gamma_recv[R].view(1, 1, D_E) * rms_inv[:, R].view(bt, 1, 1)
                     scores = torch.einsum("ed,bkd->bke", G_recv[R], ln_bar)         # [bt, k, n_experts]
 
-                    scores_pos = scores.clamp(min=0.0)
-                    scores_neg = scores.clamp(max=0.0)
                     sel_flat = sel_S.flatten()
-                    APS_accum[S, :, R, :].index_add_(0, sel_flat, scores_pos.flatten(0, 1))
-                    ANS_accum[S, :, R, :].index_add_(0, sel_flat, scores_neg.flatten(0, 1))
 
-                    # ---- Softmax-mass perturbation under Approach 2 ----
+                    # ---- Softmax-mass perturbation ----
                     # See build_dag.py for the derivation; same per-pair logic here.
                     N = N_EXPERTS
                     diag_idx = torch.arange(N, device=device0)
@@ -896,11 +887,9 @@ def main():
                     p_orig_R = p_orig_R.unsqueeze(1).expand(bt, TOP_K, N_EXPERTS)
 
                     delta = p_orig_R - p_pert_n                                    # [bt, K, N]
-                    wsm_accum       [S, :, R, :].index_add_(0, sel_flat, delta.abs().flatten(0, 1))
-                    wsm_sq_accum    [S, :, R, :].index_add_(0, sel_flat, (delta * delta).flatten(0, 1))
-                    wsm_signed_accum[S, :, R, :].index_add_(0, sel_flat, (-delta).flatten(0, 1))
+                    wsm_accum[S, :, R, :].index_add_(0, sel_flat, delta.abs().flatten(0, 1))
 
-                    del ln_bar, scores, scores_pos, scores_neg
+                    del ln_bar, scores
                     del p_orig_R, p_pert_n, delta
 
             del full_hooks, after_res1, after_norm2, selected, weighted_out
@@ -940,24 +929,13 @@ def main():
         denom = count_safe.view(N_LAYERS, N_EXPERTS, 1, 1)
         zero_mask = (n_tokens_selected == 0).view(N_LAYERS, N_EXPERTS, 1, 1)
 
-        APS   = (APS_accum  / denom).masked_fill(zero_mask, 0.0)
-        ANS   = (ANS_accum  / denom).masked_fill(zero_mask, 0.0)
-
-        W_softmax        = (wsm_accum        / denom).masked_fill(zero_mask, 0.0)
-        W_softmax_E_sq   = (wsm_sq_accum     / denom).masked_fill(zero_mask, 0.0)
-        W_softmax_var    = (W_softmax_E_sq - W_softmax * W_softmax).clamp(min=0.0)
-        W_softmax_signed = (wsm_signed_accum / denom).masked_fill(zero_mask, 0.0)
-        del W_softmax_E_sq
+        W_softmax = (wsm_accum / denom).masked_fill(zero_mask, 0.0)
 
         dag_dir = os.path.join(output_dir, "dags", args.dataset)
         os.makedirs(dag_dir, exist_ok=True)
         out_path = os.path.join(dag_dir, f"dag_{args.model}_{args.dataset}.pt")
         torch.save({
-            "APS":               APS.cpu(),
-            "ANS":               ANS.cpu(),
-            "W_softmax":         W_softmax.cpu(),                 # PRIMARY, Approach 2 pairwise-isolated
-            "W_softmax_var":     W_softmax_var.cpu(),
-            "W_softmax_signed":  W_softmax_signed.cpu(),
+            "W_softmax":         W_softmax.cpu(),
             "act":               act_accum.cpu(),
             "n_tokens_selected": n_tokens_selected.cpu(),
             "top_weight":        top_weight.cpu(),
