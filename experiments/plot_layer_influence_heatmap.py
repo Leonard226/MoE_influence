@@ -7,7 +7,14 @@ for each (sending layer, receiving layer) pair, sum the raw out(v)-style
 edge weight over every sender expert in the sending layer and every
 receiver expert in the receiving layer --
 
-    H[c, l] = sum_j sum_n W_softmax[c, j, l, n]
+    H[c, l] = sum_j sum_n W_softmax[c, j, l, n]  +  sum_n W_softmax_shared[c, l, n]
+
+The second term folds in each sending layer's shared-expert vertex (main.tex
+"Shared experts"), when the dag has a W_softmax_shared entry ([c, l, n] --
+sender layer x receiver layer x receiver expert, no sender-expert axis since
+there's one shared-expert vertex per layer, not N-many) -- currently
+DeepSeek-V2 and DeepSeek-V2-Lite. Absent for models without shared experts,
+in which case H is exactly the old regular-experts-only sum.
 
 No normalization -- these are the raw accumulated W_softmax values. Entries
 where l <= c are not causally valid edges (E = {(c,j)->(l,n): c<l}) and are
@@ -67,6 +74,11 @@ def layer_heatmap(model: str, dataset: str, out_dir: Path) -> None:
     W = d["W_softmax"]  # [c, j, l, n]
     L, N = W.shape[2], W.shape[1]
     H = W.sum(dim=(1, 3)).numpy()  # [c, l], raw accumulated out(v)
+
+    if "W_softmax_shared" in d:
+        H_shared = d["W_softmax_shared"].sum(dim=-1).numpy()  # [c, l]
+        H = H + H_shared
+        print(f"{model}: folded in shared-expert contribution to H[c,l]")
 
     # Cross-check: out(v) for a SINGLE expert is W[c,j,:,:].sum() -- the same
     # quantity reported in tab:topk-match-c4/tab:top-ins-c4. A heatmap cell
