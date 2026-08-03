@@ -12,13 +12,15 @@ every model; large models simply have far more edges clearing that quantile
 threshold itself is never touched by that subsampling.
 
     W_softmax(v -> v') = E_i[|p_orig(v') - p_pert(v')|] under an ablation of v
-                         (see build_dag.py / main.tex); bounded in [0, 1].
+                         (see build_dag.py / main.tex); bounded in [0, 1] --
+                         except deepseek-v2, see COLOR_RANGE_OVERRIDE below.
 
 Vertex handling: show_enhanced_layered_graph already drops isolated vertices
 (degree == 0) from the drawing. No `is_super` vertex attribute is set, which
 suppresses the gold/red highlighting inside the drawing routine -- every node
 renders uniformly (white fill, black border). The colour axis is pinned to
-[0, 1] so the same |w| renders the same shade in every model.
+[0, 1] so the same |w| renders the same shade in every model, except
+deepseek-v2 (see COLOR_RANGE_OVERRIDE).
 
 Shared experts (DeepSeek-V2/V2-Lite): if the dag has a W_softmax_shared entry
 ([L, L, N] -- sender layer x receiver layer x receiver expert, no
@@ -89,6 +91,18 @@ MAX_EDGES_OVERRIDE = {
     "qwen3-235b-a22b": 500,
 }
 
+# Per-model colorbar (color_vmin, color_vmax) override. Default (0.0, 1.0) is
+# shared across models for cross-model comparability. deepseek-v2 uses
+# routing_scale=16 (main.tex "Scaled routing weight") -- its own gating
+# weight genuinely isn't bounded [0,1] (there's no unscaled version anywhere
+# in the real model to fall back to), so W_softmax for deepseek-v2 can
+# legitimately exceed 1. (None, None) falls back to that graph's own
+# min/max magnitude, giving proper shade differentiation among its edges
+# instead of everything above 1 clipping to the same saturated color.
+COLOR_RANGE_OVERRIDE = {
+    "deepseek-v2": (None, None),
+}
+
 
 def plot_one(model: str, task: str, out_dir: Path, edge_q: float,
              max_edges: int) -> None:
@@ -129,13 +143,14 @@ def plot_one(model: str, task: str, out_dir: Path, edge_q: float,
     g = thresholding_routing_graph(dag, "_vis_edge", 1e-9,
                                    shared_target=shared_target, shared_threshold=1e-9)
 
+    color_vmin, color_vmax = COLOR_RANGE_OVERRIDE.get(model, (0.0, 1.0))
     show_enhanced_layered_graph(
         g, quantile=edge_q,
         target=f"{TARGET}/EDGE-first",
         model=model, model_display=MODEL_DISPLAY.get(model, model),
         dataset=task, n_prompts=dag["n_prompts"],
         layer_labels=dag["moe_layers"],
-        color_vmin=0.0, color_vmax=1.0,
+        color_vmin=color_vmin, color_vmax=color_vmax,
         save_path=out_dir / f"{model}_{task}_q{edge_q}.pdf",
     )
     plt.close("all")
