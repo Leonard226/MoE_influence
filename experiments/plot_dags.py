@@ -79,7 +79,15 @@ MODEL_DISPLAY = {
 }
 
 # Models whose surviving edge set is too dense to read without subsampling.
-LARGE_MODELS = {"deepseek-v2", "qwen3-30b-a3b", "qwen3-235b-a22b"}
+LARGE_MODELS = {"deepseek-v2-lite", "deepseek-v2", "qwen3-30b-a3b", "qwen3-235b-a22b"}
+
+# Fixed subsampling cap for all LARGE_MODELS, overriding --max-edges.
+MAX_EDGES_OVERRIDE = {
+    "deepseek-v2-lite": 500,
+    "deepseek-v2": 500,
+    "qwen3-30b-a3b": 500,
+    "qwen3-235b-a22b": 500,
+}
 
 
 def plot_one(model: str, task: str, out_dir: Path, edge_q: float,
@@ -98,9 +106,10 @@ def plot_one(model: str, task: str, out_dir: Path, edge_q: float,
           f"{einfo['n_edges_total']}, t_edge={einfo['t_edge']:.4g}")
 
     if model in LARGE_MODELS:
-        W_e, sinfo = subsample_edges(W_e, max_edges=max_edges, seed=0)
+        cap = MAX_EDGES_OVERRIDE.get(model, max_edges)
+        W_e, sinfo = subsample_edges(W_e, max_edges=cap, seed=0)
         print(f"[SAMPLE] {model}: sampled {sinfo['n_edges_sampled']}/"
-              f"{sinfo['n_edges_before_sample']} edges down to cap={max_edges}")
+              f"{sinfo['n_edges_before_sample']} edges down to cap={cap}")
 
     dag["_vis_edge"] = W_e
 
@@ -110,9 +119,10 @@ def plot_one(model: str, task: str, out_dir: Path, edge_q: float,
         print(f"[SHARED] {model}: edges_kept={shinfo['n_edges_kept']}/"
               f"{shinfo['n_edges_total']}, t_edge={shinfo['t_edge']:.4g}")
         if model in LARGE_MODELS:
-            W_shared, shsinfo = subsample_edges(W_shared, max_edges=max_edges, seed=0)
+            cap = MAX_EDGES_OVERRIDE.get(model, max_edges)
+            W_shared, shsinfo = subsample_edges(W_shared, max_edges=cap, seed=0)
             print(f"[SHARED SAMPLE] {model}: sampled {shsinfo['n_edges_sampled']}/"
-                  f"{shsinfo['n_edges_before_sample']} edges down to cap={max_edges}")
+                  f"{shsinfo['n_edges_before_sample']} edges down to cap={cap}")
         dag["_vis_edge_shared"] = W_shared
         shared_target = "_vis_edge_shared"
 
