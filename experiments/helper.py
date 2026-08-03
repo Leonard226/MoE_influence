@@ -254,12 +254,19 @@ def sparsify_shared_edges(W, edge_q: float = 0.9999, edge_floor_frac: float = 0.
     return W_filtered, info
 
 
-def subsample_edges(W_filtered, max_edges: int, seed: int = 0):
-    """If sparsify_edges left more than max_edges surviving entries, keep a
-    uniform random sample of exactly max_edges of them (fixed seed,
-    reproducible) and zero the rest. Legibility-only: the quantile threshold
-    itself already decided which edges qualify, this just controls how many
-    of the (already equally-qualifying) survivors get drawn.
+def subsample_edges(W_filtered, max_edges: int, seed: int = 0, n_top: int = 0):
+    """If sparsify_edges left more than max_edges surviving entries, cap them
+    down to max_edges. Legibility-only: the quantile threshold itself already
+    decided which edges qualify, this just controls how many of the (already
+    equally-qualifying) survivors get drawn.
+
+    Hybrid mode (n_top > 0): the n_top largest-magnitude survivors are ALWAYS
+    kept (deterministic -- guarantees the true extremes are never dropped by
+    chance), and the remaining (max_edges - n_top) slots are filled with a
+    uniform random sample of the rest (fixed seed, reproducible). The two
+    groups are disjoint by construction (drawn from a partition of the same
+    ranked index list), so no edge is ever counted twice. n_top=0 (default)
+    is pure uniform random, as before; n_top >= max_edges is pure top-K.
 
     Works for any tensor rank (4D W_softmax or 3D W_softmax_shared).
 
@@ -267,24 +274,47 @@ def subsample_edges(W_filtered, max_edges: int, seed: int = 0):
         W_filtered: output of sparsify_edges/sparsify_shared_edges (same
             shape, non-surviving entries already zeroed).
         max_edges: cap on the number of nonzero entries to keep.
-        seed: RNG seed for the sample, for reproducible figures.
+        seed: RNG seed for the random-fill sample, for reproducible figures.
+        n_top: number of largest-magnitude survivors to always keep.
 
     Returns:
         W_sampled: same shape as W_filtered.
-        info: dict with n_edges_before_sample / n_edges_sampled.
+        info: dict with n_edges_before_sample / n_edges_sampled / n_top_kept /
+            n_random_fill.
     """
     import torch
     nz = torch.nonzero(W_filtered, as_tuple=False)
     n = nz.shape[0]
     if n <= max_edges:
-        return W_filtered, {"n_edges_before_sample": n, "n_edges_sampled": n}
+        return W_filtered, {"n_edges_before_sample": n, "n_edges_sampled": n,
+                             "n_top_kept": n, "n_random_fill": 0}
 
+    idx0 = tuple(nz[:, i] for i in range(nz.shape[1]))
+    vals = W_filtered[idx0].abs()
+    ranked = torch.argsort(-vals)  # positions into nz, descending magnitude
+
+    n_top_eff = min(n_top, max_edges, n)
+    top_pos = ranked[:n_top_eff]
+    rest_pos = ranked[n_top_eff:]
+
+    n_fill = max_edges - n_top_eff
     g = torch.Generator().manual_seed(seed)
-    keep = nz[torch.randperm(n, generator=g)[:max_edges]]
+    if n_fill > 0 and rest_pos.numel() > 0:
+        fill_pos = rest_pos[torch.randperm(rest_pos.numel(), generator=g)[:n_fill]]
+    else:
+        fill_pos = rest_pos[:0]
+
+    keep_pos = torch.cat([top_pos, fill_pos])
+    keep = nz[keep_pos]
     idx = tuple(keep[:, i] for i in range(keep.shape[1]))
     W_sampled = torch.zeros_like(W_filtered)
     W_sampled[idx] = W_filtered[idx]
-    return W_sampled, {"n_edges_before_sample": n, "n_edges_sampled": max_edges}
+    return W_sampled, {
+        "n_edges_before_sample": n,
+        "n_edges_sampled": int(keep_pos.numel()),
+        "n_top_kept": int(n_top_eff),
+        "n_random_fill": int(fill_pos.numel()),
+    }
 
 
 def get_thresholds(dag: dict, target: str, quantiles: list) -> list:

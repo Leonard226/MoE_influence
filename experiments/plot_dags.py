@@ -8,8 +8,13 @@ quantile of all forward-edge magnitudes (i.e. the top 1 - EDGE_Q fraction).
 No per-vertex threshold, no vertex-first pass. The SAME EDGE_Q is used for
 every model; large models simply have far more edges clearing that quantile
 (bigger L*N), so their survivors are additionally subsampled down to
---max-edges (uniform random, fixed seed) purely for legibility. The quantile
-threshold itself is never touched by that subsampling.
+--max-edges purely for legibility. The quantile threshold itself is never
+touched by that subsampling. Subsampling is hybrid (see TOP_K_GUARANTEED):
+the TOP_K_GUARANTEED largest-magnitude survivors are always kept -- so the
+plot's max never silently disagrees with print_top_edges.py's true top-K --
+and the rest of the cap is filled with a uniform random sample (fixed seed)
+of the remainder, for a sense of the broader structure beyond the single
+strongest cluster.
 
     W_softmax(v -> v') = E_i[|p_orig(v') - p_pert(v')|] under an ablation of v
                          (see build_dag.py / main.tex); bounded in [0, 1] --
@@ -91,6 +96,11 @@ MAX_EDGES_OVERRIDE = {
     "qwen3-235b-a22b": 500,
 }
 
+# Hybrid subsampling: this many of the largest-magnitude survivors are always
+# kept (so the plot's max never silently disagrees with print_top_edges.py),
+# with the rest of the cap filled by uniform random sample of the remainder.
+TOP_K_GUARANTEED = 100
+
 # Per-model colorbar (color_vmin, color_vmax) override. Default (0.0, 1.0) is
 # shared across models for cross-model comparability. deepseek-v2 uses
 # routing_scale=16 (main.tex "Scaled routing weight") -- its own gating
@@ -121,9 +131,10 @@ def plot_one(model: str, task: str, out_dir: Path, edge_q: float,
 
     if model in LARGE_MODELS:
         cap = MAX_EDGES_OVERRIDE.get(model, max_edges)
-        W_e, sinfo = subsample_edges(W_e, max_edges=cap, seed=0)
+        W_e, sinfo = subsample_edges(W_e, max_edges=cap, seed=0, n_top=TOP_K_GUARANTEED)
         print(f"[SAMPLE] {model}: sampled {sinfo['n_edges_sampled']}/"
-              f"{sinfo['n_edges_before_sample']} edges down to cap={cap}")
+              f"{sinfo['n_edges_before_sample']} edges down to cap={cap} "
+              f"(top={sinfo['n_top_kept']}, random={sinfo['n_random_fill']})")
 
     dag["_vis_edge"] = W_e
 
@@ -134,9 +145,10 @@ def plot_one(model: str, task: str, out_dir: Path, edge_q: float,
               f"{shinfo['n_edges_total']}, t_edge={shinfo['t_edge']:.4g}")
         if model in LARGE_MODELS:
             cap = MAX_EDGES_OVERRIDE.get(model, max_edges)
-            W_shared, shsinfo = subsample_edges(W_shared, max_edges=cap, seed=0)
+            W_shared, shsinfo = subsample_edges(W_shared, max_edges=cap, seed=0, n_top=TOP_K_GUARANTEED)
             print(f"[SHARED SAMPLE] {model}: sampled {shsinfo['n_edges_sampled']}/"
-                  f"{shsinfo['n_edges_before_sample']} edges down to cap={cap}")
+                  f"{shsinfo['n_edges_before_sample']} edges down to cap={cap} "
+                  f"(top={shsinfo['n_top_kept']}, random={shsinfo['n_random_fill']})")
         dag["_vis_edge_shared"] = W_shared
         shared_target = "_vis_edge_shared"
 
