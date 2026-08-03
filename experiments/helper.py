@@ -317,6 +317,104 @@ def subsample_edges(W_filtered, max_edges: int, seed: int = 0, n_top: int = 0):
     }
 
 
+def guarantee_top_vertices(dag: dict, target: str, shared_target: str | None = None,
+                           top_k: int = 5, mass_frac: float = 0.5, max_edges: int = 30):
+    """Force-include a representative slice of each top-out(v) vertex's own
+    outgoing edges, regardless of whether they clear the global edge-quantile
+    cutoff. Fixes the failure mode where a vertex with diffuse influence
+    (mass spread thin across many receivers, no single edge in the global
+    extreme tail) vanishes from the edge-first-sparsified plot entirely,
+    despite topping the out(v) ranking (main.tex "Global Influence" /
+    print_top_outs.py -- same ranking pool: regular experts + shared-expert
+    vertices, if any, pooled together).
+
+    For each of the top_k vertices by out(v) = sum of |forward outgoing
+    W_softmax|, its own outgoing edges are sorted descending by magnitude and
+    the smallest prefix whose cumulative sum reaches `mass_frac` of that
+    vertex's own out(v) is kept -- self-adapting to the vertex's own
+    distribution (a concentrated vertex needs few edges to hit the fraction;
+    a diffuse one needs many, which is the honest picture of its influence).
+    `max_edges` is a legibility backstop (not the primary criterion) for the
+    pathological case where hitting mass_frac would need an unreasonable
+    number of edges.
+
+    Returns:
+        guarantee_mask: bool tensor, same shape as dag[target].
+        guarantee_mask_shared: bool tensor, same shape as dag[shared_target],
+            or None if shared_target is not given / not present in dag.
+        info: dict with "vertices", a list of per-guaranteed-vertex dicts
+            (vertex label, out(v), edges kept, mass fraction actually
+            achieved -- useful to print/inspect when max_edges caps a vertex
+            short of mass_frac).
+    """
+    import torch
+
+    W = dag[target].float()  # [L, N, L, N]
+    L, N = W.shape[0], W.shape[1]
+    s_idx = torch.arange(L).view(-1, 1, 1, 1)
+    r_idx = torch.arange(L).view(1, 1, -1, 1)
+    fwd = (s_idx < r_idx).expand_as(W)
+    W_fwd_abs = W.abs() * fwd
+
+    out_vals = list(W_fwd_abs.sum(dim=(2, 3)).reshape(-1))          # regular experts, flat[l*N+n]
+    ids = [("regular", l, n) for l in range(L) for n in range(N)]
+
+    has_shared = shared_target is not None and shared_target in dag
+    Ws_fwd_abs = None
+    if has_shared:
+        Ws = dag[shared_target].float()  # [L, L, N]
+        s_idx3 = torch.arange(L).view(-1, 1, 1)
+        r_idx3 = torch.arange(L).view(1, -1, 1)
+        fwd3 = (s_idx3 < r_idx3).expand_as(Ws)
+        Ws_fwd_abs = Ws.abs() * fwd3
+        out_vals += list(Ws_fwd_abs.sum(dim=(1, 2)))                 # [L], one shared vertex per layer
+        ids += [("shared", l, None) for l in range(L)]
+
+    out_flat = torch.stack(out_vals)
+    top_order = torch.argsort(-out_flat)[:top_k]
+
+    guarantee_mask = torch.zeros_like(W, dtype=torch.bool)
+    guarantee_mask_shared = torch.zeros_like(Ws_fwd_abs, dtype=torch.bool) if has_shared else None
+
+    def _keep_prefix(edge_row_flat, total):
+        """edge_row_flat: 1D tensor of one vertex's forward edge magnitudes.
+        Returns (kept_positions, cumulative_mass_fraction_achieved)."""
+        row_order = torch.argsort(-edge_row_flat)
+        kept, cum = [], 0.0
+        for pos in row_order.tolist():
+            val = float(edge_row_flat[pos])
+            if val <= 0.0 or len(kept) >= max_edges:
+                break
+            kept.append(pos)
+            cum += val
+            if total > 0 and cum >= mass_frac * total:
+                break
+        return kept, (cum / total if total > 0 else 0.0)
+
+    info = {"vertices": []}
+    for kind, l, n in (ids[int(i)] for i in top_order):
+        if kind == "regular":
+            row = W_fwd_abs[l, n]                # [L, N]
+            total = float(row.sum())
+            kept, frac = _keep_prefix(row.reshape(-1), total)
+            for pos in kept:
+                rl, rn = pos // N, pos % N
+                guarantee_mask[l, n, rl, rn] = True
+            info["vertices"].append({"vertex": f"L{l}E{n}", "out": total,
+                                     "kept": len(kept), "mass_frac_achieved": frac})
+        else:
+            row = Ws_fwd_abs[l]                  # [L, N]
+            total = float(row.sum())
+            kept, frac = _keep_prefix(row.reshape(-1), total)
+            for pos in kept:
+                rl, rn = pos // N, pos % N
+                guarantee_mask_shared[l, rl, rn] = True
+            info["vertices"].append({"vertex": f"L{l}S", "out": total,
+                                     "kept": len(kept), "mass_frac_achieved": frac})
+
+    return guarantee_mask, guarantee_mask_shared, info
+
+
 def get_thresholds(dag: dict, target: str, quantiles: list) -> list:
     import torch
 
@@ -342,7 +440,8 @@ def get_thresholds(dag: dict, target: str, quantiles: list) -> list:
 
 def thresholding_routing_graph(dag: dict, target: str, threshold: float,
                                shared_target: str | None = None,
-                               shared_threshold: float | None = None) -> ig.Graph:
+                               shared_threshold: float | None = None,
+                               guarantee_mask=None, guarantee_mask_shared=None) -> ig.Graph:
     """Build the igraph DAG from a (sparsified) W_softmax tensor.
 
     shared_target: key into `dag` for the shared-expert edge tensor
@@ -351,6 +450,13 @@ def thresholding_routing_graph(dag: dict, target: str, threshold: float,
         per layer at expert-slot index N_EXPERTS (the slot right after the
         last regular expert), tagged `is_shared=True`, with outgoing-only
         edges thresholded at `shared_threshold` (defaults to `threshold`).
+
+    guarantee_mask, guarantee_mask_shared: optional bool tensors, same shape
+        as dag[target]/dag[shared_target], from guarantee_top_vertices --
+        marks edges that survived only because their sender is a top-out(v)
+        vertex, not because they naturally cleared the quantile threshold.
+        Recorded as the "is_guarantee" edge attribute so show_enhanced_layered_graph
+        can render them distinctly (e.g. dashed).
     """
     import numpy as np
     # Get the 4D matrix (Shape: [16, 64, 16, 64])
@@ -372,6 +478,10 @@ def thresholding_routing_graph(dag: dict, target: str, threshold: float,
     weights = matrix[s_layers, s_exps, r_layers, r_exps]
     edges = list(zip(senders.tolist(), receivers.tolist()))
     edge_weights = weights.tolist()
+    if guarantee_mask is not None:
+        is_guarantee = guarantee_mask[s_layers, s_exps, r_layers, r_exps].tolist()
+    else:
+        is_guarantee = [False] * len(edges)
 
     if has_shared:
         shared_matrix = dag[shared_target]
@@ -382,6 +492,10 @@ def thresholding_routing_graph(dag: dict, target: str, threshold: float,
         shared_weights = shared_matrix[sl_layers, sr_layers, sr_exps]
         edges += list(zip(shared_senders.tolist(), shared_receivers.tolist()))
         edge_weights += shared_weights.tolist()
+        if guarantee_mask_shared is not None:
+            is_guarantee += guarantee_mask_shared[sl_layers, sr_layers, sr_exps].tolist()
+        else:
+            is_guarantee += [False] * len(sl_layers)
 
     # Build the graph
     g = ig.Graph(directed=True, n=N_NODES)
@@ -391,6 +505,7 @@ def thresholding_routing_graph(dag: dict, target: str, threshold: float,
 
     # Assign the weights and metadata
     g.es["weight"] = edge_weights
+    g.es["is_guarantee"] = is_guarantee
     g.vs["layer"] = [v // N_SLOTS for v in range(N_NODES)]
     g.vs["expert"] = [v % N_SLOTS for v in range(N_NODES)]
     if has_shared:
@@ -513,7 +628,8 @@ def show_enhanced_layered_graph(g, quantile: float, target: str, model: str, dat
     width_min = color_vmin if color_vmin is not None else min_mag
     width_max = color_vmax if color_vmax is not None else max_mag
 
-    edge_colors, edge_widths = [], []
+    has_is_guarantee = "is_guarantee" in g.edge_attributes()
+    edge_colors, edge_widths, edge_pairs, edge_is_guarantee = [], [], [], []
     for e in g.es:
         u, v = e.source, e.target
         G.add_edge(u, v)
@@ -525,6 +641,9 @@ def show_enhanced_layered_graph(g, quantile: float, target: str, model: str, dat
         w_norm = (abs(w) - width_min) / (width_max - width_min + 1e-9)
         w_norm = max(0.0, min(1.0, w_norm))  # clamp in case |w| sits outside [vmin, vmax]
         edge_widths.append(1.2 + (w_norm * 4.3))
+
+        edge_pairs.append((u, v))
+        edge_is_guarantee.append(bool(e["is_guarantee"]) if has_is_guarantee else False)
 
     # --- DRAWING ---
     # Circle sizes in points^2 (matplotlib scatter marker-area convention).
@@ -577,10 +696,26 @@ def show_enhanced_layered_graph(g, quantile: float, target: str, model: str, dat
     # is the extra gap added on top; keep it near zero so arrowheads land
     # right on the boundary rather than floating in space. `arrowsize` is
     # the arrowhead length in points — smaller now that circles are smaller.
-    nx.draw_networkx_edges(G, pos, width=edge_widths, edge_color=edge_colors, alpha=0.85,
-                           arrows=True, arrowsize=11, arrowstyle='-|>',
-                           connectionstyle="arc3,rad=0.0", ax=ax, node_size=NODE_SIZE,
-                           min_source_margin=1, min_target_margin=1)
+    # Guarantee-only edges (survived because their sender is a top-out(v)
+    # vertex, not because they cleared the global quantile threshold -- see
+    # guarantee_top_vertices) are drawn dashed so the plot stays honest about
+    # why they're visible; everything else uses the usual solid style.
+    solid_idx = [i for i, ig_ in enumerate(edge_is_guarantee) if not ig_]
+    dashed_idx = [i for i, ig_ in enumerate(edge_is_guarantee) if ig_]
+    _edge_kwargs = dict(arrows=True, arrowsize=11, arrowstyle='-|>',
+                        connectionstyle="arc3,rad=0.0", ax=ax, node_size=NODE_SIZE,
+                        min_source_margin=1, min_target_margin=1, alpha=0.85)
+    if solid_idx:
+        nx.draw_networkx_edges(G, pos, edgelist=[edge_pairs[i] for i in solid_idx],
+                               width=[edge_widths[i] for i in solid_idx],
+                               edge_color=[edge_colors[i] for i in solid_idx], **_edge_kwargs)
+    if dashed_idx:
+        nx.draw_networkx_edges(G, pos, edgelist=[edge_pairs[i] for i in dashed_idx],
+                               width=[edge_widths[i] for i in dashed_idx],
+                               edge_color=[edge_colors[i] for i in dashed_idx],
+                               style='dashed', **_edge_kwargs)
+        ax.text(0.99, 0.01, "dashed = below global threshold, kept for a top-out(v) vertex",
+               transform=ax.transAxes, fontsize=6, ha='right', va='bottom', style='italic', color='dimgray')
 
     # Sender vs receiver split: nodes with any outgoing edge get a soft fill
     # tint so the reader can pick out senders at a glance; pure receivers

@@ -35,6 +35,17 @@ quantity from W_softmax: an unconditional mean over all tokens, not
 conditional on a selection event) and rendered as an extra light-green
 row/column per layer, one slot past the last regular expert.
 
+Vertex guarantee (see TOP_K_VERTICES/VERTEX_MASS_FRAC/VERTEX_MAX_EDGES): the
+edge-first quantile cutoff can make a vertex with diffuse influence (many
+modest outgoing edges, no single one in the global extreme tail) vanish from
+the plot entirely, despite topping the out(v) ranking (main.tex "Global
+Influence" / print_top_outs.py). The top-K vertices by out(v) always get a
+representative slice of their own outgoing edges force-included -- the
+smallest prefix (by magnitude) whose cumulative sum reaches VERTEX_MASS_FRAC
+of that vertex's own out(v), capped at VERTEX_MAX_EDGES. These
+guarantee-only edges (not already present via the quantile/subsample path)
+render dashed, so the plot stays honest about why they're visible.
+
 Reads:  {result_path}/dags/{task}/dag_{model}_{task}.pt
 Writes: {result_path}/dag_visualizations/{model}_{task}_q{EDGE_Q}.pdf
 
@@ -63,6 +74,7 @@ RESULTS = Path(CFG["result_path"])
 from experiments.helper import (  # noqa: E402
     sparsify_edges, sparsify_shared_edges, subsample_edges,
     thresholding_routing_graph, show_enhanced_layered_graph,
+    guarantee_top_vertices,
 )
 
 TARGET = "W_softmax"
@@ -112,6 +124,12 @@ TOP_K_GUARANTEED = 100
 COLOR_RANGE_OVERRIDE = {
     "deepseek-v2": (None, None),
 }
+
+# Vertex guarantee: force-include a representative slice of each of the
+# top-K out(v) vertices' own outgoing edges (see module docstring).
+TOP_K_VERTICES = 5
+VERTEX_MASS_FRAC = 0.5
+VERTEX_MAX_EDGES = 30
 
 
 def plot_one(model: str, task: str, out_dir: Path, edge_q: float,
