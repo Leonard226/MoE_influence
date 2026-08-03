@@ -7,8 +7,20 @@ out(v) = sum over outgoing forward edges of |W_softmax|
 This is the raw (unnormalised) "global influence" of each expert. The
 log-max-normalised version (out / max_v' out) is what feeds the F matrix.
 
-For each model, experts are sorted by out(v) descending and the values
-at ranks 1..10, 20, plus the graph-wide median are reported.
+Shared experts (DeepSeek-V2/V2-Lite): if the dag has a W_softmax_shared entry
+([L, L, N] -- sender layer x receiver layer x receiver expert, one
+shared-expert vertex per layer, no sender-expert axis), each layer's
+shared-expert vertex gets its own out(v) computed the same way and is
+included as a candidate in the SAME ranking as the regular routed experts --
+a shared-expert vertex is a real sender in the graph too, so it's eligible to
+be among the most globally influential. Reported as expert "S" rather than a
+numeric index. This means the ranking pool (and therefore top-K/median) can
+be larger than the "Total Experts" (V) column, which still counts routed
+experts only.
+
+For each model, experts (and shared-expert vertices, if any) are sorted by
+out(v) descending and the values at ranks 1..10, 20, plus the pool-wide
+median are reported.
 
 Usage:
     python experiments/print_top_outs.py
@@ -74,12 +86,29 @@ def main() -> None:
         W_fwd = W * fwd.to(W.dtype)
         # out(v) = sum over receivers (l, n) of |W(v -> l, n)|
         out_LN = W_fwd.abs().sum(dim=(2, 3)).cpu().numpy()   # shape (L, N)
-        out_flat = out_LN.reshape(-1)                        # flat[l*N + n]
-        V = int(out_flat.size)
-        # Rank all experts descending by out-strength.
+
+        # Candidate pool: regular routed experts, flat[l*N+n], plus each
+        # layer's shared-expert vertex (out(v) computed the same way, over
+        # its own [L, N] outgoing forward edges), if present. "ids" is a
+        # parallel (layer, expert_or_None) list -- None marks a shared vertex.
+        values = list(out_LN.reshape(-1))
+        ids = [(l, n) for l in range(L) for n in range(N)]
+        if "W_softmax_shared" in dag:
+            Ws = dag["W_softmax_shared"].cpu().to(torch.float64)  # [L, L, N]
+            s_idx3 = torch.arange(L).view(-1, 1, 1)
+            r_idx3 = torch.arange(L).view(1, -1, 1)
+            fwd3 = (s_idx3 < r_idx3).expand_as(Ws)
+            Ws_fwd = Ws * fwd3.to(Ws.dtype)
+            out_shared = Ws_fwd.abs().sum(dim=(1, 2)).cpu().numpy()  # [L]
+            values += list(out_shared)
+            ids += [(l, None) for l in range(L)]
+
+        out_flat = np.array(values)
+        V = N * L  # routed experts only; ranking pool above may be larger
+        # Rank all candidates descending by out-strength.
         order = np.argsort(-out_flat)
         sorted_desc = out_flat[order]
-        tops = [float(sorted_desc[k - 1]) if k <= V else float("nan")
+        tops = [float(sorted_desc[k - 1]) if k <= sorted_desc.size else float("nan")
                 for k in RANKS]
         med = float(np.median(sorted_desc))
         print(f"{m:<18s} {V:>6d}  "
@@ -88,15 +117,14 @@ def main() -> None:
 
         # Stash top-N (layer, expert_idx, value) records for Block 2 below.
         records = []
-        for rank in range(min(args.top_n_ids, V)):
-            flat = int(order[rank])
-            layer_idx = flat // N
-            expert_idx = flat % N
+        for rank in range(min(args.top_n_ids, sorted_desc.size)):
+            idx = int(order[rank])
+            layer_idx, expert_idx = ids[idx]  # expert_idx is None for a shared vertex
             records.append({
                 "rank": rank + 1,
                 "layer": layer_idx,
                 "expert_in_layer": expert_idx,
-                "out": float(out_flat[flat]),
+                "out": float(out_flat[idx]),
                 "L": L, "N": N,
             })
         top_id_records[m] = records
@@ -114,8 +142,9 @@ def main() -> None:
         print(f"\n[{m}]  (L = {L} layers, N = {N} experts per layer)")
         print(f"  {'rank':>4s}  {'layer':>5s}  {'expert':>6s}  {'out(v)':>10s}")
         for r in recs:
+            expert_label = "S" if r["expert_in_layer"] is None else str(r["expert_in_layer"])
             print(f"  {r['rank']:>4d}  {r['layer']:>5d}  "
-                  f"{r['expert_in_layer']:>6d}  {r['out']:>10.4g}")
+                  f"{expert_label:>6s}  {r['out']:>10.4g}")
 
 
 if __name__ == "__main__":
