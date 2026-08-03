@@ -475,7 +475,7 @@ def show_enhanced_layered_graph(g, quantile: float, target: str, model: str, dat
         cmin = color_vmin if color_vmin is not None else min_mag
         cmax = color_vmax if color_vmax is not None else max_mag
         norm = mcolors.Normalize(vmin=cmin, vmax=cmax)
-        cbar_label = r"Edge weight magnitude $|W_{\mathrm{softmax}}|$"
+        cbar_label = "Edge weight magnitude |W|"
 
     # Width normalization: use the same fixed range as color when the caller
     # provides one, so an edge of magnitude X renders at the same thickness in
@@ -530,8 +530,8 @@ def show_enhanced_layered_graph(g, quantile: float, target: str, model: str, dat
 
     _model_str = model_display if model_display is not None else model
     title_str = (
-        f"{_model_str} | Task: {dataset} ({n_prompts} prompts)\n"
-        f"Threshold: {quantile} | max_w: {max_w:.2f} | min_w: {min_w:.2f}\n"
+        f"Model: {_model_str} | Task: {dataset} ({n_prompts} prompts) | "
+        f"Threshold: {quantile} | max_W: {max_w:.2f} | min_W: {min_w:.2f} | "
         f"Nodes: {n_nodes_used}/{TOTAL_POSSIBLE_NODES} ({node_sparsity:.2f}%) | "
         f"Edges: {n_edges_used}/{TOTAL_POSSIBLE_EDGES} ({edge_sparsity:.2f}%)"
     )
@@ -661,13 +661,13 @@ def show_enhanced_layered_graph(g, quantile: float, target: str, model: str, dat
     if is_deep:
         ax.set_xlim(-X_SPACING * 0.5, (N_LAYERS - 1) * X_SPACING + X_SPACING * 0.5)
         ax.set_ylim(-(N_SLOTS - 1) * Y_SPACING - Y_SPACING * 0.5, Y_SPACING * 0.5)
-        ax.set_xlabel("Layers l")
-        ax.set_ylabel("Experts e")
+        ax.set_xlabel("Layers")
+        ax.set_ylabel("Experts")
     else:
         ax.set_xlim(-X_SPACING * 0.5, (N_SLOTS - 1) * X_SPACING + X_SPACING * 0.5)
         ax.set_ylim(-(N_LAYERS - 1) * Y_SPACING - Y_SPACING * 0.5, Y_SPACING * 0.5)
-        ax.set_xlabel("Experts e")
-        ax.set_ylabel("Layers l")
+        ax.set_xlabel("Experts")
+        ax.set_ylabel("Layers")
     plt.tight_layout()
     if save_path is not None:
         save_path = Path(save_path)
