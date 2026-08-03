@@ -143,6 +143,8 @@ def plot_one(model: str, task: str, out_dir: Path, edge_q: float,
     # string, moe_layers list, dataset name) alongside the tensors.
     dag = torch.load(dag_path, map_location="cpu", weights_only=False)
 
+    has_shared = SHARED_TARGET in dag
+
     W_e, einfo = sparsify_edges(dag[TARGET], edge_q=edge_q, edge_floor_frac=0.0)
     print(f"[EDGE] {model}: edges_kept={einfo['n_edges_kept']}/"
           f"{einfo['n_edges_total']}, t_edge={einfo['t_edge']:.4g}")
@@ -154,10 +156,8 @@ def plot_one(model: str, task: str, out_dir: Path, edge_q: float,
               f"{sinfo['n_edges_before_sample']} edges down to cap={cap} "
               f"(top={sinfo['n_top_kept']}, random={sinfo['n_random_fill']})")
 
-    dag["_vis_edge"] = W_e
-
-    shared_target = None
-    if SHARED_TARGET in dag:
+    W_shared = None
+    if has_shared:
         W_shared, shinfo = sparsify_shared_edges(dag[SHARED_TARGET], edge_q=edge_q, edge_floor_frac=0.0)
         print(f"[SHARED] {model}: edges_kept={shinfo['n_edges_kept']}/"
               f"{shinfo['n_edges_total']}, t_edge={shinfo['t_edge']:.4g}")
@@ -167,11 +167,43 @@ def plot_one(model: str, task: str, out_dir: Path, edge_q: float,
             print(f"[SHARED SAMPLE] {model}: sampled {shsinfo['n_edges_sampled']}/"
                   f"{shsinfo['n_edges_before_sample']} edges down to cap={cap} "
                   f"(top={shsinfo['n_top_kept']}, random={shsinfo['n_random_fill']})")
+
+    # ---- Vertex guarantee: force-include a representative slice of the
+    # top-out(v) vertices' own edges (see module docstring), regardless of
+    # the quantile/subsample selection above.
+    guarantee_mask, guarantee_mask_shared, ginfo = guarantee_top_vertices(
+        dag, TARGET, shared_target=SHARED_TARGET if has_shared else None,
+        top_k=TOP_K_VERTICES, mass_frac=VERTEX_MASS_FRAC, max_edges=VERTEX_MAX_EDGES,
+    )
+    for v in ginfo["vertices"]:
+        print(f"[GUARANTEE] {model}: {v['vertex']} out(v)={v['out']:.4g} -> "
+              f"kept {v['kept']} edges ({v['mass_frac_achieved']*100:.0f}% of its mass)")
+
+    quantile_mask = W_e.abs() > 1e-9
+    guarantee_only_mask = guarantee_mask & ~quantile_mask
+    if int(guarantee_only_mask.sum()):
+        print(f"[GUARANTEE] {model}: +{int(guarantee_only_mask.sum())} edges "
+              f"added beyond quantile/subsample selection")
+    W_e = torch.where(guarantee_mask | quantile_mask, dag[TARGET], torch.zeros_like(dag[TARGET]))
+    dag["_vis_edge"] = W_e
+
+    shared_target = None
+    guarantee_only_mask_shared = None
+    if has_shared:
+        quantile_mask_shared = W_shared.abs() > 1e-9
+        guarantee_only_mask_shared = guarantee_mask_shared & ~quantile_mask_shared
+        if int(guarantee_only_mask_shared.sum()):
+            print(f"[GUARANTEE] {model}: +{int(guarantee_only_mask_shared.sum())} "
+                  f"shared edges added beyond quantile/subsample selection")
+        W_shared = torch.where(guarantee_mask_shared | quantile_mask_shared,
+                               dag[SHARED_TARGET], torch.zeros_like(dag[SHARED_TARGET]))
         dag["_vis_edge_shared"] = W_shared
         shared_target = "_vis_edge_shared"
 
     g = thresholding_routing_graph(dag, "_vis_edge", 1e-9,
-                                   shared_target=shared_target, shared_threshold=1e-9)
+                                   shared_target=shared_target, shared_threshold=1e-9,
+                                   guarantee_mask=guarantee_only_mask,
+                                   guarantee_mask_shared=guarantee_only_mask_shared)
 
     color_vmin, color_vmax = COLOR_RANGE_OVERRIDE.get(model, (0.0, 1.0))
     show_enhanced_layered_graph(
