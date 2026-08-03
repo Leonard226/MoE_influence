@@ -215,6 +215,45 @@ def sparsify_edges(W, edge_q: float = 0.9999, edge_floor_frac: float = 0.1):
     return W_filtered, info
 
 
+def sparsify_shared_edges(W, edge_q: float = 0.9999, edge_floor_frac: float = 0.1):
+    """Edge-first sparsification for shared-expert edges (see sparsify_edges).
+
+    Same criterion as sparsify_edges, but for the shared-expert edge tensor,
+    which has no sender-expert axis (one shared-expert vertex per layer, not
+    N_EXPERTS-many).
+
+    Args:
+        W: [L, L, N] tensor -- sender layer x receiver layer x receiver expert.
+        edge_q, edge_floor_frac: see sparsify_edges.
+
+    Returns:
+        W_filtered: same shape as W, with non-surviving entries zeroed.
+        info: dict of diagnostic stats.
+    """
+    import torch
+    L = W.shape[0]
+    s_idx = torch.arange(L).view(-1, 1, 1)
+    r_idx = torch.arange(L).view(1, -1, 1)
+    fwd = (s_idx < r_idx).expand_as(W)
+    W_abs = torch.abs(W.float())
+
+    edge_vals = W_abs[fwd]
+    edge_vals = edge_vals[edge_vals > 1e-9].cpu().numpy()
+    t_edge = max(float(np.quantile(edge_vals, edge_q)),
+                 float(edge_floor_frac * edge_vals.max()))
+
+    keep_mask = (W_abs >= t_edge) & fwd
+    W_filtered = torch.where(keep_mask, W, torch.zeros_like(W))
+
+    info = {
+        "n_edges_total": int(edge_vals.size),
+        "n_edges_kept": int(keep_mask.sum().item()),
+        "t_edge": t_edge,
+        "edge_max": float(edge_vals.max()),
+    }
+    return W_filtered, info
+
+
 def subsample_edges(W_filtered, max_edges: int, seed: int = 0):
     """If sparsify_edges left more than max_edges surviving entries, keep a
     uniform random sample of exactly max_edges of them (fixed seed,
@@ -222,9 +261,11 @@ def subsample_edges(W_filtered, max_edges: int, seed: int = 0):
     itself already decided which edges qualify, this just controls how many
     of the (already equally-qualifying) survivors get drawn.
 
+    Works for any tensor rank (4D W_softmax or 3D W_softmax_shared).
+
     Args:
-        W_filtered: output of sparsify_edges (same shape, non-surviving
-            entries already zeroed).
+        W_filtered: output of sparsify_edges/sparsify_shared_edges (same
+            shape, non-surviving entries already zeroed).
         max_edges: cap on the number of nonzero entries to keep.
         seed: RNG seed for the sample, for reproducible figures.
 
@@ -240,9 +281,9 @@ def subsample_edges(W_filtered, max_edges: int, seed: int = 0):
 
     g = torch.Generator().manual_seed(seed)
     keep = nz[torch.randperm(n, generator=g)[:max_edges]]
+    idx = tuple(keep[:, i] for i in range(keep.shape[1]))
     W_sampled = torch.zeros_like(W_filtered)
-    W_sampled[keep[:, 0], keep[:, 1], keep[:, 2], keep[:, 3]] = \
-        W_filtered[keep[:, 0], keep[:, 1], keep[:, 2], keep[:, 3]]
+    W_sampled[idx] = W_filtered[idx]
     return W_sampled, {"n_edges_before_sample": n, "n_edges_sampled": max_edges}
 
 
@@ -269,39 +310,67 @@ def get_thresholds(dag: dict, target: str, quantiles: list) -> list:
     return dict(zip(quantiles, thresholds.tolist()))
 
 
-def thresholding_routing_graph(dag: dict, target: str, threshold: float) -> ig.Graph:
+def thresholding_routing_graph(dag: dict, target: str, threshold: float,
+                               shared_target: str | None = None,
+                               shared_threshold: float | None = None) -> ig.Graph:
+    """Build the igraph DAG from a (sparsified) W_softmax tensor.
+
+    shared_target: key into `dag` for the shared-expert edge tensor
+        ([L, L, N] -- no sender-expert axis, one shared-expert vertex per
+        layer). If given (and present in `dag`), one extra vertex is added
+        per layer at expert-slot index N_EXPERTS (the slot right after the
+        last regular expert), tagged `is_shared=True`, with outgoing-only
+        edges thresholded at `shared_threshold` (defaults to `threshold`).
+    """
     import numpy as np
     # Get the 4D matrix (Shape: [16, 64, 16, 64])
     matrix = dag[target]
     N_LAYERS, N_EXPERTS = matrix.shape[0], matrix.shape[1]
-    N_NODES = N_LAYERS * N_EXPERTS
+
+    has_shared = shared_target is not None and shared_target in dag
+    N_SLOTS = N_EXPERTS + 1 if has_shared else N_EXPERTS
+    N_NODES = N_LAYERS * N_SLOTS
 
     # Find where the weights are above the threshold
-    s_layers, s_exps, r_layers, r_exps = np.where(np.abs(matrix) > threshold) 
+    s_layers, s_exps, r_layers, r_exps = np.where(np.abs(matrix) > threshold)
 
     # Convert those coordinates into Vertex IDs
-    senders = s_layers * N_EXPERTS + s_exps
-    receivers = r_layers * N_EXPERTS + r_exps
+    senders = s_layers * N_SLOTS + s_exps
+    receivers = r_layers * N_SLOTS + r_exps
 
     # Extract the weights for these specific edges
     weights = matrix[s_layers, s_exps, r_layers, r_exps]
+    edges = list(zip(senders.tolist(), receivers.tolist()))
+    edge_weights = weights.tolist()
+
+    if has_shared:
+        shared_matrix = dag[shared_target]
+        s_thresh = threshold if shared_threshold is None else shared_threshold
+        sl_layers, sr_layers, sr_exps = np.where(np.abs(shared_matrix) > s_thresh)
+        shared_senders = sl_layers * N_SLOTS + N_EXPERTS  # this layer's shared slot
+        shared_receivers = sr_layers * N_SLOTS + sr_exps
+        shared_weights = shared_matrix[sl_layers, sr_layers, sr_exps]
+        edges += list(zip(shared_senders.tolist(), shared_receivers.tolist()))
+        edge_weights += shared_weights.tolist()
 
     # Build the graph
     g = ig.Graph(directed=True, n=N_NODES)
-    
+
     # zip pairs them up: [(s1, r1), (s2, r2), ...]
-    edges = list(zip(senders.tolist(), receivers.tolist()))
     g.add_edges(edges)
-    
+
     # Assign the weights and metadata
-    g.es["weight"] = weights.tolist()
-    g.vs["layer"] = [v // N_EXPERTS for v in range(N_NODES)]
-    g.vs["expert"] = [v % N_EXPERTS for v in range(N_NODES)]
+    g.es["weight"] = edge_weights
+    g.vs["layer"] = [v // N_SLOTS for v in range(N_NODES)]
+    g.vs["expert"] = [v % N_SLOTS for v in range(N_NODES)]
+    if has_shared:
+        g.vs["is_shared"] = [(v % N_SLOTS) == N_EXPERTS for v in range(N_NODES)]
 
     return g
 
 
 def show_enhanced_layered_graph(g, quantile: float, target: str, model: str, dataset: str, n_prompts: int,
+                                 model_display: str | None = None,
                                  layer_labels: list | None = None,
                                  color_vmin: float | None = None,
                                  color_vmax: float | None = None,
@@ -311,6 +380,8 @@ def show_enhanced_layered_graph(g, quantile: float, target: str, model: str, dat
 
     quantile: cosmetic only -- a number printed in the plot title's "Threshold:"
         line. Has no effect on what gets drawn. Vestigial; pass anything informative.
+    model_display: name shown in the plot title (natural casing, e.g.
+        "Phi-3.5-MoE"). Defaults to `model` as-is if not given.
     layer_labels: optional mapping from internal DAG layer index (0..N_LAYERS-1)
         to the model's actual layer number. Use this when the DAG skips dense
         layers (e.g. DeepSeek-V2-Lite has dense layer 0, so internal M0 == model
@@ -322,6 +393,11 @@ def show_enhanced_layered_graph(g, quantile: float, target: str, model: str, dat
     save_path: if given, the figure is also written here (format inferred from
         the extension, e.g. .pdf) before being shown. Parent directories are
         created if needed. If None (default), the figure is only displayed.
+
+    Shared-expert vertices (graph's "is_shared" attribute, set by
+    thresholding_routing_graph) render as an extra row/column past the last
+    regular expert -- one per layer -- filled light green instead of the
+    usual white/pale-blue receiver/sender scheme.
     """
     edge_list = g.get_edgelist()
     if not edge_list:
@@ -339,7 +415,9 @@ def show_enhanced_layered_graph(g, quantile: float, target: str, model: str, dat
 
     # --- SPARSITY CALCULATIONS ---
     N_LAYERS = max(g.vs["layer"]) + 1
-    N_EXPERTS = g.vcount() // N_LAYERS
+    N_SLOTS = g.vcount() // N_LAYERS  # per-layer width; includes the shared slot, if any
+    has_is_shared = "is_shared" in g.vertex_attributes()
+    N_EXPERTS = N_SLOTS - 1 if has_is_shared else N_SLOTS  # regular (routed) experts only
     # Map internal DAG layer index -> model layer number used for display.
     if layer_labels is None:
         layer_labels = list(range(N_LAYERS))
@@ -372,12 +450,15 @@ def show_enhanced_layered_graph(g, quantile: float, target: str, model: str, dat
     is_deep = N_LAYERS > N_EXPERTS
     X_SPACING, Y_SPACING = 1000, 300
     for node_idx in active_node_indices:
-        layer, expert_idx = node_idx // N_EXPERTS, node_idx % N_EXPERTS
+        layer, expert_idx = node_idx // N_SLOTS, node_idx % N_SLOTS
         if is_deep:
             pos[node_idx] = (layer * X_SPACING, -expert_idx * Y_SPACING)
         else:
             pos[node_idx] = (expert_idx * X_SPACING, -layer * Y_SPACING)
-        labels[node_idx] = f"L{layer_labels[layer]}\nE{expert_idx}"
+        if has_is_shared and g.vs[node_idx]["is_shared"]:
+            labels[node_idx] = f"L{layer_labels[layer]}\nS"
+        else:
+            labels[node_idx] = f"L{layer_labels[layer]}\nE{expert_idx}"
         G.add_node(node_idx)
 
     # --- COLOR LOGIC ---
@@ -394,7 +475,7 @@ def show_enhanced_layered_graph(g, quantile: float, target: str, model: str, dat
         cmin = color_vmin if color_vmin is not None else min_mag
         cmax = color_vmax if color_vmax is not None else max_mag
         norm = mcolors.Normalize(vmin=cmin, vmax=cmax)
-        cbar_label = "Weight Magnitude |w|"
+        cbar_label = r"Edge weight magnitude $|W_{\mathrm{softmax}}|$"
 
     # Width normalization: use the same fixed range as color when the caller
     # provides one, so an edge of magnitude X renders at the same thickness in
@@ -440,16 +521,16 @@ def show_enhanced_layered_graph(g, quantile: float, target: str, model: str, dat
     MARGIN_W, MARGIN_H = 4.5, 3.5
     if is_deep:
         fig_w = max(6.0, N_LAYERS * _spacing_layer_in + MARGIN_W)
-        fig_h = max(5.0, N_EXPERTS * _spacing_expert_in + MARGIN_H)
+        fig_h = max(5.0, N_SLOTS * _spacing_expert_in + MARGIN_H)
     else:
-        fig_w = max(6.0, N_EXPERTS * _spacing_expert_in + MARGIN_W)
+        fig_w = max(6.0, N_SLOTS * _spacing_expert_in + MARGIN_W)
         fig_h = max(5.0, N_LAYERS * _spacing_layer_in + MARGIN_H)
     plt.figure(figsize=(fig_w, fig_h))
     ax = plt.gca()
 
+    _model_str = model_display if model_display is not None else model
     title_str = (
-        f"{model.upper()}\n"
-        f"Metric: {target} | Task: {dataset} ({n_prompts} prompts)\n"
+        f"{_model_str} | Task: {dataset} ({n_prompts} prompts)\n"
         f"Threshold: {quantile} | max_w: {max_w:.2f} | min_w: {min_w:.2f}\n"
         f"Nodes: {n_nodes_used}/{TOTAL_POSSIBLE_NODES} ({node_sparsity:.2f}%) | "
         f"Edges: {n_edges_used}/{TOTAL_POSSIBLE_EDGES} ({edge_sparsity:.2f}%)"
@@ -468,7 +549,7 @@ def show_enhanced_layered_graph(g, quantile: float, target: str, model: str, dat
     # the arrowhead length in points — smaller now that circles are smaller.
     nx.draw_networkx_edges(G, pos, width=edge_widths, edge_color=edge_colors, alpha=0.85,
                            arrows=True, arrowsize=11, arrowstyle='-|>',
-                           connectionstyle="arc3,rad=0.05", ax=ax, node_size=NODE_SIZE,
+                           connectionstyle="arc3,rad=0.0", ax=ax, node_size=NODE_SIZE,
                            min_source_margin=1, min_target_margin=1)
 
     # Sender vs receiver split: nodes with any outgoing edge get a soft fill
@@ -478,7 +559,13 @@ def show_enhanced_layered_graph(g, quantile: float, target: str, model: str, dat
     # colormap on the edges.
     SENDER_FILL = "#c8dcef"   # pale sky blue, slightly darker
     RECEIVER_FILL = "white"
+    SHARED_FILL = "#b8e6b8"   # light green
     sender_set = {v.index for v in g.vs if g.degree(v.index, mode="out") > 0}
+
+    # Shared-expert vertices (sender-only, no routing weight) are drawn light
+    # green and pulled out of the super/sender/receiver split below entirely.
+    shared_active = [n for n in active_node_indices if has_is_shared and g.vs[n]["is_shared"]]
+    remaining_active = [n for n in active_node_indices if n not in set(shared_active)]
 
     # Split active nodes by super-expert status if the "is_super" vertex
     # attribute is present (set by the caller before calling this function).
@@ -486,8 +573,8 @@ def show_enhanced_layered_graph(g, quantile: float, target: str, model: str, dat
     # stand out from receiver-only nodes (which would only appear because they
     # receive an edge from some super-expert).
     if has_is_super:
-        super_active = [n for n in active_node_indices if g.vs[n]["is_super"]]
-        other_active = [n for n in active_node_indices if not g.vs[n]["is_super"]]
+        super_active = [n for n in remaining_active if g.vs[n]["is_super"]]
+        other_active = [n for n in remaining_active if not g.vs[n]["is_super"]]
         # Still apply the sender-tint to the non-super majority.
         other_senders = [n for n in other_active if n in sender_set]
         other_receivers = [n for n in other_active if n not in sender_set]
@@ -498,12 +585,15 @@ def show_enhanced_layered_graph(g, quantile: float, target: str, model: str, dat
         nx.draw_networkx_nodes(G, pos, nodelist=super_active, node_size=SUPER_NODE_SIZE,
                                node_color='gold', edgecolors='red', linewidths=2.5, ax=ax)
     else:
-        senders = [n for n in active_node_indices if n in sender_set]
-        receivers = [n for n in active_node_indices if n not in sender_set]
+        senders = [n for n in remaining_active if n in sender_set]
+        receivers = [n for n in remaining_active if n not in sender_set]
         nx.draw_networkx_nodes(G, pos, nodelist=receivers, node_size=NODE_SIZE,
                                node_color=RECEIVER_FILL, edgecolors='black', linewidths=1.2, ax=ax)
         nx.draw_networkx_nodes(G, pos, nodelist=senders, node_size=NODE_SIZE,
                                node_color=SENDER_FILL, edgecolors='black', linewidths=1.2, ax=ax)
+    if shared_active:
+        nx.draw_networkx_nodes(G, pos, nodelist=shared_active, node_size=NODE_SIZE,
+                               node_color=SHARED_FILL, edgecolors='black', linewidths=1.2, ax=ax)
     nx.draw_networkx_labels(G, pos, labels, font_size=7, font_weight='bold', ax=ax)
 
     # --- AXIS & COLORBAR ---
@@ -517,16 +607,20 @@ def show_enhanced_layered_graph(g, quantile: float, target: str, model: str, dat
         def _x_tick(x, _p, _ll=layer_labels):
             idx = int(round(x / X_SPACING))
             return f"{_ll[idx]}" if 0 <= idx < len(_ll) else ""
-        def _y_tick(y, _p, _N=N_EXPERTS):
+        def _y_tick(y, _p, _N=N_EXPERTS, _shared=has_is_shared):
             if y > 1e-9:      # padding above expert 0
                 return ""
             idx = int(round(-y / Y_SPACING))
+            if _shared and idx == _N:
+                return "S"
             return f"{idx}" if 0 <= idx < _N else ""
     else:
         # WIDE orientation: x-axis carries experts (positive, left-to-right),
         # y-axis carries layers (layer 0 at top, indices increasing down).
-        def _x_tick(x, _p, _N=N_EXPERTS):
+        def _x_tick(x, _p, _N=N_EXPERTS, _shared=has_is_shared):
             idx = int(round(x / X_SPACING))
+            if _shared and idx == _N:
+                return "S"
             return f"{idx}" if 0 <= idx < _N else ""
         def _y_tick(y, _p, _ll=layer_labels):
             if y > 1e-9:      # padding above layer 0
@@ -566,11 +660,11 @@ def show_enhanced_layered_graph(g, quantile: float, target: str, model: str, dat
     # otherwise mirror as a bogus "1" above whichever axis carries index 0).
     if is_deep:
         ax.set_xlim(-X_SPACING * 0.5, (N_LAYERS - 1) * X_SPACING + X_SPACING * 0.5)
-        ax.set_ylim(-(N_EXPERTS - 1) * Y_SPACING - Y_SPACING * 0.5, Y_SPACING * 0.5)
+        ax.set_ylim(-(N_SLOTS - 1) * Y_SPACING - Y_SPACING * 0.5, Y_SPACING * 0.5)
         ax.set_xlabel("Layers l")
         ax.set_ylabel("Experts e")
     else:
-        ax.set_xlim(-X_SPACING * 0.5, (N_EXPERTS - 1) * X_SPACING + X_SPACING * 0.5)
+        ax.set_xlim(-X_SPACING * 0.5, (N_SLOTS - 1) * X_SPACING + X_SPACING * 0.5)
         ax.set_ylim(-(N_LAYERS - 1) * Y_SPACING - Y_SPACING * 0.5, Y_SPACING * 0.5)
         ax.set_xlabel("Experts e")
         ax.set_ylabel("Layers l")
