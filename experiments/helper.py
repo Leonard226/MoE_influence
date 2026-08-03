@@ -696,10 +696,8 @@ def show_enhanced_layered_graph(g, quantile: float, target: str, model: str, dat
     # is the extra gap added on top; keep it near zero so arrowheads land
     # right on the boundary rather than floating in space. `arrowsize` is
     # the arrowhead length in points — smaller now that circles are smaller.
-    # Guarantee-only edges (survived because their sender is a top-out(v)
-    # vertex, not because they cleared the global quantile threshold -- see
-    # guarantee_top_vertices) are drawn dashed so the plot stays honest about
-    # why they're visible; everything else uses the usual solid style.
+    # Guarantee-only edges (see guarantee_top_vertices) render dashed;
+    # everything else uses the usual solid style.
     solid_idx = [i for i, ig_ in enumerate(edge_is_guarantee) if not ig_]
     dashed_idx = [i for i, ig_ in enumerate(edge_is_guarantee) if ig_]
     _edge_kwargs = dict(arrows=True, arrowsize=11, arrowstyle='-|>',
@@ -714,8 +712,6 @@ def show_enhanced_layered_graph(g, quantile: float, target: str, model: str, dat
                                width=[edge_widths[i] for i in dashed_idx],
                                edge_color=[edge_colors[i] for i in dashed_idx],
                                style='dashed', **_edge_kwargs)
-        ax.text(0.99, 0.01, "dashed = below global threshold, kept for a top-out(v) vertex",
-               transform=ax.transAxes, fontsize=6, ha='right', va='bottom', style='italic', color='dimgray')
 
     # Sender vs receiver split: nodes with any outgoing edge get a soft fill
     # tint so the reader can pick out senders at a glance; pure receivers
